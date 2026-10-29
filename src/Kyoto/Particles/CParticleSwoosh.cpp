@@ -20,6 +20,7 @@
 #include "MetroidPrime/CActor.hpp"
 #include "MetroidPrime/CCameraManager.hpp"
 #include "port_overlay.h"
+#include "vr/vr_view.h"
 #include <math.h>
 #include <string.h>
 #endif
@@ -579,7 +580,12 @@ void CParticleSwoosh::Render2SidedNoSplineNoGaps() {
       const CTransform4f inverse =
           (CTransform4f::Translate(mGlobalTranslation) * mGlobalOrientation * mScaleXf)
               .GetInverse();
+#ifdef TARGET_PC
+      // PortVr: the two-sided ribbons turn to the head, not the body's camera.
+      const CTransform4f camera = inverse * PortVr::VrHeadViewTransform(CGraphics::GetViewMatrix());
+#else
       const CTransform4f camera = inverse * CGraphics::GetViewMatrix();
+#endif
       const CVector3f camToParticle = camera.GetTranslation();
       CVector3f dotVec = CVector3f::Zero();
       for (int i = 0; i < mSwooshes.size(); ++i) {

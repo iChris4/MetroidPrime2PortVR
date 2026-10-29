@@ -33,6 +33,8 @@
 #ifdef TARGET_PC
 #include "MetroidPrime/CActor.hpp"
 #include "port_overlay.h"
+#include "vr/vr_billboard_math.h"
+#include "vr/vr_view.h"
 
 namespace {
 // Snow presentation smoothing for the grid being drawn: each flake is drawn back * its last step
@@ -44,6 +46,36 @@ int sPortSnowFirst = 0;
 short PortStepBack(short v, short step) {
   const float back = sPortSnowBack * static_cast< float >(step);
   return static_cast< short >(v - static_cast< short >(back + (back >= 0.f ? 0.5f : -0.5f)));
+}
+
+// PortVr: a flake's quad facing the head's position about its own centre (the Metroid Prime VR
+// port's RenderVrFlake): the retail quad spans the camera's right and up from the particle, so it
+// faces the body's camera plane, which the eyes see edge-on as the head turns away.
+void PortVrFlake(const CTransform4f& camera, const CTransform4f& model, const CTransform4f& inverse,
+                 const CVectorFixed8_8& particle, float size) {
+  const CVector3f edgeRight = model.Rotate(camera.GetRight() * size);
+  const CVector3f edgeUp = model.Rotate(camera.GetUp() * size);
+  const CVector3f center =
+      model * CVector3f(fixed8_8_to_real(particle.mX), fixed8_8_to_real(particle.mY),
+                        fixed8_8_to_real(particle.mZ)) +
+      (edgeRight + edgeUp) * 0.5f;
+  const CVector3f viewer = camera.GetTranslation();
+  const PortVr::billboard_math::Basis basis = PortVr::billboard_math::Facing(
+      {center.GetX(), center.GetY(), center.GetZ()}, {viewer.GetX(), viewer.GetY(), viewer.GetZ()},
+      {0.f, 0.f, 1.f});
+  const CVector3f right =
+      CVector3f(basis.right[0], basis.right[1], basis.right[2]) * (edgeRight.Magnitude() * 0.5f);
+  const CVector3f up = CVector3f(basis.up[0], basis.up[1], basis.up[2]) * (edgeUp.Magnitude() * 0.5f);
+  const auto vertex = [&](const CVector3f& world, uchar u, uchar v) {
+    const CVector3f local = inverse * world;
+    GXPosition3s16(real_to_fixed8_8(local.GetX()), real_to_fixed8_8(local.GetY()),
+                   real_to_fixed8_8(local.GetZ()));
+    GXTexCoord2u8(u, v);
+  };
+  vertex(center - right - up, 0, 0);
+  vertex(center - right + up, 0, 2);
+  vertex(center + right + up, 2, 2);
+  vertex(center + right - up, 2, 0);
 }
 } // namespace
 
@@ -138,6 +170,12 @@ void CEnvFxManagerGrid::RenderSnowParticles(const CTransform4f& camXf) {
   short xy = real_to_fixed8_8(0.2f * camXf.Get10());
   short xz = real_to_fixed8_8(0.2f * camXf.Get20());
   const int count = mParticles.size();
+#ifdef TARGET_PC
+  const bool portVrFlakes = PortVr::VrImmersive();
+  const CTransform4f portVrModel = CGraphics::GetModelMatrix();
+  const CTransform4f portVrInverse =
+      portVrFlakes ? portVrModel.GetInverse() : CTransform4f::Identity();
+#endif
   CGX::Begin(GX_QUADS, GX_VTXFMT6, count * 4);
   const CVectorFixed8_8* particles = mParticles.data();
   for (int i = count - 1; i >= 0; --i) {
@@ -149,6 +187,10 @@ void CEnvFxManagerGrid::RenderSnowParticles(const CTransform4f& camXf) {
       particle.mX = PortStepBack(particle.mX, step.mX);
       particle.mY = PortStepBack(particle.mY, step.mY);
       particle.mZ = PortStepBack(particle.mZ, step.mZ);
+    }
+    if (portVrFlakes) {
+      PortVrFlake(camXf, portVrModel, portVrInverse, particle, 0.2f);
+      continue;
     }
 #endif
     GXPosition3s16(particle.mX, particle.mY, particle.mZ);
@@ -180,10 +222,22 @@ void CEnvFxManagerGrid::RenderDriftingParticles(const CTransform4f& camXf) {
   const short xy = real_to_fixed8_8(0.2f * camXf.Get10());
   const short xz = real_to_fixed8_8(0.2f * camXf.Get20());
   const int count = mParticles.size();
+#ifdef TARGET_PC
+  const bool portVrFlakes = PortVr::VrImmersive();
+  const CTransform4f portVrModel = CGraphics::GetModelMatrix();
+  const CTransform4f portVrInverse =
+      portVrFlakes ? portVrModel.GetInverse() : CTransform4f::Identity();
+#endif
   CGX::Begin(GX_QUADS, GX_VTXFMT6, count * 4);
   const CVectorFixed8_8* particles = mParticles.data();
   for (int i = count - 1; i >= 0; --i) {
     CVectorFixed8_8 particle = particles[i];
+#ifdef TARGET_PC
+    if (portVrFlakes) {
+      PortVrFlake(camXf, portVrModel, portVrInverse, particle, 0.2f);
+      continue;
+    }
+#endif
     GXPosition3s16(particle.mX, particle.mY, particle.mZ);
     GXTexCoord2u8(0, 0);
     particle.mX += zx;
@@ -266,10 +320,22 @@ void CEnvFxManagerGrid::RenderUnderwaterParticles(const CTransform4f& camXf) {
   short xy = real_to_fixed8_8(0.5f * camXf.Get10());
   short xz = real_to_fixed8_8(0.5f * camXf.Get20());
   const int count = mParticles.size();
+#ifdef TARGET_PC
+  const bool portVrFlakes = PortVr::VrImmersive();
+  const CTransform4f portVrModel = CGraphics::GetModelMatrix();
+  const CTransform4f portVrInverse =
+      portVrFlakes ? portVrModel.GetInverse() : CTransform4f::Identity();
+#endif
   CGX::Begin(GX_QUADS, GX_VTXFMT6, count * 4);
   const CVectorFixed8_8* particles = mParticles.data();
   for (int i = count - 1; i >= 0; --i) {
     CVectorFixed8_8 particle = particles[i];
+#ifdef TARGET_PC
+    if (portVrFlakes) {
+      PortVrFlake(camXf, portVrModel, portVrInverse, particle, 0.5f);
+      continue;
+    }
+#endif
     GXPosition3s16(particle.mX, particle.mY, particle.mZ);
     GXTexCoord2u8(0, 0);
     particle.mX += zx;
@@ -477,7 +543,14 @@ void CEnvFxManager::Update(float dt, CStateManager& mgr) {
   if (gpMain->IsMaxSpeed()) {
     return;
   }
+#ifdef TARGET_PC
+  // PortVr: the effects follow the head as the eyes see it (the grid's placement, the visor's
+  // splashes); the body's camera otherwise.
+  const CTransform4f camXf =
+      PortVr::VrHeadViewTransform(mgr.GetCameraManager(0)->GetCurrentCameraTransform(mgr, true));
+#else
   const CTransform4f camXf = mgr.GetCameraManager(0)->GetCurrentCameraTransform(mgr, true);
+#endif
   const EEnvFxType type = static_cast< EEnvFxType >(mgr.GetWorld()->GetNeededEnvFx());
   switch (type) {
   case kEFX_Unknown6:
@@ -1305,7 +1378,13 @@ void CEnvFxManager::Render(const CStateManager& mgr) {
   const CTransform4f xf = GetParticleBoundsToWorldTransform();
 #endif
   const CTransform4f invXf = xf.GetInverse();
+#ifdef TARGET_PC
+  // PortVr: the particles' quads (and the dark world's motes) span the head's axes.
+  const CTransform4f camXf =
+      PortVr::VrHeadViewTransform(mgr.GetCameraManager(0)->GetCurrentCameraTransform(mgr, true));
+#else
   const CTransform4f camXf = mgr.GetCameraManager(0)->GetCurrentCameraTransform(mgr, true);
+#endif
 
   switch (type) {
   case kEFX_Snow:

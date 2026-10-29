@@ -16,6 +16,7 @@
 #include "rstl/math.hpp"
 #ifdef TARGET_PC
 #include "MetroidPrime/PortEfbCopy.hpp"
+#include "vr/vr_view.h"
 #include <dolphin/gx/GXCpu2Efb.h>
 #include <string.h>
 
@@ -139,8 +140,18 @@ void CVisorFlare::Update(float dt, const CVector3f& pos, const CActor* actor, CS
     const rstl::optional_object< float > average = mOcclusionAverage.GetAverage();
     const float occlusion = average ? *average : 1.f;
     const CGameCamera& camera = *mgr.GetCameraManager(0)->GetCurrentCamera(mgr, true);
+#ifdef TARGET_PC
+    // PortVr: the flare fades with its angle from the head's facing, not the body's.
+    const CTransform4f portCameraXf =
+        PortVr::VrImmersive()
+            ? PortVr::VrHeadViewTransform(mgr.GetCameraManager(0)->GetCurrentCameraTransform(mgr, true))
+            : camera.GetTransform();
+    const CVector3f forward = portCameraXf.GetForward();
+    const CVector3f direction = pos - portCameraXf.GetTranslation();
+#else
     const CVector3f forward = camera.GetTransform().GetForward();
     const CVector3f direction = pos - camera.GetTransform().GetTranslation();
+#endif
     mIntensity = 1.f - occlusion;
     const float dot = CVector3f::Dot(direction.AsNormalized(), forward);
     mIntensity *= rstl::max_val(0.f, 1.f - mAngularFalloff * 4.f * (1.f - dot));
@@ -335,13 +346,32 @@ void CVisorFlare::UpdateOcclusion(const CVector3f& pos, const CStateManager& mgr
 void CVisorFlare::RenderFlares(const CVector3f& pos, const CStateManager& mgr) const {
   CGraphics::SetDepthWriteMode(false, kE_LEqual, false);
   const CGameCamera& camera = *mgr.GetCurrentRenderCameraManager()->GetCurrentCamera(mgr, true);
+#ifdef TARGET_PC
+  // PortVr: the flare's sprites run along the line through the head's view centre and face the
+  // head, as the eyes see the light; the body's camera off the headset.
+  const bool portVrHead = PortVr::VrImmersive() && mgr.GetCurrentRenderPlayerIndex() == 0;
+  const CTransform4f portCameraXf =
+      portVrHead ? PortVr::VrHeadViewTransform(
+                       mgr.GetCurrentRenderCameraManager()->GetCurrentCameraTransform(mgr, true))
+                 : camera.GetTransform();
+  const CVector3f cameraPos = portCameraXf.GetTranslation();
+  const CVector3f flarePos = pos;
+  const CTransform4f viewMatrix = portVrHead
+                                      ? PortVr::VrHeadViewTransform(CGraphics::GetViewMatrix())
+                                      : CGraphics::GetViewMatrix();
+#else
   const CVector3f cameraPos = camera.GetTransform().GetTranslation();
   const CVector3f flarePos = pos;
   const CTransform4f viewMatrix = CGraphics::GetViewMatrix();
+#endif
   CVector3f reflectedPos = viewMatrix.GetInverse() * flarePos;
   reflectedPos = CVector3f(-reflectedPos.GetX(), reflectedPos.GetY(), -reflectedPos.GetZ());
   const CVector3f reflectedWorldPos = viewMatrix * reflectedPos;
+#ifdef TARGET_PC
+  const CVector3f cameraForward = portCameraXf.GetForward();
+#else
   const CVector3f cameraForward = camera.GetTransform().GetForward();
+#endif
   const CVector3f toFlare = flarePos - cameraPos;
   if (!close_enough(mIntensity, 0.f)) {
     float angle = 0.f;

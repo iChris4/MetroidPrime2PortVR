@@ -21,8 +21,23 @@ quads (oriented along their motion), the flamethrower's oriented quads, `RenderL
 particles are left as they are, as there. Off the headset the helper passes the vertex through.
 
 Checked on the desk: floating debris and a beam shot render in both eyes with nothing stray; a
-VR-off A/B was identical twice. The other billboard sources (`CParticleSwoosh`, `CEnvFxManager`,
-`CHUDBillboardEffect`, `CVisorFlare`) are not converted yet.
+VR-off A/B was identical twice.
+
+The other billboard sources follow the head too (`VrHeadViewTransform`, which passes the camera
+through off the headset):
+
+- `CEnvFxManager`: `Update` places the grid and reads the visor splashes from the head; `Render`
+  spans the quads and the dark world's motes along the head's axes; snow, Echoes' drifting
+  particles and underwater flakes are drawn point-facing about their centres (`PortVrFlake`, the
+  Metroid Prime port's `RenderVrFlake`). Rain lines and the particle trails stay as they are.
+- `CParticleSwoosh`: the two-sided ribbons turn to the head.
+- `CHUDBillboardEffect::PreRender`: the visor's effects stay ahead of the head (player 0).
+- `CVisorFlare`: the fade by angle and the flare's line and sprites use the head, behind an
+  immersive gate, since Echoes reads the simulation camera there and the presented one differs
+  even off the headset. The occlusion test keeps the body camera's mono picture.
+
+Checked on the desk: the dark world's motes and a lens flare render in both eyes with nothing
+stray. VR-off A/B identical (after the usual first-run bird difference).
 
 ## Cannon texture slots: Echoes' arm cannon textures (2026-10-29, for the launcher phase)
 

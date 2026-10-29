@@ -11,6 +11,9 @@
 #include "Kyoto/Graphics/CGraphics.hpp"
 #include "Kyoto/Particles/CElectricDescription.hpp"
 #include "Kyoto/Particles/CElementGen.hpp"
+#ifdef TARGET_PC
+#include "vr/vr_view.h"
+#endif
 #include "Kyoto/Particles/CGenDescription.hpp"
 #include "Kyoto/Particles/CParticleElectric.hpp"
 
@@ -87,7 +90,15 @@ void CHUDBillboardEffect::PreRender(CStateManager& mgr) {
   }
 
   if (mgr.GetCurrentRenderPlayer()->GetCameraState() == CPlayer::kCS_FirstPerson) {
+#ifdef TARGET_PC
+    // PortVr: the visor's effects (splashes, goo) stay ahead of the head, where the visor is.
     CTransform4f camXf = mgr.GetCurrentRenderCameraManager()->GetCurrentCameraTransform(mgr, true);
+    if (mPlayerIndex == 0) {
+      camXf = PortVr::VrHeadViewTransform(camXf);
+    }
+#else
+    CTransform4f camXf = mgr.GetCurrentRenderCameraManager()->GetCurrentCameraTransform(mgr, true);
+#endif
     mGenerator->SetGlobalTranslation(camXf * mTranslation);
     mGenerator->SetGlobalOrientation(camXf);
 #ifdef TARGET_PC
