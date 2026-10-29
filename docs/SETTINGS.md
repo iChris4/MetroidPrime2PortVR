@@ -363,8 +363,9 @@ System and Debug:
   client).
 - System > Disc image > Check disc image (no key): hashes the mounted disc in the background against
   the known G2ME01 chunk table (`tools/disc_chunk_table.py`).
-- `update_check`: System > Updates > Check for updates (default on); env `MP2_UPDATE_CHECK=0` turns
-  it off for a run. Asks GitHub's releases API once at launch whether a newer release is out.
+- `update_check`: upstream's System > Updates > Check for updates. PrimedGun Echoes: off and ignored
+  (it would ask upstream's releases about upstream's version); System > Updates has a PrimedGun Echoes
+  releases button instead, which opens this fork's releases page.
 - `disc_path`: System > Disc image > Replace disc image...: the image to mount at the next start,
   checked before it is remembered (empty = the one given on the command line or beside the
   executable). No env of its own: a file on the command line or `MP2_DISC` still wins.

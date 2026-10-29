@@ -168,7 +168,8 @@ void DrawCardTransfer();
 void DrawDataFolder();
 void DrawDiscordSection();
 void DrawUpdateSection();
-// Applies sUpdateCheck (and MP2_UPDATE_CHECK) to PortUpdateCheck; settings.cpp calls it at load.
+// Keeps PortUpdateCheck off (PrimedGun Echoes: it would ask upstream's releases); settings.cpp
+// calls it at load.
 void ApplyUpdateCheck();
 void DrawDiscImageSection();
 void DrawLogSection();

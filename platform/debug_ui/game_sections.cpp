@@ -626,67 +626,23 @@ void DrawDiscordSection() {
   }
 }
 
-// MP1's Game > Updates section (port_update_check.h): asks GitHub's releases API for
-// Odrannnn/MetroidPrime2Port once at launch, or on "Check now".
 void ApplyUpdateCheck() {
-  const std::string& file = PortSettings::FilePath();
-  const std::filesystem::path dir = file.empty() ? std::filesystem::path("./") : PortUtf8::FromUtf8(file).parent_path();
-  PortUpdateCheck::Configure(sUpdateCheck && port::EnvFlag("MP2_UPDATE_CHECK", true), MP_BUILD_VERSION,
-                             PortUtf8::ToUtf8(dir / "update-check.txt"));
+  // PrimedGun Echoes: upstream's check asks Odrannnn/MetroidPrime2Port whether a release
+  // newer than upstream's versionName is out, which would send PrimedGun Echoes players to
+  // the flat port. It stays off (as in the Metroid Prime VR fork) until it asks this fork's
+  // releases with PrimedGun Echoes' version. Switched off, no worker thread starts,
+  // CheckNow() returns at once and the update toast never shows.
+  PortUpdateCheck::Configure(false, std::string(), std::string());
 }
 
+// PrimedGun Echoes: upstream's update check stays off (ApplyUpdateCheck), so its checkbox
+// and status would only ever read "off". This links this fork's releases instead.
 void DrawUpdateSection() {
   ImGui::SeparatorText("Updates");
-  bool check = sUpdateCheck;
-  if (ImGui::Checkbox("Check for updates", &check)) {
-    sUpdateCheck = check;
-    ApplyUpdateCheck();
-    PortUpdateCheck::CheckNow(); // switched on: check now, not next launch
-    Changed(true);
+  if (ImGui::Button("PrimedGun Echoes releases")) {
+    SDL_OpenURL("https://github.com/iChris4/MetroidPrime2PortVR/releases");
   }
-  ItemHelp("Asks GitHub (api.github.com) once at launch whether a newer release is out. Nothing "
-           "else is sent, and nothing is installed: the release page opens in your browser.");
-  const PortUpdateCheck::EStatus status = PortUpdateCheck::Status();
-  switch (status) {
-  case PortUpdateCheck::kStatus_Off:
-    ImGui::TextDisabled(sUpdateCheck ? "off (MP2_UPDATE_CHECK=0)" : "off");
-    break;
-  case PortUpdateCheck::kStatus_Checking:
-    ImGui::TextUnformatted("checking...");
-    break;
-  case PortUpdateCheck::kStatus_UpToDate:
-    ImGui::TextColored(ThemeGoodColor(), "up to date");
-    break;
-  case PortUpdateCheck::kStatus_Available:
-    ImGui::TextColored(ThemeGoodColor(), "%s is out", PortUpdateCheck::Latest().version.c_str());
-    break;
-  case PortUpdateCheck::kStatus_Failed:
-    ImGui::TextColored(ThemeBadColor(), "%s", PortUpdateCheck::LastError().c_str());
-    break;
-  }
-  if (status == PortUpdateCheck::kStatus_Off) {
-    return;
-  }
-  ImGui::BeginDisabled(status == PortUpdateCheck::kStatus_Checking);
-  if (ImGui::Button("Check now")) {
-    PortUpdateCheck::CheckNow();
-  }
-  ImGui::EndDisabled();
-  if (status == PortUpdateCheck::kStatus_Available) {
-    ImGui::SameLine();
-    if (ImGui::Button("Open release page")) {
-      SDL_OpenURL(PortUpdateCheck::Latest().url.c_str());
-    }
-  }
-  if (const int64_t checked = PortUpdateCheck::LastChecked(); checked > 0) {
-    const time_t when = static_cast< time_t >(checked);
-    char text[64] = {};
-    if (const std::tm* local = std::localtime(&when)) {
-      std::strftime(text, sizeof(text), "%Y-%m-%d %H:%M", local);
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled("last checked %s", text);
-  }
+  ImGui::SetItemTooltip("Opens github.com/iChris4/MetroidPrime2PortVR/releases in the browser.");
 }
 
 void DrawMemoryCard() {

@@ -213,7 +213,7 @@
 {"System", "", "Discord", "Rich Presence", "discord profile activity presence status rich"},
 {"System", "", "Log", "Write the log to a file", "logging output stdout stderr debug log file"},
 {"System", "", "Log", "Copy log path", "logging clipboard"},
-{"System", "", "Updates", "Check for updates", "update check github release newer version"},
+{"System", "", "Updates", "PrimedGun Echoes releases", "update check github release newer version primedgun"},
 {"Debug", "", "Camera", "Free camera", "freecam fly noclip"},
 {"Debug", "", "Camera", "Freeze the game", "pause freecam"},
 {"Debug", "", "Camera", "Show Samus", "player model freecam"},
