@@ -17,6 +17,13 @@
 #ifdef TARGET_PC
 #include "GuiSys/CGuiModel.hpp"
 #include "port_touch.h"
+#include "vr/vr_view.h"
+
+// PortVr: the menu's icon and lozenge widgets are models; anything else is left out.
+static CGuiModel* PortVrAsModel(CGuiWidget* widget) {
+  return widget != nullptr && widget->GetWidgetTypeID() == 'MODL' ? static_cast< CGuiModel* >(widget)
+                                                                  : nullptr;
+}
 #endif
 
 static const char* const skBaseWidgetNames[] = {"basewidget_visormenuicons",
@@ -201,6 +208,17 @@ void CHudVisorBeamMenu::Update(float dt, const bool init) {
       icons[i] = mItems[i].mIcon;
     }
     PortTouch::CaptureWheelIcons(mType, icons);
+    // PortVr: the wrist visor display draws the visor menu's icons and lozenges (by visor, as the
+    // menu's items are).
+    if (mType == kVBM_Visor) {
+      CGuiModel* wristIcons[4];
+      CGuiModel* wristFrames[4];
+      for (int i = 0; i < 4; ++i) {
+        wristIcons[i] = PortVrAsModel(mItems[i].mIcon);
+        wristFrames[i] = PortVrAsModel(mItems[i].mLozenge);
+      }
+      PortVr::VrWristCaptureModels(wristIcons, wristFrames);
+    }
   }
 #endif
   const CColor itemColors[2][4] = {

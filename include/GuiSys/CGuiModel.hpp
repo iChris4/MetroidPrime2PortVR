@@ -37,6 +37,10 @@ public:
   // Beam's centre triangle is a second surface with its own texture). The first layer is the
   // icon's cell in the shared atlas.
   int PortIconLayers(PortIconLayer* out, int max) const;
+  // PortVr: the wrist visor display (vr_wrist_visor.cpp) draws the HUD visor menu's models on the
+  // off hand: this model's own material and colour path at `transform`, without the depth test,
+  // at the alpha of its last HUD draw times `alpha`.
+  void PortDrawWrist(const CTransform4f& transform, float alpha) const;
 #endif
   static void BeginDraw();                        // Guessed name
   static void EndDraw();                          // Guessed name
@@ -48,6 +52,9 @@ private:
   CAssetId mModelId;
   int mModelIndex;
   uint mLightMask;
+#ifdef TARGET_PC
+  mutable float mPortHudDrawAlpha = 1.f;
+#endif
 };
 CHECK_SIZEOF(CGuiModel, 0xc8)
 

@@ -9,6 +9,29 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Parity, part 5: the wrist visor display (2026-10-29)
+
+`vr_wrist_visor_enabled` (off by default) shows the four visors on the off-hand wrist, drawn with the
+HUD visor menu's own icon and lozenge models.
+
+- `CHudVisorBeamMenu::Update` (visor menu) hands its items' model widgets, by visor, to
+  `VrWristCaptureModels`; `CGuiModel`'s destructor forgets them (`VrWristForgetModel`).
+- `CGuiModel::PortDrawWrist`: the model's material and colour path (Draw's switch, without the depth
+  test or write, outside the HUD's batch) at a given transform, at its last HUD draw alpha
+  (`mPortHudDrawAlpha`, noted in `Draw`) times the wrist's.
+- `vr_wrist_visor.cpp` differs from the Metroid Prime VR port's here: Echoes' GUI models draw from
+  their frame's model database, with no model token to keep, so only the widgets are kept and each
+  draws itself, its bounds from `PortGetBounds`. The pose maths are the same; the slots map to
+  Echoes' visors by index (Combat 0, Echo 1, Scan 2, Dark 3).
+
+Checked on the desk only with a temporary pose ahead of the camera (the controllers report as not
+connected on the desk, so the VR pad and the wrist stay off): the icons and lozenges draw in both
+eyes with their HUD materials. Visors not yet owned keep the menu's own zero alpha, so they do not
+show at all.
+
+A/B note: a VR-off run occasionally differs from the baseline in the birds only, run to run, with
+an unchanged binary; repeat the run before blaming a change.
+
 ## Parity, part 4: pause screen models in 3D (2026-10-29)
 
 Echoes has no dolls: its pause screen (Data Network) is one 3D scene, the scan tree and its nodes

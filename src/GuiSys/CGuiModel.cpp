@@ -13,6 +13,7 @@
 #include "Kyoto/Basics/CBasics.hpp"
 #include "Kyoto/Graphics/CTexture.hpp"
 #include "port_pointer.h"
+#include "vr/vr_view.h"
 #endif
 #ifdef TARGET_PC
 #include <cstdlib>
@@ -86,7 +87,12 @@ CGuiModel* CGuiModel::Create(CGuiFrame* frame, CInputStream& in, uint version) {
 CGuiModel::CGuiModel(const CGuiWidgetParms& parms, CAssetId modelId, uint lightMask, int modelIndex)
 : CGuiWidget(parms), mModelId(modelId), mModelIndex(modelIndex), mLightMask(lightMask) {}
 
+#ifdef TARGET_PC
+// PortVr: the wrist visor display keeps the visor menu's widgets until they go.
+CGuiModel::~CGuiModel() { PortVr::VrWristForgetModel(this); }
+#else
 CGuiModel::~CGuiModel() {}
+#endif
 
 void CGuiModel::Draw(const CGuiWidgetDrawParms& parms) const {
   CGraphics::SetModelMatrix(GetWorldTransform());
@@ -100,6 +106,8 @@ void CGuiModel::Draw(const CGuiWidgetDrawParms& parms) const {
         PortGuiHit::Record(this, CGraphics::GetModelMatrix(), box.GetMinPoint(), box.GetMaxPoint());
       }
     }
+    // PortVr: the wrist visor display fades with the HUD.
+    mPortHudDrawAlpha = parms.GetAlpha();
 #endif
     if (!sDrawing) {
       CCubeMaterial::ResetCachedMaterials();
@@ -209,6 +217,53 @@ void CGuiModel::DrawModel(const CModelFlags& flags) const {
 }
 
 #ifdef TARGET_PC
+void CGuiModel::PortDrawWrist(const CTransform4f& transform, float alpha) const {
+  const CGuiFrameModelDatabase* db = GetParentFrame()->GetModelDatabase();
+  if (db == nullptr || db->GetModel(mModelIndex) == nullptr) {
+    return;
+  }
+  // Draw's material and colour path, outside the HUD's batch, with no depth test or write: the
+  // wrist's icons lie flat over each other in a fixed order.
+  CGraphics::SetModelMatrix(transform);
+  CCubeMaterial::ResetCachedMaterials();
+  CCubeMaterial::ResetTransparencyKColor();
+  UpdateDrawState(-1, CColor::Black());
+  const CColor color = GetModifiedColor().WithAlphaModulatedBy(mPortHudDrawAlpha * alpha);
+  UpdateDrawState(mDrawFlags, color);
+  GetParentFrame()->EnableLights(mLightMask);
+  if (mCullFaces) {
+    CGraphics::SetCullMode(kCM_Front);
+  }
+  CModelFlags flags = CModelFlags::Normal();
+  switch (mDrawFlags) {
+  case kGMDF_Shadeless:
+    DrawModel(flags.DepthCompareUpdate(false, false));
+    break;
+  case kGMDF_Opaque:
+    DrawModel(CModelFlags::ColorModulate(color).DepthCompareUpdate(false, false));
+    break;
+  case kGMDF_Alpha:
+    flags = CModelFlags::AlphaBlended(color).DepthCompareUpdate(false, false);
+    DrawModel(CModelFlags(flags, flags.GetOtherFlags() | CModelFlags::kF_Unknown400));
+    break;
+  case kGMDF_Additive:
+    flags = CModelFlags::Additive(color).DepthCompareUpdate(false, false);
+    DrawModel(CModelFlags(flags, flags.GetOtherFlags() | CModelFlags::kF_Unknown400));
+    break;
+  case kGMDF_AlphaAdditiveOverdraw:
+    DrawModel(CModelFlags::AlphaBlended(color).DepthCompareUpdate(false, false));
+    DrawModel(CModelFlags::AdditiveRGB(color).DepthCompareUpdate(false, false));
+    break;
+  default:
+    // The screen masks (ClearAlpha, DoubleColor) have nothing to show on the wrist.
+    break;
+  }
+  if (mCullFaces) {
+    CGraphics::SetCullMode(kCM_None);
+  }
+  GetParentFrame()->DisableLights();
+}
+
 int CGuiModel::PortIconLayers(PortIconLayer* out, int max) const {
   const CGuiFrameModelDatabase* db = GetParentFrame()->GetModelDatabase();
   const CCubeModel* model = db != nullptr ? db->GetModel(mModelIndex) : nullptr;
