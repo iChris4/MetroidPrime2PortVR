@@ -57,7 +57,16 @@ nothing useful.
   - Port tests 53/53, `gfx_recording_tests` 135/135.
   - `gx_fifo_tests` passes test by test, but the whole suite dies at random points, on the
     committed code as well (not this change).
-- Not checked: anything worn, and the Quest (multiview reads eye 0 as layer 0).
+- Quest 3 on the desk:
+  - Multiview reads eye 0 as layer 0 of the shared eye texture.
+  - The pick follows the body's turns, and both eyes show the window's highlight under its frame.
+  - That run also showed a merge bug the scan visor brings out. Echoes' dual-source dst alpha
+    (`apply_dst_alpha_mode`, a constant destination alpha on a source-alpha blend) matched
+    `fs_main` by its whole signature, which multiview had already rewritten (the view index
+    parameter). Every such pipeline fell back to plain blending ("no fs_main to rewrite"), so a
+    blended scannable wrote no scan id. Only the return type is rewritten now, wherever the
+    parameter list ends.
+- Not checked: anything worn.
 
 ## Quest: the APK (2026-10-29)
 

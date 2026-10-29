@@ -3580,14 +3580,19 @@ bool apply_dst_alpha_mode(std::string& source, DstAlphaMode mode) noexcept {
     source.replace(at, tail.size(), "    return vec4f(prev.rgb, 1.0);\n}");
     return true;
   }
-  constexpr std::string_view head = "fn fs_main(in: VertexOutput) -> @location(0) vec4f {";
+  // PrimedGun: fs_main may take more than `in` (multiview's view index, a map batch's facing), so
+  // only its return type is rewritten, wherever its parameter list ends.
+  constexpr std::string_view head = "fn fs_main(in: VertexOutput";
+  constexpr std::string_view returns = ") -> @location(0) vec4f {";
   const size_t headAt = source.find(head);
-  if (at == std::string::npos || headAt == std::string::npos) {
+  const size_t returnsAt = headAt != std::string::npos ? source.find(returns, headAt) : std::string::npos;
+  if (at == std::string::npos || returnsAt == std::string::npos || returnsAt > at ||
+      source.find('{', headAt) < returnsAt) {
     Log.error("dual-source dst alpha: no fs_main to rewrite, using plain blending");
     return false;
   }
   source.replace(at, tail.size(), "    return GxDstAlphaOut(vec4f(prev.rgb, 1.0), prev);\n}");
-  source.replace(headAt, head.size(), "fn fs_main(in: VertexOutput) -> GxDstAlphaOut {");
+  source.replace(returnsAt, returns.size(), ") -> GxDstAlphaOut {");
   source.insert(0, "enable dual_source_blending;\n");
   source += R"(
 struct GxDstAlphaOut {
