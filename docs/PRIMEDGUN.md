@@ -9,6 +9,22 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## The stray pixel in the middle of the screen (2026-10-29)
+
+Echoes' known "stray pixel" (a small teal right triangle just above the middle of the picture at any
+resolution above the TV's; in the headset one in each eye) is `CGraphics::EndScene`'s 96 dummy
+triangles, (0,1)-(0,0)-(1,0) in a centred orthographic projection with colour 0, drawn before the
+display copy to flush the hardware's pipeline. They take whatever TEV state the frame's last draw
+left, the minimap's Samus marker (recolouring the marker recolours them), and at 640x448 they cover
+no pixel centre; at 4x they cover six. `TARGET_PC` skips them; the projection, matrix and Z mode
+around them are kept. Desktop at 4x render scale: the six pixels go and nothing else changes; Quest
+eye captures in the hive hall: the four pixels at each eye's image centre are gone.
+
+How it was found, for the next one: skip switches by game draw group (`CInGameGuiManager::Draw`,
+then `CAutoMapper::Draw`) narrowed it to the marker's draw, and a `GXSetDrawTag` around that draw
+let `draw_prim` in aurora count and skip the draws that follow it in the FIFO (the marker's own
+primitives were not it: the triangles ignore its model matrix but take its colour).
+
 ## Quest: the quick resume question in the headset (2026-10-29)
 
 From the third headset test: the Quest stayed black after the shader compile. Echoes' quick resume

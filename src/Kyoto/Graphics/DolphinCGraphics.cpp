@@ -1058,6 +1058,13 @@ void CGraphics::EndScene() {
   GXLoadPosMtxImm(model, GX_PNMTX0);
   CGX::SetZMode(true, GX_LEQUAL, false);
   CGX::SetVtxDescv(skPosColorTexDirect);
+#ifdef TARGET_PC
+  // Port: the 96 one-pixel triangles flushed the hardware's pipeline before the copy. They sit at
+  // the middle of the screen, in whatever TEV state the frame's last draw left (the minimap's Samus
+  // marker colours them), and at the TV's resolution they cover no pixel centre: at any higher one
+  // they show as the "stray pixel" in the middle of the picture, one per eye in the headset.
+  // Nothing on the PC needs the flush.
+#else
   CGX::Begin(GX_TRIANGLES, GX_VTXFMT0, 288);
   for (int i = 0; i < 96; ++i) {
     GXPosition3f32(0.f, 1.f, 1.f);
@@ -1071,6 +1078,7 @@ void CGraphics::EndScene() {
     GXTexCoord2f32(0.f, 0.f);
   }
   CGX::End();
+#endif
   CGX::SetZMode(true, GX_LEQUAL, true);
 
   const float brightness = CMath::Clamp(0.f, mBrightness, 2.f);
