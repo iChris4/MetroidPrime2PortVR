@@ -9,6 +9,21 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Parity, part 4: pause screen models in 3D (2026-10-29)
+
+Echoes has no dolls: its pause screen (Data Network) is one 3D scene, the scan tree and its nodes
+plus the selected scan's or item's models, under the logbook camera. `CPauseScreen::DrawModels`
+wraps `DrawModelView` in `PortVr::VrPauseModel3D` (the Metroid Prime VR port's dolls scope): on the
+held screen the models stand in 3D a little in front of it, at the size of their flat picture. The
+models stand at the world origin's depth (`GetDefaultModelPosition` has no depth offset), which is
+where the scope puts the screen. The scan tree stays flat on the screen. The scan-in sweep is an
+orthographic draw: under the 3D route it covers each whole eye, masked by that eye's model alpha.
+
+Checked on the desk: the Missile Launcher entry shows its model in both eyes, 9 px (of 3400) more
+crossed than the screen's frame and text, which all shift alike. Harness: a console `press` of the
+same button twice while paused needs a `stick 0 0 1` between them (a new hold replaces the old one,
+and holds only count down on game updates, which do not run while paused).
+
 ## Parity, part 3: the held 3D map, vsync off in the headset (2026-10-29)
 
 - `CAutoMapper::PortVrSetHologram` (statics, set and cleared by `CInGameGuiManager::Draw`): `Draw`

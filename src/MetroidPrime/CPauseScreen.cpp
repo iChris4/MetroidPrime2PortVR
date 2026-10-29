@@ -52,6 +52,7 @@
 #ifdef TARGET_PC
 #include "port_pointer.h"
 #include "port_pointer_menu.h"
+#include "vr/vr_view.h"
 #endif
 #include "rstl/StringExtras.hpp"
 #include "rstl/algorithm.hpp"
@@ -2127,7 +2128,17 @@ void CPauseScreen::DrawModels(int nodeId, float alpha) const {
     }
   }
   SetFog(false);
+#ifdef TARGET_PC
+  {
+    // PortVr: in the headset's view the scan or inventory model stands in 3D on the pause menu's
+    // screen (the models stand at the world origin's depth, where the scope places the screen). The
+    // scan-in sweep is orthographic: drawn over each whole eye, masked by that eye's model alpha.
+    const PortVr::VrPauseModel3D vrModel3D;
+    DrawModelView(mModelTransform, alpha);
+  }
+#else
   DrawModelView(mModelTransform, alpha);
+#endif
   SetFog(true);
 }
 
