@@ -2,6 +2,7 @@
 #include "MetroidPrime/ScriptLoader/SLdrTweakPlayerControls.hpp"
 #ifdef TARGET_PC
 #include "port_overlay.h"
+#include "vr/vr_pad.h"
 #endif
 
 bool CTweakPlayerControls::GetFreeLookTurnsPlayer() const {
@@ -63,8 +64,9 @@ bool CTweakPlayerControls::GetAssistedAimingIgnoreVertical() const {
 CControlMapper::EFunctionList
 CTweakPlayerControls::GetMapping(CControlMapper::ECommands command) const {
 #ifdef TARGET_PC
-  // Swap the Scan and Echo visor buttons (F1 Controls > Options).
-  if (PortOverlay::SwapVisors()) {
+  // Swap the Scan and Echo visor buttons (F1 Controls > Options). PortVr: not under the VR custom
+  // layout, whose visor bindings name the visors by the game's own map.
+  if (PortOverlay::SwapVisors() && !PortVr::VrCustomLayoutActive()) {
     if (command == CControlMapper::kC_EnviroVisor) {
       command = CControlMapper::kC_XrayVisor;
     } else if (command == CControlMapper::kC_XrayVisor) {

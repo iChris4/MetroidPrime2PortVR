@@ -9,6 +9,21 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Parity, part 7: custom layout gate, wrist visor pick (2026-10-29)
+
+- `CTweakPlayerControls::GetMapping`: the port's Scan/Echo visor swap (F1 Controls > Options) is
+  off while the VR custom layout drives the pad (`VrCustomLayoutActive`): its visor bindings name the
+  visors by the game's own map, as the Metroid Prime VR port's gate does. Echoes' second control
+  scheme (`gpTweakPlayerControlsB`) belongs to multiplayer, and its command overrides are never set,
+  so nothing else needs the gate. Echoes' touch wheels switch visors and beams outside the control
+  mapper (Android only), so the Metroid Prime port's touch-wheel gates have no counterpart here.
+- `CPlayer::UpdateVisorState`: the wrist visor display's pick (`VrTakeWristVisorRequest`) selects
+  that visor for player 0 like a visor button, unless the scan virus holds the scan visor. It was
+  queued by the VR pad but never taken until now.
+
+A/B note: again the first VR-off run after the build differed in the birds only; the repeat was
+identical. The first launch of a freshly built executable is slower, which looks like the cause.
+
 ## Parity, part 6: camera hints interpolate in morph ball (2026-10-29)
 
 Echoes already interpolates most hint changes the Metroid Prime port cut (`CCameraHintManager`

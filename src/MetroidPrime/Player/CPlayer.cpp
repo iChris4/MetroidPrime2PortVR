@@ -103,6 +103,7 @@
 #ifdef TARGET_PC
 #include "port_entry.h"
 #include "port_mouse.h"
+#include "vr/vr_pad.h"
 #include "vr/vr_view.h"
 #include "port_radial.h"
 #include "MetroidPrime/PortScanTarget.hpp"
@@ -1480,6 +1481,16 @@ void CPlayer::UpdateVisorState(const CFinalInput& input, float dt, CStateManager
     }
 
 #ifdef TARGET_PC
+    // PortVr: the wrist visor display's pick (vr_pad.cpp), for player 0, as a visor button would;
+    // the scan virus still holds the scan visor.
+    if (mPlayerIndex == 0 && !mPlayerState->GetItemAmount(CPlayerState::kIT_ScanVirus)) {
+      const int wristVisor = PortVr::VrTakeWristVisorRequest();
+      if (wristVisor >= 0 && wristVisor < 4 &&
+          playerState->HasPowerUp(skVisorToItemMapping[wristVisor].first)) {
+        mVisorChangeRequested = true;
+        selectedVisor = wristVisor;
+      }
+    }
     PortScanTarget::NoteVisorSelection(currentVisor, selectedVisor, mVisorChangeRequested);
 #endif
     if (selectedVisor != currentVisor &&
