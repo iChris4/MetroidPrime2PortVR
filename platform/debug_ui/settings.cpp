@@ -816,6 +816,22 @@ int SettingsSelfTest(std::string& report) {
       }
     }
   }
+  // PrimedGun Echoes: the VR settings through the same reader and writer (the Metroid Prime VR
+  // port's check): otherwise a refactor can round-trip every desktop key while dropping the VR ones.
+  for (const char* key : {"vr_use_right_hand", "vr_room_scale", "vr_game_menu_screen_enabled"}) {
+    for (const char* sample : {"0", "1"}) {
+      std::istringstream in(std::string(key) + "=" + sample + "\n");
+      ApplySettingsText(in);
+      const auto written = SettingsValues(SettingsText());
+      const auto found = written.find(key);
+      if (found == written.end() || found->second != sample) {
+        std::snprintf(line, sizeof(line), "settings self-test: VR setting %s=%s did not round-trip\n",
+                      key, sample);
+        report += line;
+        ++failures;
+      }
+    }
+  }
   // Every line written is a key something reads, and reading the whole file
   // back writes it unchanged.
   const std::string first = SettingsText();
