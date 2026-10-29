@@ -9,6 +9,54 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Quest: the APK (2026-10-29)
+
+`quest/` is PrimedGun v2's Quest project, adapted: package `org.primedgun.echoes`, version
+`1.0.0-alpha.1` (code 1), libraries `metroid_prime2_port` and `primedgun_launcher`. Build with
+`quest\Build-Quest.ps1` (JDK 17, NDK 29.0.14206865, a system CMake 3.25+, Rust's
+`aarch64-linux-android`; `MP_HOST_PYTHON3` or `python` on PATH for the module-scoping step), run
+with `quest\Run-Quest.ps1 -Disc <iso>`.
+
+- Game activity (`PrimedGunVrActivity`): Echoes' Android paths come from `port_paths.txt` in the
+  private folder (`platform/main.cpp` `ResolveAndroidPaths`), not `MP2_USER_PATH`, so the activity
+  writes `user=` (the external files folder, as PrimedGun v2's) there, keeping any `env.` lines; the
+  disc goes as `MP2_DISC` once `QuestStorage.checkDisc` passes; `MP2_NO_DISC_DIALOG`, `MP2_VR=1`,
+  `MP2_LOG_FILE=1`; adb test extras are the `MP2_*` harness names. No options-only activity: Echoes
+  has no `--options` start, so the panel's Open Full Port Options says so.
+- `platform/main.cpp`: `EnsureDiscImage` honours `MP2_NO_DISC_DIALOG` on Android (no picker in the
+  headset; the run ends and the launcher shows why); the Quest build precompiles pipelines (the
+  Metroid Prime VR port's fix for the Adreno 740 multiview fault with lazy pipelines).
+- Root `CMakeLists.txt`: OpenXR on Android, `openxr_android/vulkan/vulkan_direct.cpp` in
+  `mp_port_vr`, `MP_BUILD_QUEST_LAUNCHER` (`launcher/jni`), no custom GPU drivers with OpenXR
+  (`MP_NO_CUSTOM_GPU_DRIVERS`, `port_gpu_driver.cpp` stubs), and the NDK's tools found with their
+  Windows `.exe` names (upstream's Android build assumed a Linux host).
+- Launcher panel: no Cannon Textures tab, `quick_resume` and `aniso`, Echoes' texts and discs, and a
+  settings-only import (PrimedGun v2's `port_settings.ini` through the new JNI
+  `readPrimedGunV2Settings`, PrimedGun.ini, or a Dolphin user data zip; cards are refused: Echoes has
+  no pending card import).
+- Dawn: PrimedGun's patched package (`quest\Build-QuestDawn.ps1`) is built from Dawn `1155e0ed`, an
+  older revision than aurora's desktop pin (`bfa89008`, still listed among its previous versions);
+  the Metroid Prime fork's package was reused (same patch inputs). It works with the merged aurora.
+- `tools/scope_module.py`: `nm` runs in batches bounded by command length too (24000 characters), as
+  200 of the Quest build's deep object paths overran Windows' 32767-character command line.
+
+Checked on a Quest 3 lying on the desk (`adb`; `debug.oculus.guardian_pause 1`, else the Guardian
+dialog takes focus and stops the session within seconds): the game boots the disc, starts OpenXR on
+Vulkan with direct presentation, pipelined, multiview, passthrough on; the intro cinematic plays on
+the virtual screen with the world drawn; after it, gameplay is immersive in both eyes (world, sky,
+HUD, helmet, cannon), memory near 580 MiB, no GPU fault in 260 s. Screen captures:
+`adb shell screencap -p /sdcard/...` then `adb pull` (both eyes, 4128x2208); PowerShell's `>`
+mangles `exec-out` output. The launcher panel opens with the Echoes texts, the copied disc and Play.
+
+Harness note: `MP2_SKIP_INTRO`/`MP2_SKIP_CINEMATICS` boots on the Quest end on a white world with
+only the HUD's markers (no energy bar, no gun): the intro's scripted white camera-filter flash is
+left on, the case `docs/STATUS-history.md` describes for `MP2_TELEPORT` boots. Desk runs that need
+gameplay use `MP2_SKIP_FRONTEND` + `MP2_NEW_GAME` and wait out the intro (about 3 minutes); players
+are not affected (no skip from the launcher).
+
+Not checked: controllers, the VR pad and the launcher's Play/Stop/import on the device, frame rate
+in play, and anything worn.
+
 ## Launcher: PrimedGunEchoes.exe (2026-10-29)
 
 PrimedGun v2's Qt launcher, adapted (`launcher/README.md` has the behaviour). Built with

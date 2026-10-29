@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // The Quest launcher's native half: the PC launcher's Qt-free core
-// (launcher/core) behind JNI, for org.primedgun.v2.launcher.LauncherNative
-// (quest/app). Both launchers then edit port_settings.ini through the same key
+// (launcher/core) behind JNI, for org.primedgun.echoes.launcher.LauncherNative
+// (quest/app). Both launchers then edit settings.cfg through the same key
 // table, the same line-preserving file editor and the same cannon pack code,
 // which port_launcher_tests checks.
 //
@@ -249,18 +249,18 @@ Result Guarded(JNIEnv* env, Result fallback, Body&& body) {
 } // namespace
 
 #define LAUNCHER_JNI(ret, name) \
-  extern "C" JNIEXPORT ret JNICALL Java_org_primedgun_v2_launcher_LauncherNative_##name
+  extern "C" JNIEXPORT ret JNICALL Java_org_primedgun_echoes_launcher_LauncherNative_##name
 
 // --- setup -------------------------------------------------------------------
 
-// The game's user folder (MP_USER_PATH: port_settings.ini, user_textures, the
+// The game's user folder (port_paths.txt user=: settings.cfg, user_textures, the
 // cannon library) and the cannon slots the APK carries, unpacked. Seeds the
 // user's cannon library and reads the settings. False when the settings file
 // exists but cannot be read.
 LAUNCHER_JNI(jboolean, init)(JNIEnv* env, jclass, jstring userFolder, jstring shippedCannon) {
   return Guarded<jboolean>(env, JNI_FALSE, [&] {
     const fs::path user = PathFromJava(env, userFolder);
-    gState.settingsFile = user / "port_settings.ini";
+    gState.settingsFile = user / "settings.cfg";
     gState.cannon.library = user / "primedgun" / "cannon_textures";
     gState.cannon.shippedLibrary = PathFromJava(env, shippedCannon);
     gState.cannon.userTextures = user / "user_textures";
@@ -527,6 +527,22 @@ LAUNCHER_JNI(jintArray, decodeDds)(JNIEnv* env, jclass, jstring path) {
 // PrimedGun's settings from an old install's user folder (Config/PrimedGun.ini,
 // or Config/Qt.ini from older builds) as port keys: the file read, then
 // key=value entries. Empty when the folder holds neither.
+// PrimedGun Echoes: a PrimedGun v2 (Metroid Prime) install's settings (its user/port_settings.ini
+// under `folder`, or a port_settings.ini there), in readOldSettings' form.
+LAUNCHER_JNI(jobjectArray, readPrimedGunV2Settings)(JNIEnv* env, jclass, jstring folder) {
+  return Guarded<jobjectArray>(env, nullptr, [&] {
+    const OldSettings v2 = ReadPrimedGunV2Settings(PathFromJava(env, folder));
+    std::vector<std::string> out;
+    if (!v2.source.empty()) {
+      out.push_back(PathToUtf8(v2.source));
+      for (const auto& [key, value] : v2.values) {
+        out.push_back(key + '=' + value);
+      }
+    }
+    return ToJavaArray(env, out);
+  });
+}
+
 LAUNCHER_JNI(jobjectArray, readOldSettings)(JNIEnv* env, jclass, jstring userFolder) {
   return Guarded<jobjectArray>(env, nullptr, [&] {
     const OldSettings old = ReadOldSettings(PathFromJava(env, userFolder));

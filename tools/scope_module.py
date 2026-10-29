@@ -60,8 +60,19 @@ def read_modules(path):
 def nm(tool, objs, *flags):
     """Return {symbol: type} lists from nm -P over objs, in chunks to bound the command line."""
     out = []
-    for i in range(0, len(objs), 200):
-        r = subprocess.run([tool, "--no-demangle", "-P", *flags, *objs[i:i + 200]],
+    # At most 200 objects and about 24000 characters a run: a Windows command line holds 32767,
+    # which 200 of a deep build folder's object paths (an Android build from Windows) overran.
+    chunks, chunk, length = [], [], 0
+    for obj in objs:
+        if chunk and (len(chunk) >= 200 or length + len(obj) + 3 > 24000):
+            chunks.append(chunk)
+            chunk, length = [], 0
+        chunk.append(obj)
+        length += len(obj) + 3
+    if chunk:
+        chunks.append(chunk)
+    for chunk in chunks:
+        r = subprocess.run([tool, "--no-demangle", "-P", *flags, *chunk],
                            capture_output=True, text=True, check=True)
         for line in r.stdout.splitlines():
             parts = line.split()

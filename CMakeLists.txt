@@ -112,6 +112,9 @@ set(MP_PRIMEDGUN_VERSION "1.0.0-alpha.1")
 # PrimedGun Echoes' launcher (launcher/): a Qt 6 window beside the game. Needs Qt on
 # CMAKE_PREFIX_PATH (docs/PRIMEDGUN.md, "Launcher").
 option(MP_BUILD_LAUNCHER "Build the PrimedGun Echoes Qt launcher (PrimedGunEchoes.exe)" OFF)
+# Its Quest counterpart's native half (launcher/jni, libprimedgun_launcher.so), which
+# quest/app/build.gradle.kts builds beside the game.
+option(MP_BUILD_QUEST_LAUNCHER "Build the Quest launcher's JNI library" OFF)
 set(MP_OPENXR_SDK_DIR "" CACHE PATH
     "Optional OpenXR-SDK source tree; when empty, use a package or fetch the pinned SDK")
 
@@ -147,8 +150,8 @@ target_compile_definitions(mp_game PUBLIC MUSY_TARGET=MUSY_TARGET_PC)
 # fetched at configure time (static loader), as the Metroid Prime VR fork does.
 set(MP_OPENXR_TARGET "")
 if(MP_ENABLE_OPENXR)
-    if(NOT WIN32)
-        message(WARNING "OpenXR is only wired for Windows in PrimedGun Echoes so far; disabling MP_ENABLE_OPENXR")
+    if(NOT WIN32 AND NOT ANDROID)
+        message(WARNING "OpenXR is only wired for Windows and Android (Quest) in PrimedGun Echoes; disabling MP_ENABLE_OPENXR")
         set(MP_ENABLE_OPENXR OFF)
     else()
         if(NOT MP_OPENXR_SDK_DIR AND NOT FETCHCONTENT_SOURCE_DIR_OPENXR)
@@ -362,7 +365,8 @@ if(ANDROID)
     # behave as tools/scope_module.py expects, and llvm-objcopy takes the same
     # --redefine-sym/--localize-symbols arguments.
     get_filename_component(MP_ANDROID_LLVM_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    if(NOT EXISTS "${MP_ANDROID_LLVM_BIN}/ld.lld")
+    # PrimedGun Echoes: a Windows host's NDK names them ld.lld.exe and so on (the Quest build).
+    if(NOT EXISTS "${MP_ANDROID_LLVM_BIN}/ld.lld" AND NOT EXISTS "${MP_ANDROID_LLVM_BIN}/ld.lld.exe")
         message(FATAL_ERROR
             "No NDK LLVM toolchain bin directory at ${MP_ANDROID_LLVM_BIN} (from "
             "CMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}); the module-scoping tools come "
@@ -811,6 +815,14 @@ if(AURORA_SDL3_TARGET)
         target_link_libraries(mp_port_vr PRIVATE ${MP_OPENXR_TARGET})
         if(WIN32)
             target_sources(mp_port_vr PRIVATE platform/vr/openxr_d3d12.cpp)
+        elseif(ANDROID)
+            # The Quest: the loader's Android glue, and two Vulkan backends: direct
+            # presentation on Dawn's own device (PrimedGun's patched Dawn), or Wiicompiled's
+            # VkDevice of the runtime's own that meets Dawn's on AHardwareBuffers.
+            target_sources(mp_port_vr PRIVATE
+                platform/vr/openxr_android.cpp
+                platform/vr/openxr_vulkan.cpp
+                platform/vr/openxr_vulkan_direct.cpp)
         endif()
         # The platform files that call into the VR layer (main.cpp, port_events.cpp, the F1 page).
         target_compile_definitions(mp_port_entry PRIVATE MP_ENABLE_OPENXR=1)
@@ -850,6 +862,9 @@ endforeach()
 # PrimedGun Echoes: the launcher's Qt-free core (settings.cfg editing, the key table, the disc
 # check, the PrimedGun settings import), which port_launcher_tests checks, and the Qt window.
 add_subdirectory(launcher/core)
+if(MP_BUILD_QUEST_LAUNCHER)
+    add_subdirectory(launcher/jni)
+endif()
 if(MP_BUILD_LAUNCHER)
     # Its Qt UI tests (launcher/CMakeLists.txt) register with CTest from that folder.
     enable_testing()
@@ -1185,7 +1200,14 @@ elseif(CMAKE_LINK_GROUP_USING_RESCAN_SUPPORTED OR CMAKE_CXX_LINK_GROUP_USING_RES
         # Custom Vulkan drivers (Turnip) through libadrenotools (port_gpu_driver.cpp). Its
         # hook libraries and the shim Dawn loads as libvulkan.so are separate shared
         # libraries, loaded by path: android/app/build.gradle lists them as targets.
-        if(ANDROID_ABI STREQUAL "arm64-v8a")
+        # PrimedGun Echoes: not in the Quest build (MP_ENABLE_OPENXR). The OpenXR runtime
+        # creates the Vulkan instance and device there, and linkernsbypass would patch the
+        # dynamic linker from a load-time constructor at every start; port_gpu_driver.cpp is
+        # then its stubs (MP_NO_CUSTOM_GPU_DRIVERS), as in the Metroid Prime VR fork.
+        if(ANDROID_ABI STREQUAL "arm64-v8a" AND MP_ENABLE_OPENXR)
+            target_compile_definitions(mp_port_audio PRIVATE MP_NO_CUSTOM_GPU_DRIVERS=1)
+            target_link_libraries(metroid_prime2_port PRIVATE vulkan)
+        elseif(ANDROID_ABI STREQUAL "arm64-v8a")
             add_subdirectory(extern/adrenotools EXCLUDE_FROM_ALL)
             add_library(mp2_vkshim SHARED platform/android/vkshim.c)
             set_target_properties(mp2_vkshim PROPERTIES C_VISIBILITY_PRESET hidden)

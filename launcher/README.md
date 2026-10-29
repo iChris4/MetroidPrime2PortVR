@@ -78,5 +78,17 @@ the window (label `port`).
 
 ## The Quest launcher
 
-`jni/` is the Quest panel's native half from PrimedGun v2. It is not built yet:
-the Quest app comes in a later phase.
+The Quest APK (`quest/`) opens on the same launcher as a 2D Horizon OS panel
+(`quest/app/src/main/java/org/primedgun/echoes/launcher/`). Its native half,
+`jni/` (`libprimedgun_launcher.so`, built with `-DMP_BUILD_QUEST_LAUNCHER=ON`),
+puts `core/` behind JNI, so both launchers edit `settings.cfg` with the same key
+table and line-preserving editor. Where the Quest panel differs:
+
+- The game runs in its own process (`PrimedGunVrActivity`, `:game`); the tabs
+  lock while it lives. Select Game copies the picked image to `disc.iso` in the
+  user folder, `/sdcard/Android/data/org.primedgun.echoes/files`.
+- Import PrimedGun Settings takes a picked file: PrimedGun v2's
+  `port_settings.ini`, a `PrimedGun.ini`, or a Dolphin user data zip (settings
+  only; memory cards are refused).
+- Open Full Port Options says the F1 options are PC-only; the VR menu holds
+  the PrimedGun settings in the headset.

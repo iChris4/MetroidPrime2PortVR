@@ -3,7 +3,13 @@
 #include "port_gpu_driver.h"
 #include "port_strings.h"
 
-#if defined(__ANDROID__) && defined(__aarch64__)
+// PrimedGun Echoes: the Quest build (MP_NO_CUSTOM_GPU_DRIVERS, CMakeLists.txt) leaves custom
+// drivers out: the OpenXR runtime owns the Vulkan instance and device there.
+#if defined(__ANDROID__) && defined(__aarch64__) && !defined(MP_NO_CUSTOM_GPU_DRIVERS)
+#define PORT_CUSTOM_GPU_DRIVERS 1
+#endif
+
+#if defined(PORT_CUSTOM_GPU_DRIVERS)
 #include <SDL3/SDL.h>
 #include <adrenotools/driver.h>
 #include <dlfcn.h>
@@ -33,7 +39,7 @@ void SetLoadError(std::string why) {
   sLoadError = std::move(why);
 }
 
-#if defined(__ANDROID__) && defined(__aarch64__)
+#if defined(PORT_CUSTOM_GPU_DRIVERS)
 namespace {
 namespace fs = std::filesystem;
 

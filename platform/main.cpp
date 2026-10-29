@@ -795,6 +795,13 @@ std::string EnsureDiscImage(const std::string& resolved, const std::string& defa
     if (DiscImageIsUsable(disc)) {
       return disc;
     }
+    // PrimedGun Echoes: the Quest's game activity sets MP2_NO_DISC_DIALOG, as a picker inside the
+    // headset is seen by nobody; the launcher says why the disc was refused.
+    if (port::EnvFlag("MP2_NO_DISC_DIALOG")) {
+      std::fprintf(stderr, "metroid_prime2_port: %s is not a usable disc image (MP2_NO_DISC_DIALOG)\n",
+                   disc.c_str());
+      return {};
+    }
     std::fprintf(stderr,
                  "metroid_prime2_port: %s is not a Metroid Prime 2: Echoes disc image; "
                  "asking for one\n",
@@ -1250,7 +1257,11 @@ int main(int argc, char** argv) {
   {
     char why[96] = "";
     bool lazy = PortMemoryLog::LowRamDevice(why, sizeof(why));
-#if defined(__ANDROID__)
+    // PrimedGun Echoes: not on the Quest (the Metroid Prime VR port's fix). A Vulkan multiview eye
+    // pass encoded while its pipelines are still building (draws skipped) faults the Quest 3's GPU
+    // (Adreno 740: "CP opcode error", VK_ERROR_DEVICE_LOST) in the first immersive frames; built at
+    // startup they are ready by then. A low-RAM device still builds them on first use.
+#if defined(__ANDROID__) && !defined(MP_ENABLE_OPENXR)
     if (!lazy) {
       lazy = true;
       std::strncat(why, ", Android", sizeof(why) - std::strlen(why) - 1);

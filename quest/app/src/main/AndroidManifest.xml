@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PrimedGun Echoes on Meta Quest. The OpenXR entries follow Wiicompiled VR's
+     working Quest manifest (and DolphinXR's before it). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The Khronos loader brokers the system OpenXR runtime through this permission. -->
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
+    <!-- SDL's haptics call Vibrator.cancel() unconditionally. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- The Archipelago client's WebSocket (ws:// only in this build). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Select Game copies the disc image in a foreground service that keeps the CPU awake. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <queries>
+        <provider android:authorities="org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runtime_broker" />
+        <intent>
+            <action android:name="org.khronos.openxr.OpenXRRuntimeService" />
+        </intent>
+        <intent>
+            <action android:name="org.khronos.openxr.OpenXRApiLayerService" />
+        </intent>
+    </queries>
+
+    <uses-feature android:name="android.hardware.vulkan.level" android:required="true" android:version="1" />
+    <uses-feature android:name="android.hardware.vulkan.version" android:required="true" android:version="0x00401000" />
+    <uses-feature android:name="android.hardware.vr.headtracking" android:required="true" android:version="1" />
+    <uses-feature android:name="android.software.xr.api.openxr" android:required="true" />
+    <!-- XR_FB_passthrough around the virtual screen: without this flag Horizon OS
+         keeps the app passthrough-disabled and the layer composites nothing. -->
+    <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+    <!-- Hand tracking declared optional, which the game does not use: Horizon OS then
+         launches it without the "pick up your controllers" check, so a start with
+         sleeping controllers (or from adb, for automated runs) goes straight in;
+         the controllers work as soon as they wake. -->
+    <uses-feature android:name="oculus.software.handtracking" android:required="false" android:version="1" />
+    <uses-permission android:name="com.oculus.permission.HAND_TRACKING" />
+    <uses-permission android:name="oculus.permission.handtracking" />
+
+    <application
+        android:allowBackup="false"
+        android:appCategory="game"
+        android:hasFragileUserData="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.PrimedGun.Vr">
+
+        <meta-data android:name="com.oculus.supportedDevices" android:value="quest2|quest3|quest3s|questpro" />
+        <meta-data android:name="com.oculus.vr.focusaware" android:value="true" />
+        <!-- With oculus.software.handtracking above: hand tracking is optional, not used. -->
+        <meta-data android:name="com.oculus.handtracking.version" android:value="V2.0" />
+        <!-- Let the runtime move CPU budget to the GPU (Quest 3 and 3S): 1 = one GPU level more and one
+             CPU level less, -1 the reverse. The eye passes are GPU-bound; the CPU has room. -->
+        <meta-data android:name="com.oculus.trade_cpu_for_gpu_amount" android:value="1" />
+
+        <!-- The launcher panel (PrimedGun's Quest launcher): settings, the game disc, Play.
+             The library starts it; Play starts the game below. -->
+        <activity
+            android:name=".launcher.LauncherActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode|density"
+            android:exported="true"
+            android:resizeableActivity="true"
+            android:theme="@style/Theme.PrimedGun.Main">
+            <!-- Horizon OS panel size. -->
+            <layout
+                android:defaultWidth="1024dp"
+                android:defaultHeight="640dp"
+                android:minWidth="760dp"
+                android:minHeight="520dp" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Copies the picked disc image into the user folder (launcher process). -->
+        <service
+            android:name=".launcher.DiscCopyService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- The game. Its own process, which PrimedGunVrActivity ends when the game
+             closes: SDLActivity cannot be created twice in one process, and the
+             OpenXR device must not start twice. Every configuration change is
+             handled in place for the same reason. -->
+        <activity
+            android:name=".PrimedGunVrActivity"
+            android:configChanges="density|fontScale|fontWeightAdjustment|grammaticalGender|keyboard|keyboardHidden|layoutDirection|locale|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode"
+            android:excludeFromRecents="false"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:preferMinimalPostProcessing="true"
+            android:process=":game"
+            android:resizeableActivity="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.PrimedGun.Vr">
+            <property
+                android:name="android.window.PROPERTY_XR_ACTIVITY_START_MODE"
+                android:value="XR_ACTIVITY_START_MODE_FULL_SPACE_UNMANAGED" />
+            <!-- No library entry: the launcher's Play starts it. Still exported, so adb
+                 can start it directly (Run-Quest.ps1). -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="com.oculus.intent.category.VR" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
