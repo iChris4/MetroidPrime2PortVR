@@ -1060,7 +1060,9 @@ int main(int argc, char** argv) {
   PortLogFile::AttachParentConsole();
 #endif
   if (argc == 2 && std::strcmp(argv[1], "--version") == 0) {
-    std::printf("Metroid Prime 2 native port %s (%s)\n", MP_BUILD_VERSION, MP_BUILD_REVISION);
+    // PrimedGun Echoes: its own version first, then upstream's.
+    std::printf("PrimedGun Echoes %s (Metroid Prime 2 native port %s, %s)\n", MP_PRIMEDGUN_VERSION,
+                MP_BUILD_VERSION, MP_BUILD_REVISION);
     return 0;
   }
   // Android first, before anything can print: from here on fd 1 and fd 2 reach logcat, which

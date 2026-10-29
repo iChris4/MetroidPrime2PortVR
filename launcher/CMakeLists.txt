@@ -1,0 +1,116 @@
+# PrimedGunEchoes.exe: PrimedGun's launcher window (from its Dolphin build's
+# DolphinQt/MainWindow.cpp, by way of the Metroid Prime VR fork) beside
+# metroid_prime2_port.exe. It edits the game's settings.cfg and starts the
+# game. Built with -DMP_BUILD_LAUNCHER=ON and Qt 6.5 or later on
+# CMAKE_PREFIX_PATH. Its version is PrimedGun Echoes' (MP_PRIMEDGUN_VERSION in
+# the root CMakeLists.txt).
+set(PRIMEDGUN_LAUNCHER_VERSION "${MP_PRIMEDGUN_VERSION}")
+
+find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
+
+# PrimedGun Echoes: no memory-card transfer (the game shares or mirrors a
+# Dolphin or PrimeHack card itself, F1 > System > Memory card), so no Aurora
+# card library; the Cannon Textures tab is not shown (its slots are Metroid
+# Prime's), so no shipped slot textures either.
+set(PRIMEDGUN_LAUNCHER_UI_SOURCES
+    ui/about_tab.cpp
+    ui/calibration_tab.cpp
+    ui/cannon_tab.cpp
+    ui/controller_tab.cpp
+    ui/controller_layout_dialog.cpp
+    ui/launcher_window.cpp
+    ui/layout_tab.cpp
+    ui/port_config_tab.cpp
+    ui/tab_context.cpp
+    ui/widgets.cpp)
+qt_add_executable(PrimedGunEchoes WIN32 main.cpp ${PRIMEDGUN_LAUNCHER_UI_SOURCES})
+qt_add_resources(PrimedGunEchoes "primedgun_assets"
+    PREFIX "/"
+    BASE assets
+    FILES
+        assets/PrimedGun.png
+        assets/controller_layout.png
+        assets/default_arm.png
+        assets/samus.png
+        assets/samus_arm.png)
+if(WIN32)
+    target_sources(PrimedGunEchoes PRIVATE PrimedGun.rc PrimedGun.manifest)
+endif()
+
+# Next to the game: the launcher finds the game, and the game's user folder
+# (platform/main.cpp DesktopUserFolder, mirrored in ui/tab_context.cpp), from
+# its own folder.
+set_target_properties(PrimedGunEchoes PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+if(MSVC)
+    # Qt's static entry-point library is built with /GL, which lld-link cannot
+    # read; the C runtime's own entry point calls main() just as well.
+    set_target_properties(PrimedGunEchoes PROPERTIES qt_no_entrypoint ON)
+    target_link_options(PrimedGunEchoes PRIVATE /ENTRY:mainCRTStartup)
+endif()
+target_compile_definitions(PrimedGunEchoes PRIVATE
+    PRIMEDGUN_LAUNCHER_VERSION="${PRIMEDGUN_LAUNCHER_VERSION}")
+# generated/port_build_info.h: MP_BUILD_REVISION for the About tab.
+add_dependencies(PrimedGunEchoes port_build_info)
+target_include_directories(PrimedGunEchoes PRIVATE
+    ui
+    "${PROJECT_BINARY_DIR}/generated"
+    ${PROJECT_SOURCE_DIR}/platform/include)
+target_link_libraries(PrimedGunEchoes PRIVATE primedgun_launcher_core Qt6::Widgets)
+if(WIN32)
+    target_link_libraries(PrimedGunEchoes PRIVATE shell32 ole32 advapi32)
+endif()
+
+# Qt's DLLs and platform plugin.
+if(WIN32 AND TARGET Qt6::windeployqt)
+    add_custom_command(TARGET PrimedGunEchoes POST_BUILD
+        COMMAND "$<TARGET_FILE:Qt6::windeployqt>" --release --no-translations
+            --no-compiler-runtime --no-opengl-sw --no-system-d3d-compiler
+            "$<TARGET_FILE:PrimedGunEchoes>"
+        COMMENT "Copying the Qt runtime next to PrimedGunEchoes.exe"
+        VERBATIM)
+endif()
+
+install(TARGETS PrimedGunEchoes RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+qt_generate_deploy_app_script(
+    TARGET PrimedGunEchoes
+    OUTPUT_SCRIPT primedgun_deploy_script
+    NO_TRANSLATIONS
+    NO_UNSUPPORTED_PLATFORM_ERROR)
+install(SCRIPT ${primedgun_deploy_script})
+
+if(MP_BUILD_TESTS)
+    add_executable(port_launcher_settings_sync_tests
+        ${PROJECT_SOURCE_DIR}/tests/port_launcher_settings_sync.cpp
+        ${PRIMEDGUN_LAUNCHER_UI_SOURCES})
+    add_dependencies(port_launcher_settings_sync_tests port_build_info)
+    target_include_directories(port_launcher_settings_sync_tests PRIVATE
+        ui "${PROJECT_BINARY_DIR}/generated" ${PROJECT_SOURCE_DIR}/platform/include)
+    target_compile_definitions(port_launcher_settings_sync_tests PRIVATE
+        PRIMEDGUN_LAUNCHER_VERSION="${PRIMEDGUN_LAUNCHER_VERSION}")
+    target_link_libraries(port_launcher_settings_sync_tests PRIVATE
+        primedgun_launcher_core Qt6::Widgets)
+    if(WIN32)
+        target_link_libraries(port_launcher_settings_sync_tests PRIVATE shell32 ole32 advapi32)
+    endif()
+    set_target_properties(port_launcher_settings_sync_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+    add_test(NAME port_launcher_settings_sync_tests COMMAND port_launcher_settings_sync_tests)
+    if(WIN32)
+        set_tests_properties(port_launcher_settings_sync_tests PROPERTIES LABELS port
+            ENVIRONMENT "QT_QPA_PLATFORM=windows" TIMEOUT 20)
+    else()
+        set_tests_properties(port_launcher_settings_sync_tests PROPERTIES LABELS port
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20)
+    endif()
+    add_executable(port_controller_layout_ui_tests
+        ${PROJECT_SOURCE_DIR}/tests/port_controller_layout_ui.cpp
+        ui/controller_layout_dialog.cpp ui/tab_context.cpp ui/widgets.cpp)
+    target_include_directories(port_controller_layout_ui_tests PRIVATE ui ${PROJECT_SOURCE_DIR}/platform/include)
+    target_link_libraries(port_controller_layout_ui_tests PRIVATE primedgun_launcher_core Qt6::Widgets)
+    set_target_properties(port_controller_layout_ui_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+    add_test(NAME port_controller_layout_ui_tests COMMAND port_controller_layout_ui_tests)
+    if(WIN32)
+        set_tests_properties(port_controller_layout_ui_tests PROPERTIES LABELS port ENVIRONMENT "QT_QPA_PLATFORM=windows;PRIMEDGUN_LAYOUT_TEST=1" TIMEOUT 20)
+    else()
+        set_tests_properties(port_controller_layout_ui_tests PROPERTIES LABELS port ENVIRONMENT "QT_QPA_PLATFORM=offscreen;PRIMEDGUN_LAYOUT_TEST=1" TIMEOUT 20)
+    endif()
+endif()

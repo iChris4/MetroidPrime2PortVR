@@ -17,6 +17,8 @@
 #include "port_save.h"
 #include "port_settings.h"
 #include "port_suit_colours.h"
+#include "port_textures.h"
+#include "port_utf8_path.h"
 #include "port_update_check.h"
 #include "port_video.h"
 
@@ -34,7 +36,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <mutex>
+
+#include <SDL3/SDL_timer.h>
 #include <sstream>
 #include <string>
 
@@ -594,6 +599,32 @@ bool sFrozen = false;
 // The text last read from or written to the file: SaveSettings writes only when SettingsText()
 // differs.
 std::string sBaseline;
+// PrimedGun Echoes: the file's time and size when it was last read or written (PollSettingsFile),
+// and when it was last looked at.
+std::filesystem::file_time_type sFileTime{};
+std::uintmax_t sFileSize = 0;
+uint64_t sPollMs = 0;
+
+// The settings file's time and size now; false when it cannot be seen.
+bool FileStamp(std::filesystem::file_time_type& time, std::uintmax_t& size) {
+  if (PortSettings::FilePath().empty()) {
+    return false;
+  }
+  const std::filesystem::path path = PortUtf8::FromUtf8(PortSettings::FilePath());
+  std::error_code ec;
+  time = std::filesystem::last_write_time(path, ec);
+  if (ec) {
+    return false;
+  }
+  size = std::filesystem::file_size(path, ec);
+  return !ec;
+}
+
+void NoteFileStamp() {
+  if (!FileStamp(sFileTime, sFileSize)) {
+    sFileSize = 0;
+  }
+}
 
 } // namespace
 
@@ -684,6 +715,7 @@ void LoadSettings() {
     ApplySettingsText(lines);
   }
   sBaseline = SettingsText();
+  NoteFileStamp();
   // Discord Rich Presence starts with the settings, not with the first F1 visit.
   PortDiscord::Configure(sDiscord);
   PortDebug::ApplyUpdateCheck();
@@ -765,6 +797,81 @@ void SaveSettings() {
   LogSettingChanges(sBaseline, text);
   std::fprintf(stderr, "port: saved settings to %s\n", PortSettings::FilePath().c_str());
   sBaseline = text;
+  NoteFileStamp();
+}
+
+// PrimedGun Echoes: a key another program (PrimedGun Echoes' launcher) changed in the file while
+// the game runs, stored as LoadSettings stores it; the overlay's per-frame appliers
+// (port_overlay.cpp Draw: vsync, MSAA, anisotropy, render scale) pick it up, and the vr_* keys go
+// to Aurora at once (vr_enabled waits for the next start). Only the keys the launcher edits; any
+// other keeps the game's value, which its next save writes back. False when the key was not
+// applied. (The Metroid Prime VR port's debug_ui/window.cpp ApplyChangedSetting.)
+static bool ApplyChangedSetting(const std::string& key, const std::string& value) {
+  if (key == "cannon_textures_applied") {
+    // A request rather than a setting (no save writes it back): the launcher copied cannon
+    // textures into the user pack.
+    PortTextures::RequestUserPackReload();
+    return true;
+  }
+  if (key.compare(0, 3, "vr_") == 0) {
+    return ApplySetting(key, value);
+  }
+  if (key == "fullscreen") {
+    ApplySetting(key, value);
+    PortOverlay::SetFullscreen(PortOverlay::Fullscreen());
+    return true;
+  }
+  if (key == "vsync" || key == "msaa" || key == "aniso" || key == "render_scale" ||
+      key == "quick_resume") {
+    return ApplySetting(key, value);
+  }
+  return false;
+}
+
+void PollSettingsFile(bool now) {
+  const uint64_t ms = SDL_GetTicks();
+  if (!now && ms - sPollMs < 250) {
+    return;
+  }
+  sPollMs = ms;
+  std::filesystem::file_time_type time;
+  std::uintmax_t size = 0;
+  if (!FileStamp(time, size)) {
+    return;
+  }
+  std::map< std::string, std::string > changed;
+  {
+    std::lock_guard< std::recursive_mutex > lock(sMutex);
+    if (!sLoaded || sFrozen || (time == sFileTime && size == sFileSize)) {
+      return;
+    }
+    std::string text;
+    if (!PortSettings::ReadFile(text)) {
+      return;
+    }
+    sFileTime = time;
+    sFileSize = size;
+    const std::map< std::string, std::string > known = SettingsValues(sBaseline);
+    for (const auto& [key, value] : SettingsValues(text)) {
+      const auto it = known.find(key);
+      if (it == known.end() || it->second != value) {
+        changed.emplace(key, value);
+      }
+    }
+  }
+  bool applied = false;
+  for (const auto& [key, value] : changed) {
+    if (ApplyChangedSetting(key, value)) {
+      applied = true;
+      std::fprintf(stderr, "port: %s=%s changed in the settings file, applied\n", key.c_str(),
+                   value.c_str());
+    }
+  }
+  if (applied) {
+    // What the file says is now in effect: the next save writes only what changes after this.
+    std::lock_guard< std::recursive_mutex > lock(sMutex);
+    sBaseline = SettingsText();
+  }
 }
 
 void MarkDirty() { sSettingsDirty = true; }

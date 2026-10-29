@@ -82,7 +82,7 @@ struct VrPadState {
     int wrist_hover = -1;
     unsigned wrist_owned = 0;
     bool visor_zone = false;    // the off hand is at the head: its stick is the D-pad
-    int visor_direction = -1;   // VisorDpad::Dir: 0 up (combat), 1 right (X-ray), 2 down (thermal), 3 left (scan)
+    int visor_direction = -1;   // VisorDpad::Dir: 0 up (combat), 1 right (echo), 2 down (dark), 3 left (scan)
     bool move_owned = false;    // directional movement has the move stick (VrMove::owns)
     bool move_moving = false;   // and the stick is past its deadzone
     float move_heading_degrees = 0.0f; // the heading's yaw from Samus's forward, positive right

@@ -9,6 +9,44 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Launcher: PrimedGunEchoes.exe (2026-10-29)
+
+PrimedGun v2's Qt launcher, adapted (`launcher/README.md` has the behaviour). Built with
+`-DMP_BUILD_LAUNCHER=ON` and Qt 6.5 on `CMAKE_PREFIX_PATH` (the PrimedGun Dolphin tree's
+`Externals/Qt/Qt6.5.1/x64` here). Version `MP_PRIMEDGUN_VERSION` (root `CMakeLists.txt`,
+`1.0.0-alpha.1`): the window title, the About tab, and the game's `--version`
+(`PrimedGun Echoes 1.0.0-alpha.1 (Metroid Prime 2 native port 0.6.0, <revision>)`).
+
+What changed from the Metroid Prime launcher:
+
+- `core/port_settings_file`: `settings.cfg`'s rules (a comment only at a line's start, `\n` line
+  ends); `core/launcher_keys`: Echoes' `quick_resume` (on by default), `aniso`, `render_scale` 0 =
+  the window's size, fullscreen off on the desktop, and Echoes' boolean reading for its own keys;
+  `core/disc_probe`: the four Echoes and Trilogy ids at revision 0, WIA and GCZ (GCZ on trust);
+  `core/primedgun_import`: `ReadPrimedGunV2Settings` (a PrimedGun v2 install's `vr_*` keys).
+- `ui/tab_context`: the game's user-folder rule mirrored (Echoes keeps it private to
+  `platform/main.cpp`), `metroid_prime2_port.exe`, `settings.cfg`, `metroid_prime2_port.log`,
+  `MP2_USER_TEXTURES`. `ui/launcher_window`: Echoes texts and formats; Import PrimedGun Settings in
+  place of the card transfer (the game shares or mirrors an emulator card itself, so no
+  `port_gci`); no Cannon Textures tab; Open Full Port Options writes `open_options.request` and,
+  with no game running, starts the game with the window open (no options-only start here).
+- Game side: `PortOverlaySettings::PollSettingsFile` (debug_ui/settings.cpp, from the overlay's
+  `Draw` and the VR menu) applies the launcher's keys changed in the file while the game runs (file
+  time and size, then the values against the last text read or written); the overlay's per-frame
+  appliers take MSAA, anisotropy, render scale and vsync from there, `fullscreen` goes through
+  `SetFullscreen`, `cannon_textures_applied` reloads the user pack. `port_overlay.cpp`
+  `PollOptionsRequest` opens the F1 window on `open_options.request` and logs it.
+- The VR controls' visor labels name Echoes' visors (D-pad right Echo, down Dark), in the bindings
+  table, the VR debug tab and the comments.
+
+Tests: `port_launcher_tests` (core, Echoes' cases: comment rule, quick resume, bool reading, discs,
+the PrimedGun v2 import), `port_launcher_settings_sync_tests` and `port_controller_layout_ui_tests`
+(the window; they open briefly on the desktop): 53 of 53 `port` tests pass with the launcher, 50 of
+50 without OpenXR. Checked by hand: the window opens as "PrimedGun Echoes v1.0.0-alpha.1"; a game
+run with `settings.cfg` edited at 9 s logs `msaa=4` and `vr_world_scale=2.25` applied, and an
+`open_options.request` opens F1 ("the launcher asked for the options; F1 window open"). The Quest
+panel (`launcher/jni`) is copied but not built: the Quest phase.
+
 ## Parity, part 8: particle billboards face the head (2026-10-29)
 
 `CElementGen`'s camera-plane quads turn to face the head about their own centres in the headset

@@ -155,6 +155,9 @@ void LogSettings();
 // read or saved.
 void SaveSettings();
 void MarkDirty();
+// PrimedGun Echoes: a few times a second (or at once with `now`), applies the keys PrimedGun
+// Echoes' launcher changed in the settings file while the game runs (debug_ui/settings.cpp).
+void PollSettingsFile(bool now);
 bool Dirty();
 // The disc image F1 > System > Disc image > Replace remembered for the next start; "" when none.
 // SetDiscPath marks the settings dirty; the caller saves them.

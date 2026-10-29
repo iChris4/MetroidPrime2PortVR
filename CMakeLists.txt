@@ -107,6 +107,11 @@ if(WIN32)
 endif()
 option(MP_ENABLE_OPENXR "Build OpenXR VR support (PrimedGun Echoes)" ${MP_ENABLE_OPENXR_DEFAULT})
 unset(MP_ENABLE_OPENXR_DEFAULT)
+# PrimedGun Echoes' release version: the launcher's title and About tab, and the game's --version.
+set(MP_PRIMEDGUN_VERSION "1.0.0-alpha.1")
+# PrimedGun Echoes' launcher (launcher/): a Qt 6 window beside the game. Needs Qt on
+# CMAKE_PREFIX_PATH (docs/PRIMEDGUN.md, "Launcher").
+option(MP_BUILD_LAUNCHER "Build the PrimedGun Echoes Qt launcher (PrimedGunEchoes.exe)" OFF)
 set(MP_OPENXR_SDK_DIR "" CACHE PATH
     "Optional OpenXR-SDK source tree; when empty, use a package or fetch the pinned SDK")
 
@@ -555,6 +560,8 @@ add_custom_target(port_build_info
     BYPRODUCTS "${CMAKE_BINARY_DIR}/generated/port_build_info.h"
     VERBATIM)
 add_dependencies(mp_port_entry port_build_info)
+# PrimedGun Echoes' version for --version.
+target_compile_definitions(mp_port_entry PRIVATE MP_PRIMEDGUN_VERSION="${MP_PRIMEDGUN_VERSION}")
 target_include_directories(mp_port_entry PRIVATE
     "${CMAKE_BINARY_DIR}/generated"
     platform/include
@@ -840,6 +847,16 @@ endforeach()
 # it is not behind BUILD_TESTING: some dependency of Aurora forces that variable to OFF
 # internally (build-port-link/CMakeCache.txt), so a condition on it would silently drop the
 # test.
+# PrimedGun Echoes: the launcher's Qt-free core (settings.cfg editing, the key table, the disc
+# check, the PrimedGun settings import), which port_launcher_tests checks, and the Qt window.
+add_subdirectory(launcher/core)
+if(MP_BUILD_LAUNCHER)
+    # Its Qt UI tests (launcher/CMakeLists.txt) register with CTest from that folder.
+    enable_testing()
+    set(MP_BUILD_TESTS ON)
+    add_subdirectory(launcher)
+endif()
+
 if(AURORA_SDL3_TARGET)
     enable_testing()
     # Every F1 row is in platform/port_settings_index.inc (the settings search) and every settings key
@@ -1054,6 +1071,9 @@ if(AURORA_SDL3_TARGET)
     endforeach()
     mp_port_test(port_vr_policy_tests SOURCES tests/port_vr_policy.cpp platform/vr/prime_vr_policy.cpp
         INCLUDES platform/include extern/aurora/include extern/aurora/lib)
+    mp_port_test(port_launcher_tests SOURCES tests/port_launcher.cpp
+        INCLUDES platform/include LIBRARIES primedgun_launcher_core
+        ARGS "${CMAKE_CURRENT_BINARY_DIR}/launcher-test-data")
     if(MP_ENABLE_OPENXR AND MP_OPENXR_TARGET)
         mp_port_test(port_vr_panel_pose_tests SOURCES tests/port_vr_panel_pose.cpp
             INCLUDES platform/include DEFINITIONS MP_ENABLE_OPENXR)

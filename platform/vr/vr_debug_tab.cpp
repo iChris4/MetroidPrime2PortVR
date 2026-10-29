@@ -46,9 +46,9 @@ const char* VisorDirectionName(int direction) {
   case 0:
     return "up (combat)";
   case 1:
-    return "right (X-ray)";
+    return "right (echo)";
   case 2:
-    return "down (thermal)";
+    return "down (dark)";
   case 3:
     return "left (scan)";
   default:
@@ -316,7 +316,7 @@ void DrawVrDebugTab() {
   changed |= ImGui::Checkbox("Off-hand visor wristband", &s.wrist_visor_enabled);
   changed |= ImGui::Checkbox("Pick visors with the off hand next to the head", &s.xr_dpad_enabled);
   ImGui::TextWrapped("Hold the off-hand controller beside the headset and push its stick: up combat, left scan, "
-                     "down thermal, right X-ray. Meanwhile that stick does not move Samus.");
+                     "down dark, right echo. Meanwhile that stick does not move Samus.");
   changed |= ImGui::SliderFloat("Head zone radius", &s.xr_dpad_head_radius, 0.05f, 0.6f, "%.2f m");
   changed |= ImGui::SliderFloat("Head zone below", &s.xr_dpad_head_y_below, 0.0f, 0.6f, "%.2f m");
   changed |= ImGui::SliderFloat("Gesture stick deadzone", &s.xr_dpad_deadzone, 0.05f, 0.95f, "%.2f");

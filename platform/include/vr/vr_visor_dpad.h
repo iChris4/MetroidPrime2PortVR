@@ -4,7 +4,7 @@
 // NativeRuntime.cpp: LeftControllerNearHead, StickToDpad, UpdateXrDpad). Hold
 // the off-hand controller next to the headset and its stick becomes the
 // GameCube D-pad, which the game's own control map turns into visors: up
-// combat, left scan, down thermal, right X-ray. While the hand is there its
+// combat, left scan, down dark, right echo (Echoes). While the hand is there its
 // stick no longer moves or turns Samus.
 //
 // PrimedGun fed the D-pad by poking CFinalInput and needed its "XR Visor D-Pad

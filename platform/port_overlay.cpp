@@ -36,6 +36,10 @@
 #include "MetroidPrime/Player/CGameState.hpp"
 
 #include <SDL3/SDL.h>
+#include <filesystem>
+
+#include "port_settings.h"
+#include "port_utf8_path.h"
 #include <aurora/aurora.h>
 #include <aurora/gfx.h>
 #include <dolphin/vi.h>
@@ -1656,9 +1660,42 @@ void ApplyLanguage() {
   }
 }
 
+// PrimedGun Echoes: the launcher's "Open Full Port Options" (launcher/ui/launcher_window.cpp
+// OpenPortOptions) leaves open_options.request in the user folder; it opens (never toggles shut)
+// the F1 window and brings the game's window forward. Desktop only.
+void PollOptionsRequest() {
+#if !defined(PORT_MOBILE)
+  static uint64_t nextPoll = 0;
+  if (SDL_GetTicks() < nextPoll || PortSettings::FilePath().empty()) {
+    return;
+  }
+  nextPoll = SDL_GetTicks() + 250;
+  std::error_code ec;
+  const std::filesystem::path request =
+      PortUtf8::FromUtf8(PortSettings::FilePath()).parent_path() / "open_options.request";
+  if (!std::filesystem::remove(request, ec)) {
+    return;
+  }
+  if (!sVisible) {
+    Toggle();
+  }
+  std::fprintf(stderr, "port: the launcher asked for the options; F1 window %s\n",
+               sVisible ? "open" : "still closed");
+  int count = 0;
+  SDL_Window** windows = SDL_GetWindows(&count);
+  if (windows != nullptr && count > 0) {
+    SDL_RestoreWindow(windows[0]);
+    SDL_RaiseWindow(windows[0]);
+  }
+  SDL_free(windows);
+#endif
+}
+
 void Draw() {
   TickFps();
   ApplyLanguage();
+  PortOverlaySettings::PollSettingsFile(false);
+  PollOptionsRequest();
   if (const int milli = sPendingWheelMilli.exchange(0, std::memory_order_relaxed); milli != 0) {
     ImGui::GetIO().AddMouseWheelEvent(0.f, static_cast< float >(milli) / 1000.f);
   }

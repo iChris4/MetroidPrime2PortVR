@@ -15,7 +15,7 @@ inline constexpr std::array<screen_math::Vec3, 4> Centers{{
     {0.f, 0.035f, 0.06f}, {0.f, 0.035f, 0.11f},
     {0.f, 0.035f, 0.16f}, {0.f, 0.035f, 0.21f}}};
 // Slots run from wrist (right end) towards forearm (left end).
-// Viewed left to right: X-ray, Thermal, Scan, Combat.
+// Viewed left to right: Echo, Dark, Scan, Combat (Metroid Prime: X-ray, Thermal).
 // Values are CPlayerState::EPlayerVisor indices, independent of their position.
 inline constexpr std::array<int, 4> VisorForSlot{0, 2, 3, 1};
 inline unsigned SlotMask(unsigned visors) {

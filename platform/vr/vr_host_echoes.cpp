@@ -119,8 +119,8 @@ void MarkSettingsDirty() { PortOverlaySettings::MarkDirty(); }
 
 void SaveSettingsNow() { PortOverlaySettings::SaveSettings(); }
 
-// The launcher's live edits come in Phase 5 (docs/PRIMEDGUN.md); the file is read at start-up.
-void PollSettingsFile(bool) {}
+// The launcher's live edits (debug_ui/settings.cpp PollSettingsFile).
+void PollSettingsFile(bool now) { PortOverlaySettings::PollSettingsFile(now); }
 
 // As the desktop toast (platform/debug_ui/video.cpp DrawShaderCompilationToast): while the queue the
 // pipeline cache filled at start-up drains, after half a second, the count since then.
