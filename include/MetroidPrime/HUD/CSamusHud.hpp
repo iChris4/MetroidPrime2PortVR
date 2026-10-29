@@ -83,6 +83,10 @@ public:
   void UpdateHudMemo(float dt, const CStateManager& mgr);
   void UpdateHudFrame(float dt, const CStateManager& mgr);
   void DrawHudMemo() const;
+#ifdef TARGET_PC
+  // PortVr: the morph ball's HUD is up (or coming up): the headset lays it on a screen ahead.
+  bool PortVrBallHudShown() const { return mNextState == kHS_Ball; }
+#endif
   void DrawHelmet(const CStateManager& mgr, float cameraYOffset) const;
   void ProcessControllerInput(const CFinalInput& input);
   void PrepareScanDisplay(const CStateManager& mgr, int playerIndex);

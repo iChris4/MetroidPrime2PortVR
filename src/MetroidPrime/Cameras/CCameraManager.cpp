@@ -42,6 +42,7 @@
 #include "port_mouse.h"
 #include "port_presentation_rules.h"
 #include "port_timing.h"
+#include "vr/vr_view.h"
 #include <math.h>
 #endif
 
@@ -64,6 +65,8 @@ CTransform4f sCurrentCameraTransform = CTransform4f::Identity();
 // Squared translation of the current camera over the last tick.
 float sCameraLastStep2 = 0.f;
 float sPresentationInterpolation = -1.f;
+// PortVr: a snap turn asked for the next Update to be a cut (CCameraManager::PortCutNextUpdate).
+bool sPortCutNextUpdate = false;
 
 CTransform4f InterpolateCameraTransform(const CTransform4f& previous, const CTransform4f& current,
                                         float t) {
@@ -96,6 +99,40 @@ bool PortPresentedLookRotation(float t, CTransform4f& rotation) {
   rotation = CTransform4f::RotateZ(CRelAngle::FromRadians(dyaw)) * camRot *
              CTransform4f::RotateX(CRelAngle::FromRadians(dpitch)) * camRot.GetInverse();
   return true;
+}
+
+// PortVr (PrimedGun's ball camera level patch): while the headset runs, the morph ball's camera
+// keeps its yaw and position but loses the game's pitch and roll (the head supplies the tilt), the
+// yaw the head had when the ball began is taken out once (stereo adds it back), and the stand-up
+// view keeps the base it had when the unmorph began. Every view gets the room-scale offset.
+// Player 0 only: the headset is one player's.
+CTransform4f PortVrLevelBallCamera(const CCameraManager& cameras, const CStateManager& mgr,
+                                   int playerIndex, const CTransform4f& xf) {
+  const CPlayer* player = playerIndex == 0 ? mgr.GetPlayer(0) : nullptr;
+  if (player == nullptr) {
+    return xf;
+  }
+  if (PortVr::VrImmersive() && !cameras.IsInCinematicCamera() &&
+      player->GetMorphballTransitionState() != CPlayer::kMS_Unmorphed) {
+    CVector3f right = xf.GetRight();
+    right[kDZ] = 0.f;
+    if (!right.CanBeNormalized()) {
+      CVector3f forward = xf.GetForward();
+      forward[kDZ] = 0.f;
+      right = CVector3f::Cross(forward, CVector3f::Up());
+    }
+    if (!right.CanBeNormalized()) {
+      right = CVector3f(1.f, 0.f, 0.f);
+    }
+    right.Normalize();
+    if (player->GetMorphballTransitionState() == CPlayer::kMS_Unmorphing) {
+      return PortVr::VrRoomScaleCameraTransform(PortVr::VrUnmorphCameraBase(xf));
+    }
+    return PortVr::VrRoomScaleCameraTransform(PortVr::VrBallCameraBaseTransform(
+        CTransform4f::FromColumns(right, CVector3f::Cross(CVector3f::Up(), right), CVector3f::Up(),
+                     xf.GetTranslation())));
+  }
+  return PortVr::VrRoomScaleCameraTransform(xf);
 }
 } // namespace
 
@@ -278,7 +315,14 @@ const CGameCamera* CCameraManager::GetCurrentCamera(const CStateManager& mgr, bo
 void CCameraManager::SetCurrentCameraId(TUniqueId uid, CStateManager& mgr) { mCurCameraId = uid; }
 
 void CCameraManager::UpdateAudioListener(CStateManager& mgr) {
+#ifdef TARGET_PC
+  // PortVr: directional audio follows the head, not the body.
+  const CTransform4f xf = mPlayerIndex == 0
+                              ? PortVr::VrHeadViewTransform(GetCurrentCameraTransform(mgr, true))
+                              : GetCurrentCameraTransform(mgr, true);
+#else
   const CTransform4f xf = GetCurrentCameraTransform(mgr, true);
+#endif
   CSfxManager::UpdateListener(xf.GetTranslation(), CVector3f::Zero(), xf.GetForward(), xf.GetUp(),
                               CAudioSys::kMaxVolume, mPlayerIndex);
 }
@@ -441,11 +485,12 @@ void CCameraManager::Update(float dt, CStateManager& mgr) {
       (currentTransform.GetTranslation() - previousTransform.GetTranslation()).MagSquared();
   const bool sameCamera = hadPrevious && sCameraSnapshotOwner == this && previousId == currentId;
   const bool discontinuity =
-      PortIsTeleport(step2, sameCamera ? sCameraLastStep2 : 0.f) ||
+      sPortCutNextUpdate || PortIsTeleport(step2, sameCamera ? sCameraLastStep2 : 0.f) ||
       (!PortMouseLookIsFree(mgr, mPlayerIndex) &&
        fabsf(CQuaternion::Dot(previousRotation, currentRotation)) < 0.9238795f);
   sCameraLastStep2 = sameCamera ? step2 : 0.f;
   sPreviousCameraTransform = (!sameCamera || discontinuity) ? currentTransform : previousTransform;
+  sPortCutNextUpdate = false;
   sCurrentCameraTransform = currentTransform;
   sCameraSnapshotOwner = this;
   sCameraSnapshotId = currentId;
@@ -554,13 +599,19 @@ CTransform4f CCameraManager::GetCurrentCameraTransform(const CStateManager& mgr,
         latest = look * latest.GetRotation();
       }
       latest.SetTranslation(presentation.GetTranslation());
-      return latest;
+      return PortVrLevelBallCamera(*this, mgr, mPlayerIndex, latest);
     }
-    return presentation;
+    return PortVrLevelBallCamera(*this, mgr, mPlayerIndex, presentation);
   }
 #endif
   const CGameCamera* camera = GetCurrentCamera(mgr, selector);
+#ifdef TARGET_PC
+  return PortVrLevelBallCamera(
+      *this, mgr, mPlayerIndex,
+      camera->GetTransform() * CTransform4f::Translate(mCameraShakeManager->GetTranslation(mgr)));
+#else
   return camera->GetTransform() * CTransform4f::Translate(mCameraShakeManager->GetTranslation(mgr));
+#endif
 }
 
 #ifdef TARGET_PC
@@ -576,6 +627,7 @@ bool CCameraManager::PortLookIsFree(const CStateManager& mgr, int playerIndex) {
 
 void CCameraManager::SetPresentationInterpolation(float t) { sPresentationInterpolation = t; }
 float CCameraManager::GetPresentationInterpolation() { return sPresentationInterpolation; }
+void CCameraManager::PortCutNextUpdate() { sPortCutNextUpdate = true; }
 #endif
 CVector3f CCameraManager::GetGlobalCameraTranslation(const CStateManager& mgr,
                                                      bool selector) const {

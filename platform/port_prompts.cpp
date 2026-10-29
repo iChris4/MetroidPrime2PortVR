@@ -9,6 +9,9 @@
 
 #include "input/port_input_devices.h"
 #include "port_textures.h"
+#if defined(MP_ENABLE_OPENXR)
+#include "vr/vr_pad.h"
+#endif
 
 #include <dolphin/gx.h>
 #include <dolphin/pad.h>
@@ -844,6 +847,13 @@ const char* ActiveDevice() {
   if (const char* forced = PortOverlay::PromptGlyphs()) {
     return forced;
   }
+#if defined(MP_ENABLE_OPENXR)
+  // PortVr: the PrimedGun pad is the GameCube pad it emulates, while it owns port 0. It sends no
+  // SDL events, so the last keyboard or pad touched would otherwise pick the icons.
+  if (PortVr::VrPadOwnsPort0()) {
+    return "gamecube";
+  }
+#endif
   switch (sActiveInput.load(std::memory_order_relaxed)) {
   case ActiveInput::Keyboard:
     return "keyboard";

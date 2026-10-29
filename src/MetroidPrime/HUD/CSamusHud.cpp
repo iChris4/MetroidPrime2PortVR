@@ -42,6 +42,9 @@
 #include "port_entry.h"
 #include "port_overlay.h"
 #include "port_radial.h"
+#include "vr/vr_view.h"
+#include <aurora/gfx.h>
+#include <dolphin/gx.h>
 #endif
 #include "MetroidPrime/SFX/UI.h"
 #include "MetroidPrime/SFX/UI2.h"
@@ -2555,7 +2558,14 @@ void CSamusHud::Draw(const CStateManager& mgr, float alpha, uint helmetVisibilit
     DrawPlayerFilter(mgr);
     mStaticFilter.Draw();
     if (targetingVisible) {
+#ifdef TARGET_PC
+      // PortVr: the reticle sits on its target in the world, not on the helmet.
+      AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+#endif
       mTargetingManager.Draw(mgr, false);
+#ifdef TARGET_PC
+      AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED);
+#endif
     }
   }
 #ifdef TARGET_PC
@@ -2571,7 +2581,24 @@ void CSamusHud::Draw(const CStateManager& mgr, float alpha, uint helmetVisibilit
                                     CCameraFilterPass::kFS_CookieCutterDepthRandomStatic,
                                     CColor::White(), nullptr, 1.f - alpha);
     }
+#ifdef TARGET_PC
+    // PortVr: the morph ball's HUD is laid out for the whole picture, so head-locked it would
+    // cover each eye's image and put its gauges at the lens edges. The headset lays it on a screen
+    // ahead instead: placed where the head faces when it comes up and then held
+    // (CInGameGuiManager::Update holds the anchor), or with vr_floating_hud a detached plane that
+    // eases toward the headset's pose.
+    const bool vrBallScreen = PortVrBallHudShown();
+    if (vrBallScreen) {
+      AuroraSetStereoDrawRoute(PortVr::VrFloatingHud() ? AURORA_STEREO_ROUTE_FLOATING_HUD
+                                                       : AURORA_STEREO_ROUTE_ANCHORED_SCREEN);
+    }
+#endif
     mLoadedHudFrame->Draw(CGuiWidgetDrawParms(hudAlpha, CVector3f::Zero()));
+#ifdef TARGET_PC
+    if (vrBallScreen) {
+      AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED);
+    }
+#endif
   }
   if (!mScanInterface.null()) {
     mScanInterface->Draw(mgr);

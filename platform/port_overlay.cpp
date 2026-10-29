@@ -6,6 +6,9 @@
 // Built by `mp_port_audio` (it needs ImGui, which Aurora brings in with SDL).
 
 #include "port_mobile.h"
+#if defined(MP_ENABLE_OPENXR)
+#include "vr/vr_pad.h"
+#endif
 #include "port_overlay.h"
 #include "port_discord.h"
 
@@ -1797,6 +1800,12 @@ const char* PromptGlyphs() {
 
 bool SwapVisors() {
   ReadEnv();
+#if defined(MP_ENABLE_OPENXR)
+  // PortVr: the visor gesture sends the retail D-pad directions.
+  if (PortVr::VrPadOwnsPort0()) {
+    return false;
+  }
+#endif
   return !OriginalExperience() && EnvBool("MP2_SWAP_VISORS", sSwapVisors);
 }
 

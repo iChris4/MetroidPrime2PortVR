@@ -79,6 +79,11 @@ public:
   void SetHudO2WTransform(const CTransform4f& xf, const CVector3f& idlePos);
   // The drawn screen tangent of unlagged tangent `tangent` at view depth `depth`.
   float GetLaggedTangent(float tangent, float depth) const;
+  // PortVr: the tangents of the half angles the perspective view the last Draw set up spans across
+  // and up (after the aspect match); zero for an orthographic camera or before the first Draw. The
+  // headset lays the HUD's 2D draws on a plane spanning the same angles (CInGameGuiManager::Draw).
+  float GetDrawTanHalfWidth() const { return mDrawTanX; }
+  float GetDrawTanHalfHeight() const { return mDrawTanY; }
 #endif
   UCameraParms GetParms() const { return mCameraParms; }
   void SetParms(const UCameraParms& parms) { mCameraParms = parms; }
@@ -98,6 +103,8 @@ private:
   mutable CTransform4f mSpreadView = CTransform4f::Identity();
   CTransform4f mSpreadLag = CTransform4f::Identity();
   CTransform4f mSpreadLagInv = CTransform4f::Identity();
+  mutable float mDrawTanX = 0.f;
+  mutable float mDrawTanY = 0.f;
 #endif
 };
 CHECK_SIZEOF(CGuiCamera, 0xd8)

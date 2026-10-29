@@ -11,6 +11,9 @@
 #include "port_radial.h"
 
 #include "port_overlay_internal.h"
+#if defined(MP_ENABLE_OPENXR)
+#include "vr/vr_pad.h"
+#endif
 
 #include <SDL3/SDL.h>
 
@@ -231,13 +234,25 @@ void PointerAimScale(float& sx, float& sy) {
   sy = PortMouse::PointerUnitsPerCount(static_cast< float >(height), sSensitivity);
 }
 
+// PortVr: the PrimedGun pad is the GameCube pad it emulates, so while it owns port 0 the desktop's
+// direct aim stands down: twin stick would eat its C-stick (the beam wheel's pulse, the morph
+// ball's right stick), and direct aim would turn the look stick's turn into a strafe and switch off
+// the snap turn and directional movement. The head and the tracked cannon aim instead.
+bool VrOwnsAim() {
+#if defined(MP_ENABLE_OPENXR)
+  return PortVr::VrPadOwnsPort0();
+#else
+  return false;
+#endif
+}
+
 } // namespace
 
 namespace PortMouse {
 
 bool Enabled() {
   ReadEnv();
-  return sEnabled;
+  return sEnabled && !VrOwnsAim();
 }
 
 void SetEnabled(bool enabled) {
@@ -250,7 +265,7 @@ void SetEnabled(bool enabled) {
 
 bool StickEnabled() {
   ReadEnv();
-  return sStickEnabled;
+  return sStickEnabled && !VrOwnsAim();
 }
 
 void SetStickEnabled(bool enabled) {
@@ -319,7 +334,7 @@ void AddStickAim(float x, float y, float dt) {
 
 bool TouchEnabled() {
   ReadEnv();
-  return sTouchEnabled.load();
+  return sTouchEnabled.load() && !VrOwnsAim();
 }
 
 void SetTouchEnabled(bool enabled) {
@@ -743,7 +758,7 @@ void Reset() {
   SetCapture(false);
 }
 
-bool Aiming() { return sAiming; }
+bool Aiming() { return sAiming && !VrOwnsAim(); }
 bool Initialized() { return sAim.initialized; }
 float Yaw() { return sAim.yaw; }
 float Pitch() { return sAim.pitch; }

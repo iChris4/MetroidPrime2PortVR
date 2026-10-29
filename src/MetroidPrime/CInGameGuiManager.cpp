@@ -49,7 +49,10 @@
 #include "port_overlay.h"
 #include "port_pointer.h"
 #include "GuiSys/CGuiModel.hpp"
+#include "vr/vr_pad.h"
+#include "vr/vr_view.h"
 #include <algorithm>
+#include <aurora/gfx.h>
 #include <float.h>
 #endif
 #include "MetroidPrime/SFX/UI.h"
@@ -301,7 +304,10 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
       // repeated rather than wrapped, so the matching build's bytes for it do not change.
       if (!PortOverlay::HideHelmet() && !PortFreeCam::Active()) {
         CGraphics::SetDepthRange(1.f / 512.f, 1.f / 256.f);
+        // PortVr: the helmet frame is drawn in its GUI camera's space: head-locked.
+        AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED);
         mSamusHud->DrawHelmet(mgr, 0.f);
+        AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
       }
 #else
       CGraphics::SetDepthRange(1.f / 512.f, 1.f / 256.f);
@@ -314,6 +320,22 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
     if (mgr.GetPlayer(mPlayerIndex)->GetMorphballTransitionState() == CPlayer::kMS_Unmorphed) {
       mSamusHud->GetTargetingManager().Draw(mgr, true);
     }
+#ifdef TARGET_PC
+    // PortVr: the visor, the faceplate and the HUD are drawn in the GUI camera's own space, so the
+    // headset keeps them in front of the head; the reticle above stays in the world (CSamusHud::Draw
+    // routes its own reticle draw the same way). The scan window's and the visors' orthographic
+    // draws are laid on a plane in front of the head spanning the same angles as the HUD camera's
+    // view, at the depth of the HUD's body (its widgets sit about twenty units from the camera).
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED);
+    if (const CGuiFrame* vrHudFrame = mSamusHud->GetLoadedHudFrame()) {
+      const CGuiCamera* vrHudCamera = vrHudFrame->GetFrameCamera();
+      if (vrHudCamera != nullptr && vrHudCamera->GetDrawTanHalfWidth() > 0.f) {
+        static const float kHudBodyDepth = 20.f;
+        AuroraSetStereoHeadLockedPlane(vrHudCamera->GetDrawTanHalfWidth(),
+                                       vrHudCamera->GetDrawTanHalfHeight(), kHudBodyDepth);
+      }
+    }
+#endif
     CGraphics::SetDepthRange(1.f / 64.f, 1.f / 32.f);
     const CPlayer::EPlayerMorphBallState morphState =
         mgr.GetPlayer(mPlayerIndex)->GetMorphballTransitionState();
@@ -352,6 +374,13 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
       mSamusHud->DrawHudMemo();
 #endif
     }
+#ifdef TARGET_PC
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+    // PortVr: the wrist visor display, after the visor's own draws, in the world (tracked hand).
+    if (mPlayerIndex == 0) {
+      PortVr::VrWristVisorDraw(mgr);
+    }
+#endif
   }
 
   const bool preDrawBlur =
@@ -365,6 +394,16 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
       (!inTurret || mPrevState == kIGGS_MapScreen || mNextState == kIGGS_MapScreen) &&
       (mPauseScreenBlur->IsGameDraw() || mPrevState == kIGGS_MapScreen ||
        mNextState == kIGGS_MapScreen) && mgr.GetPendingDockArea() == kInvalidAreaId) {
+#ifdef TARGET_PC
+    // PortVr: the minimap is drawn in the HUD frame camera's space: head-locked, or on the morph
+    // ball HUD's screen with it (CSamusHud::Draw), where it keeps its place in the ball's layout.
+    if (mSamusHud->PortVrBallHudShown()) {
+      AuroraSetStereoDrawRoute(PortVr::VrFloatingHud() ? AURORA_STEREO_ROUTE_FLOATING_HUD
+                                                       : AURORA_STEREO_ROUTE_ANCHORED_SCREEN);
+    } else {
+      AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED);
+    }
+#endif
     const CPlayerState& playerState = *mgr.GetPlayerState(mPlayerIndex);
     float mapAlpha = 1.f;
     if (playerState.GetCurrentVisor() == CPlayerState::kPV_Scan) {
@@ -428,6 +467,9 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
     if (model != nullptr) {
       model->SetIsVisible(false);
     }
+#ifdef TARGET_PC
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+#endif
   }
   if (!preDrawBlur) {
     mPauseScreenBlur->Draw(mgr);
@@ -505,6 +547,14 @@ void CInGameGuiManager::Update(const CStateManager& mgr, float dt, CRandom16& ra
                                CArchitectureQueue& queue, bool cameraActive) {
   const bool pendingDock = mgr.GetPendingDockArea() != kInvalidAreaId;
   EnsureStates(mgr);
+#ifdef TARGET_PC
+  if (mPlayerIndex == 0) {
+    // PortVr: the map, pause, logbook, save, message and quit screens take the VR controllers'
+    // plain GameCube layout, where A confirms (in the gameplay one A is the weapon trigger).
+    PortVr::VrNoteInGameMenu(InGameGuiStates::IsPausedState(mPrevState) ||
+                             InGameGuiStates::IsPausedState(mNextState) || !mQuitScreen.null());
+  }
+#endif
   if (!mQuitScreen.null()) {
     const EQuitAction action = mQuitScreen->Update(dt, const_cast< CStateManager& >(mgr));
     if (action == kQA_Yes) {
@@ -588,6 +638,18 @@ void CInGameGuiManager::Update(const CStateManager& mgr, float dt, CRandom16& ra
     player.SetViewportScaleX(scaleX);
     player.SetViewportScaleY(scaleY);
   }
+#ifdef TARGET_PC
+  if (mPlayerIndex == 0) {
+    if (PortVr::VrRemoveCinematicBars()) {
+      // PortVr: a shrunken viewport squeezes the world into a band of each eye.
+      player.SetViewportScaleX(1.f);
+      player.SetViewportScaleY(1.f);
+    }
+    // PortVr: the morph ball HUD's screen (AURORA_STEREO_ROUTE_ANCHORED_SCREEN) is placed where
+    // the head faces when the HUD comes up and held while it stays, unless it floats.
+    aurora_set_stereo_screen_anchor(!PortVr::VrFloatingHud() && mSamusHud->PortVrBallHudShown());
+  }
+#endif
   mPauseScreenBlur->Update(dt, mgr, mDumpedTextures.empty());
 
   if (mPrevState == kIGGS_PauseSaveGame && mNextState == kIGGS_PauseSaveGame) {

@@ -31,6 +31,7 @@
 #ifdef TARGET_PC
 #include "port_mouse.h"
 #include "port_overlay.h"
+#include "vr/vr_view.h"
 #endif
 
 #include "MetroidPrime/CAnimData.hpp"
@@ -1486,6 +1487,26 @@ void CPlayer::PrepareToEnterMorphBallState(float dt, CStateManager& mgr) {
 }
 
 void CPlayer::BeginMorphTransition(float dt, CStateManager& mgr, EPlayerMorphBallState state) {
+#ifdef TARGET_PC
+  if (mgr.GetPlayer(0) == this) {
+    // PortVr: the morph animation and the ball camera start from the heading the head had. Taken
+    // before the body turns: stereo still adds the head's yaw on top of the camera.
+    PortVr::VrBeginBallCamera(mCameraManager->GetCurrentCameraTransform(mgr, false));
+    const CVector3f facing = PortVr::VrBallCameraEntryDirection();
+    if (PortVr::VrImmersive() && !mCameraManager->IsInCinematicCamera() &&
+        facing.CanBeNormalized()) {
+      SetTransform(CTransform4f::LookAt(GetTranslation(), GetTranslation() + facing, CVector3f::Up()));
+      // Her first visible transition frame already faces the headset's way; the render blend
+      // must not ease from the old, hidden heading.
+      PortSnapshotRenderTransform();
+      // The ball camera starts from the first-person camera's transform (SetState, the to-ball
+      // spline): give it the same heading.
+      CFirstPersonCamera* firstPerson = mCameraManager->FirstPersonCamera();
+      const CVector3f eye = firstPerson->GetTranslation();
+      firstPerson->SetTransform(CTransform4f::LookAt(eye, eye + facing, CVector3f::Up()));
+    }
+  }
+#endif
   SetIntoBallReadyAnimation(dt, state);
   SetMomentumWR(CVector3f::Zero());
   SetMorphBallState(kMS_Morphing, state);
@@ -1584,6 +1605,14 @@ bool CPlayer::PrepareToLeaveMorphBallState(float dt, CStateManager& mgr,
       }
     }
   }
+#ifdef TARGET_PC
+  if (PortVr::VrImmersive() && mgr.GetPlayer(0) == this) {
+    // PortVr: the stand-up model faces the headset's way, not retail's movement or hint
+    // direction. The unmorph camera keeps its own base (VrBeginUnmorphCamera).
+    SetTransform(PortVr::VrUnmorphFacingTransform(GetTransform()));
+    PortSnapshotRenderTransform();
+  }
+#endif
   const bool immediate = !transitionCamera->TransitionFromMorphBallState(mgr);
   mCameraManager->SetPlayerCamera(mgr, transitionCamera->GetUniqueId());
   if (immediate) {
@@ -1594,6 +1623,13 @@ bool CPlayer::PrepareToLeaveMorphBallState(float dt, CStateManager& mgr,
 }
 
 void CPlayer::BeginUnmorphTransition(float dt, CStateManager& mgr, EPlayerMorphBallState state) {
+#ifdef TARGET_PC
+  if (PortVr::VrImmersive() && mgr.GetPlayer(0) == this) {
+    // PortVr: the stand-up view keeps the ball view's base and glides to the eye.
+    PortVr::VrBeginUnmorphCamera(mCameraManager->GetCurrentCameraTransform(mgr, false),
+                                 GetEyePosition());
+  }
+#endif
   SetMorphBallState(kMS_Unmorphing, state);
   SetOutOfBallReadyAnimation(dt, mgr);
   mMorphBall->LeaveMorphBallState(mgr);
@@ -1638,6 +1674,14 @@ void CPlayer::EnterMorphBallState(CStateManager& mgr, EPlayerMorphBallState stat
 }
 
 void CPlayer::LeaveMorphBallState(CStateManager& mgr) {
+#ifdef TARGET_PC
+  if (PortVr::VrImmersive() && mMorphBallState == kMS_Unmorphing && mgr.GetPlayer(0) == this) {
+    // PortVr: the stand-up model is hidden now. The body takes the unmorph view's base before
+    // first person adds the head's rotation, so the view the unmorph ended on stays.
+    SetTransform(PortVr::VrUnmorphCameraBase(GetTransform()));
+    PortSnapshotRenderTransform();
+  }
+#endif
   AddMaterial(kMT_GroundCollider, mgr);
   AddMaterial(kMT_Orbit, kMT_Target, mgr);
   SetMomentumWR(CVector3f::Zero());

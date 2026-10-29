@@ -15,6 +15,9 @@
 #include "MetroidPrime/ScriptObjects/CScriptPathCamera.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptTrigger.hpp"
 #include "MetroidPrime/TCastTo.hpp"
+#ifdef TARGET_PC
+#include "vr/vr_view.h"
+#endif
 
 CCameraHintManager::CCameraHintManager(int playerIndex, const rstl::string& name)
 : CHintManager(playerIndex, name) {}
@@ -217,7 +220,15 @@ void CCameraHintManager::ClearHint(CStateManager& mgr, bool areaChanged) {
       TCastToPtr< CScriptCameraHint >(const_cast< CGameHint* >(GetCurrentHint(mgr)));
   CCameraManager* cameras = mgr.CameraManager(GetPlayerIndex());
   CBallCamera* ballCamera = cameras->BallCamera();
+#ifdef TARGET_PC
+  // PortVr: the interpolation starts from the simulation camera; the presented one carries the
+  // headset's levelling and room-scale offset, which the presentation adds again.
+  const CTransform4f oldXf = PortVr::VrImmersive()
+                                 ? cameras->GetSimulationCameraTransform(mgr, false)
+                                 : cameras->GetCurrentCameraTransform(mgr, false);
+#else
   const CTransform4f oldXf = cameras->GetCurrentCameraTransform(mgr, false);
+#endif
   ClearCurrentHint(10000);
 
   if (cameras->IsBallCameraTransitioning(mgr)) {

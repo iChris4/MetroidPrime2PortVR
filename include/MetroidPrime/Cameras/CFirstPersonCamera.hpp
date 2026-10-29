@@ -2,6 +2,9 @@
 #define _CFIRSTPERSONCAMERA
 
 #include "MetroidPrime/Cameras/CGameCamera.hpp"
+#ifdef TARGET_PC
+#include "vr/vr_action_view.h"
+#endif
 
 class CFirstPersonCamera : public CGameCamera {
 public:
@@ -50,6 +53,10 @@ private:
   float mInitialFov; // Guessed name; initialized from the FOV argument, later use unresolved.
   bool mDeferBallTransitionProcessing : 1;
   bool mFluidEffectsPending : 1;
+#ifdef TARGET_PC
+  // PortVr: the view's yaw during a lock or a grapple while the headset runs (vr/vr_action_view.h).
+  PortVr::ActionView::State mPortVrActionView;
+#endif
 };
 CHECK_SIZEOF(CFirstPersonCamera, 0x260)
 

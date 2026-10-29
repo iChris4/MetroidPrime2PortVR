@@ -156,6 +156,7 @@
 
 #ifdef TARGET_PC
 #include "vr/vr_host.h" // PortVr (PrimedGun Echoes): the live game for the VR layer
+#include "vr/vr_view.h"
 #include "port_harness.h"
 #include "port_entry.h"
 #include "port_hold_toggle.h"
@@ -861,6 +862,10 @@ void CStateManager::PreRender(uint playerIndex) {
   const CTransform4f cameraTransform = mCameraManager->GetCurrentCameraTransform(*this, true);
   CFrustumPlanes frustum(cameraTransform, CRelAngle::FromDegrees(camera->GetFov()).AsRadians(),
                          camera->GetAspectRatio(), camera->GetNearClipDistance(), false, 100.f);
+#ifdef TARGET_PC
+  // PortVr: cull against where the head looks, with the headset's wider cone.
+  PortVr::VrCullingFrustum(cameraTransform, camera->GetNearClipDistance(), frustum);
+#endif
   mPlanes = frustum;
   SetupAreaFrusta();
 
@@ -1298,6 +1303,9 @@ void CStateManager::SetupViewForDraw(const CViewport& viewport) {
                            camera->GetNearClipDistance(), camera->GetFarClipDistance());
   mPlanes = CFrustumPlanes(cameraTransform, fieldOfView, aspect, camera->GetNearClipDistance(),
                            false, 100.f);
+#ifdef TARGET_PC
+  PortVr::VrCullingFrustum(cameraTransform, camera->GetNearClipDistance(), mPlanes);
+#endif
   gpRender->PrimColor(CColor::White());
   gpRender->SetModelMatrix(CTransform4f::Identity());
   mFluidPlaneManager->StartFrame(false);
@@ -1437,7 +1445,8 @@ void CStateManager::DrawWorld(const CInGameGuiManagerSet& gui) {
     // a view-model FOV in other shooters; otherwise a wide view shrinks it and pushes it into the
     // corner. Morph ball and scripted cameras keep their own FOVs.
     const CGameCamera& gunCam = *mCameraManager->GetCurrentCamera(*this, true);
-    const bool gunFov = mCameraManager->IsInFPCamera() &&
+    // PortVr: the headset's own projection draws the cannon at its tracked pose.
+    const bool gunFov = !PortVr::VrImmersive() && mCameraManager->IsInFPCamera() &&
                         gunCam.GetFov() != CCameraManager::sFirstPersonFOV;
     const CGraphics::CProjectionState gunProj = CGraphics::GetProjectionState();
     if (gunFov) {
@@ -1501,6 +1510,9 @@ void CStateManager::ResetViewAfterDraw(const CViewport& viewport, const CTransfo
   const CGameCamera* camera = mCameraManager->GetCurrentCamera(*this, true);
   CFrustumPlanes frustum(viewMatrix, CRelAngle::FromDegrees(camera->GetFov()).AsRadians(),
                          camera->GetAspectRatio(), camera->GetNearClipDistance(), false, 100.f);
+#ifdef TARGET_PC
+  PortVr::VrCullingFrustum(viewMatrix, camera->GetNearClipDistance(), frustum);
+#endif
   mPlanes = frustum;
 
   const float height = CGraphics::GetViewport().mHeight;

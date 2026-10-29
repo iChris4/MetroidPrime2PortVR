@@ -12,6 +12,10 @@
 #include "MetroidPrime/Player/CPlayerGun.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptPlayerHint.hpp"
 #include "MetroidPrime/Tweaks/CTweakBall.hpp"
+#ifdef TARGET_PC
+#include "MetroidPrime/CStateManager.hpp"
+#include "vr/vr_view.h"
+#endif
 
 void CPlayer::UpdatePlayerControlDirection(float dt, CStateManager& mgr) {
   const CVector3f oldDirection = mControlDir;
@@ -30,6 +34,21 @@ void CPlayer::UpdatePlayerControlDirection(float dt, CStateManager& mgr) {
 }
 
 void CPlayer::CalculatePlayerControlDirection(CStateManager& mgr) {
+#ifdef TARGET_PC
+  if (PortVr::VrImmersive() && mMorphBallState == kMS_Morphed && !mControlDirectionOverridden &&
+      mgr.GetPlayer(0) == this) {
+    // PortVr: the ball rolls along the ball camera's flat forward; the levelled headset view is
+    // built from it.
+    CVector3f forward = mCameraManager->GetCurrentCamera(mgr, true)->GetTransform().GetForward();
+    forward.SetZ(0.f);
+    if (forward.CanBeNormalized()) {
+      forward.Normalize();
+      mControlDir = forward;
+      mControlDirFlat = forward;
+      return;
+    }
+  }
+#endif
   if (mControlDirectionOverridden) {
     if (mControlDirOverride.CanBeNormalized()) {
       mControlDir = mControlDirOverride.AsNormalized();

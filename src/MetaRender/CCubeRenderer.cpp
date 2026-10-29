@@ -12,6 +12,8 @@
 #include "MetroidPrime/PortEfbCopy.hpp"
 #include "MetroidPrime/Tweaks/CTweakGui.hpp"
 #include "MetroidPrime/Tweaks/CTweakGuiColors.hpp"
+#include "vr/vr_view.h"
+#include "vr/vr_visibility.h"
 #include <cstdio>
 #include <cstdlib>
 #endif
@@ -751,9 +753,17 @@ void CCubeRenderer::AddPlaneObject(const void* obj, const CAABox& bounds, const 
   float closestDist = mViewPlane.GetHeight(closestPoint);
   CVector3f furthestPoint = bounds.FurthestPointAlongVector(mViewPlane.GetNormal());
   float furthestDist = mViewPlane.GetHeight(furthestPoint);
+#ifdef TARGET_PC
+  // PortVr: water may be behind the body camera while in front of an eye; its own tests already use
+  // the headset's frustum, so the sorting camera does not discard the whole plane here.
+  if (closestDist < 0.f && furthestDist < 0.f && !PortVr::VrImmersive()) {
+    return;
+  }
+#else
   if (closestDist < 0.f && furthestDist < 0.f) {
     return;
   }
+#endif
 
   bool zOnly;
   if (plane.GetNormal() == sOptimalPlane) {
@@ -1453,6 +1463,18 @@ void CCubeRenderer::RenderFogVolumeModel(const CAABox& bounds, const CModel* mod
     const CAABox worldBounds = transformedBounds;
     static const GXVtxDescList desc[] = {{GX_VA_POS, GX_DIRECT}, {GX_VA_NULL, GX_NONE}};
     CGX::SetVtxDescv(desc);
+#ifdef TARGET_PC
+    // PortVr: this CPU-built cap must follow the tracked head (yaw, pitch and room-scale position):
+    // the eyes cannot bring back fog geometry clipped away behind the body camera's near plane.
+    if (PortVr::VrImmersive()) {
+      CTransform4f clipView = PortVr::VrHeadFacingTransform(view);
+      CVector3f headOrigin, headDirection;
+      if (PortVr::VrHeadGaze(view, headOrigin, headDirection)) {
+        clipView.SetTranslation(headOrigin);
+      }
+      view = clipView;
+    }
+#endif
     const CUnitVector3f forward(view.GetForward());
     const CVector3f& min = worldBounds.GetMinPoint();
     const CVector3f& max = worldBounds.GetMaxPoint();
@@ -1598,7 +1620,13 @@ void CCubeRenderer::ReallyRenderFogVolume(const CColor& color, const CAABox& bou
 
   int drawRight = vpWidth;
   int drawBottom = vpHeight;
+#ifdef TARGET_PC
+  // PortVr: the rectangle projected with the body camera can clip fog an eye sees; each eye copies
+  // its own full depth, so the composite covers the whole view.
+  if (!allOutside && !PortVr::VrImmersive()) {
+#else
   if (!allOutside) {
+#endif
     maxChunkW = rstl::min_val(maxBounds.GetX() - minBounds.GetX(), maxChunkW);
     maxChunkH = rstl::min_val(maxBounds.GetY() - minBounds.GetY(), maxChunkH);
 

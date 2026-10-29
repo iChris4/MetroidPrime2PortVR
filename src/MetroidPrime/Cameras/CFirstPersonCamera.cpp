@@ -23,6 +23,11 @@
 
 #ifdef TARGET_PC
 #include "port_mouse.h"
+// PortVr (PrimedGun Echoes): the headset owns the view's pitch; the body keeps the yaw.
+#include "vr/vr_settings.h"
+#include "vr/vr_view.h"
+
+#include <cmath>
 
 namespace {
 // MP1 #169: the pitch an empty lock-on holds under direct aim, taken from the view when it began.
@@ -160,7 +165,14 @@ void CFirstPersonCamera::UpdateTransform(CStateManager& mgr, float dt) {
     bob->SetCameraBobTransform(CTransform4f::Identity());
   }
 
+#ifdef TARGET_PC
+  // PortVr: a scan lock picked by the head holds the body's facing (VrLookHoldsFacing). Combat and
+  // grapple locks keep their simulation orientation; the action view below turns their camera.
+  const bool portVrHoldFacing = PortVr::VrLookHoldsFacing(mgr, *player);
+  switch (portVrHoldFacing ? CPlayer::kOS_NoOrbit : player->GetOrbitState()) {
+#else
   switch (player->GetOrbitState()) {
+#endif
   case CPlayer::kOS_OrbitObject:
   case CPlayer::kOS_ForcedOrbitObject: {
     const CActor* actor = TCastToConstPtr< CActor >(mgr.GetObjectById(player->GetOrbitTargetId()));
@@ -224,6 +236,39 @@ void CFirstPersonCamera::UpdateTransform(CStateManager& mgr, float dt) {
     break;
   }
 
+#ifdef TARGET_PC
+  if (PortVr::VrFlattenLookPitch()) {
+    // PortVr: the headset supplies the pitch; the game camera keeps the yaw of whatever the look
+    // logic chose (free look, lock-on, pitch volumes).
+    lookDir[kDZ] = 0.f;
+    if (!lookDir.IsMagnitudeSafe()) {
+      lookDir = playerXf.GetForward();
+      lookDir[kDZ] = 0.f;
+    }
+  }
+  {
+    // PortVr: during a lock or a grapple the view turns with the action (vr/vr_action_view.h);
+    // releasing it resumes free movement in the current view, not the target-facing body's yaw.
+    const bool vrActionView = PortVr::VrImmersive() && !GetCameraManager(mgr).IsInCinematicCamera() &&
+                              player->GetMorphballTransitionState() == CPlayer::kMS_Unmorphed;
+    const bool action =
+        player->GetOrbitState() != CPlayer::kOS_NoOrbit || player->GetGrappleState() != CPlayer::kGS_None;
+    const CVector3f previousForward = GetTransform().GetForward();
+    const auto view = mPortVrActionView.Update(
+        vrActionView, action, PortVr::GetVrSettings().look_lock_no_camera_turn,
+        std::atan2(-lookDir.GetX(), lookDir.GetY()), std::atan2(-previousForward.GetX(), previousForward.GetY()),
+        player->GetOrbitTargetId().value);
+    if (vrActionView && (action || view.released)) {
+      lookDir = CVector3f(-std::sin(view.yaw), std::cos(view.yaw), 0.f);
+      if (view.released) {
+        player->SetTransform(
+            CTransform4f::LookAt(player->GetTranslation(), player->GetTranslation() + lookDir));
+        player->SetAngularVelocityOR(CAxisAngle::Identity());
+        player->PortSnapshotRenderTransform();
+      }
+    }
+  }
+#endif
   if (lookDir.IsMagnitudeSafe()) {
     lookDir.Normalize();
   }
@@ -400,11 +445,21 @@ void CFirstPersonCamera::UpdateTransform(CStateManager& mgr, float dt) {
 
   CPlayerCameraBob* bob = player->CameraBobObject();
   CTransform4f bobXf = bob->GetCameraBobTransformation();
+#ifdef TARGET_PC
+  // PortVr: no camera bob while the headset moves the view.
+  if (player->GetMorphballTransitionState() == CPlayer::kMS_Morphed ||
+      player->GetOrbitState() == CPlayer::kOS_Grapple ||
+      player->GetGrappleState() != CPlayer::kGS_None ||
+      mgr.GetGameState() == CStateManager::kGS_SoftPaused ||
+      GetCameraManager(mgr).IsInCinematicCamera() || mCloseInTimer > 0.f ||
+      PortVr::VrNoCameraBob()) {
+#else
   if (player->GetMorphballTransitionState() == CPlayer::kMS_Morphed ||
       player->GetOrbitState() == CPlayer::kOS_Grapple ||
       player->GetGrappleState() != CPlayer::kGS_None ||
       mgr.GetGameState() == CStateManager::kGS_SoftPaused ||
       GetCameraManager(mgr).IsInCinematicCamera() || mCloseInTimer > 0.f) {
+#endif
     bobXf = CTransform4f::Identity();
     bob->SetCameraBobTransform(bobXf);
   }
@@ -420,6 +475,9 @@ void CFirstPersonCamera::PreThink(float dt, CStateManager& mgr) {}
 void CFirstPersonCamera::Render(const CStateManager& mgr) const {}
 
 void CFirstPersonCamera::Reset(const CTransform4f& xf, CStateManager& mgr) {
+#ifdef TARGET_PC
+  mPortVrActionView.Reset();
+#endif
   SetTransform(xf);
   SetTranslation(GetPlayer(mgr).GetEyePosition());
   mGunFollowXf = GetTransform();
@@ -441,6 +499,11 @@ void CFirstPersonCamera::Think(float dt, CStateManager& mgr) {
     UpdateFluidEffects(mgr);
     mFluidEffectsPending = false;
   }
+#ifdef TARGET_PC
+  if (player->GetMorphballTransitionState() != CPlayer::kMS_Unmorphed) {
+    mPortVrActionView.Reset();
+  }
+#endif
   if (!mDeferBallTransitionProcessing) {
     if (player->GetMorphballTransitionState() == CPlayer::kMS_Morphed) {
       if (player->GetCameraState() != CPlayer::kCS_Spawned) {

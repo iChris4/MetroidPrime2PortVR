@@ -103,6 +103,7 @@
 #ifdef TARGET_PC
 #include "port_entry.h"
 #include "port_mouse.h"
+#include "vr/vr_view.h"
 #include "port_radial.h"
 #include "MetroidPrime/PortScanTarget.hpp"
 #include "port_freecam.h"
@@ -2286,6 +2287,10 @@ void CPlayer::Think(float dt, CStateManager& mgr) {
   // The mouse, or the twin stick, owns the body yaw while it is aiming. After ProcessInput,
   // whose stick turn would otherwise win the frame (see MouseAimAllowed).
   UpdateMouseAim(mgr, dt);
+  // PortVr: physical steps up and down join the eye-height smoothing below (player 0's headset).
+  if (mgr.GetPlayer(0) == this) {
+    PortVr::VrRoomScaleUpdate(mgr, *this, dt);
+  }
 #endif
 
   UpdateEchoVisorEffects(dt, mgr);

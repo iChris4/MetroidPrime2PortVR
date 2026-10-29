@@ -1,4 +1,9 @@
 #include "MetroidPrime/CWorld.hpp"
+#ifdef TARGET_PC
+#include "vr/vr_view.h"
+#include <aurora/gfx.h>
+#include <dolphin/gx.h>
+#endif
 
 #include "MetroidPrime/CDummyWorld.hpp"
 #include "MetroidPrime/CWorldLayerState.hpp"
@@ -699,7 +704,21 @@ void CWorld::DrawSky(const CTransform4f& xf, bool noFog) const {
         CColor(mSkyboxLightingLevel, mSkyboxLightingLevel, mSkyboxLightingLevel, 1.f));
     CGraphics::SetDepthRange(1.f, 1.f);
     const CModelFlags& flags = CModelFlags::Normal().DepthCompareUpdate(true, false);
+#ifdef TARGET_PC
+    // PortVr: the sky is a dome centred on the camera, pushed into the far depth range so it reads
+    // as infinitely far. Per eye it would sit at its modelled distance and show its size; routed
+    // SKY, the eyes see it with the head's rotation only (vr/vr_view.h).
+    const bool skyAtInfinity = PortVr::VrSkyAtInfinity();
+    if (skyAtInfinity) {
+      AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_SKY);
+    }
+#endif
     (*(mSkyboxOverride ? mSkyboxOverride : mSkyboxWorldLoaded))->Draw(flags);
+#ifdef TARGET_PC
+    if (skyAtInfinity) {
+      AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+    }
+#endif
     CGraphics::SetDepthRange(0.125f, 1.f);
     gpRender->SetModelMatrix(CTransform4f::Identity());
     if (!noFog) {

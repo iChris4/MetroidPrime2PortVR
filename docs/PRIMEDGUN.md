@@ -9,6 +9,60 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Game hooks, part 1: cameras, culling, HUD routes, sky, fog (2026-10-29)
+
+Every hook sits in `#ifdef TARGET_PC` with the retail text under `#else`; `strip_diff.py master`
+is CLEAN and `MP2_VR=0` runs are pixel-identical to the untouched port (three screenshots of the
+new-game run, `MP2_SHOT_AT=300,700,1100`). Player 0 only throughout.
+
+Cameras and culling:
+
+- `CFirstPersonCamera::UpdateTransform`: a head-picked scan lock holds the body's facing
+  (`VrLookHoldsFacing`), the headset owns the pitch (`VrFlattenLookPitch`), the action view turns
+  the view during a lock or a grapple and hands the body the view's yaw on release
+  (`vr_action_view.h`, member `mPortVrActionView`), no camera bob (`VrNoCameraBob`). Echoes' own
+  mouse-aim and empty-lock pitch blocks stand down because direct aim does (below).
+- `CCameraManager`: `GetCurrentCameraTransform` levels the morph ball camera, takes the head's
+  entry yaw out once, keeps the unmorph base and adds the room-scale offset (`PortVrLevelBallCamera`);
+  the audio listener follows the head; `PortCutNextUpdate` (for the snap turn).
+- `CStateManager`: `VrCullingFrustum` in `PreRender`, `SetupViewForDraw`, `ResetViewAfterDraw`; the
+  arm cannon's retail-FOV draw is off in the headset.
+- Morph ball: `CPlayer::BeginMorphTransition` captures the head's heading (`VrBeginBallCamera`),
+  turns the body and the first-person camera to it (Echoes' to-ball spline and `SetState` read the
+  first-person camera); `BeginUnmorphTransition` starts the unmorph camera, `PrepareToLeaveMorphBallState`
+  faces the stand-up model the head's way, `LeaveMorphBallState` gives the body the unmorph base;
+  `CBallCamera::UpdateTransitionFromBallCamera` rises straight to the eye in that base;
+  `CalculatePlayerControlDirection` rolls the ball along the ball camera's flat forward.
+- `CInterpolationCamera`: in the headset a morph ball handoff blends straight to the target camera's
+  transform with a bounded, eased duration (`vr_camera_transition.h`). `CCameraHintManager::ClearHint`
+  starts from the simulation camera. Echoes' cut-to-smooth conversion of instant hints (MP1's
+  `UseCameraHint` change) is left for the comfort pass: Echoes' hint code differs too much to copy.
+- `CPlayer::Think`: `VrRoomScaleUpdate`.
+
+Draw routes:
+
+- `CGuiCamera::Draw` keeps the drawn tangents (`GetDrawTanHalfWidth/Height`).
+- `CInGameGuiManager::Draw`: helmet `HEAD_LOCKED`; reticle `WORLD`; faceplate, visor, reflection,
+  HUD and memo `HEAD_LOCKED` with the head-locked plane from the loaded HUD frame's camera at depth
+  20; minimap `HEAD_LOCKED`, or on the morph ball HUD's screen; the wrist visor after (draws nothing
+  yet). `Update`: `VrNoteInGameMenu` (paused states and the quit screen), cinematic bars off
+  (`VrRemoveCinematicBars`), the morph ball HUD's screen anchor held while it is up.
+- `CSamusHud::Draw`: the reticle `WORLD`, the ball HUD frame `ANCHORED_SCREEN` (`FLOATING_HUD`
+  with `vr_floating_hud`).
+- `CWorld::DrawSky` routed `SKY` (Echoes draws the sky dome at the camera's position, like MP1);
+  `CWorldShadow::BuildLightShadowTexture` routed `SKIP` up to its copy.
+- `CCubeRenderer`: plane objects are not discarded behind the body camera; the fog volume cap uses
+  the head's facing and position; the fog composite covers the whole view.
+
+Platform: the desktop's direct aim (mouse, twin stick, touch: `PortMouse::Enabled`, `StickEnabled`,
+`TouchEnabled`, `Aiming`), the Scan/Echo visor button swap and the prompt glyph pick stand down while
+the VR controllers own port 0 (`VrPadOwnsPort0`), as in the Metroid Prime fork.
+
+Not done yet: particle billboards (`VrParticleBillboard` in `CElementGen`, `CParticleSwoosh`,
+`CEnvFxManager`, `CHUDBillboardEffect`, `CVisorFlare`), the cannon, the controls' game-side gates,
+the EFB effects per eye (dark world, Dark/Echo/Scan visors), immersive message boxes and menus
+(until then they show on the virtual screen once the world stops being drawn).
+
 ## The VR host layer on Echoes (2026-10-29)
 
 `platform/vr` and `platform/include/vr` come from the Metroid Prime VR fork, with its 18 GPU-free

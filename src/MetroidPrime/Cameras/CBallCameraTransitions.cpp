@@ -13,6 +13,9 @@
 #include "MetroidPrime/Player/CPlayer.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptCameraHint.hpp"
 #include "MetroidPrime/TCastTo.hpp"
+#ifdef TARGET_PC
+#include "vr/vr_view.h"
+#endif
 
 namespace {
 CMaterialList skTransitionInclude = CMaterialList(kMT_Solid);
@@ -72,6 +75,22 @@ bool CBallCamera::UpdateTransitionFromBallCamera(CStateManager& mgr) {
     return true;
   }
 
+#ifdef TARGET_PC
+  if (PortVr::VrImmersive() && GetControllerNumber() == 0) {
+    // PortVr: the stand-up view rises straight from where the ball camera was to the eye, in the
+    // base the view had when the unmorph began (VrBeginUnmorphCamera), not along retail's swing
+    // around Samus: the head turns the view, not the camera.
+    const CPlayer& vrPlayer = GetPlayer(mgr);
+    CTransform4f view = PortVr::VrUnmorphCameraTransform(vrPlayer.GetEyePosition(),
+                                                         vrPlayer.GetMorphBallTransitionFactor());
+    const CVector3f vrPosition = ClampElevationToWater(view.GetTranslation(), mgr);
+    view.SetTranslation(vrPosition);
+    SetTransform(view);
+    TeleportCamera(vrPosition, mgr);
+    CameraManager(mgr).FirstPersonCamera()->Reset(view, mgr);
+    return false;
+  }
+#endif
   const CVector3f oldPosition = GetTranslation();
   const CPlayer& player = GetPlayer(mgr);
   const float factor = player.GetMorphBallTransitionFactor();

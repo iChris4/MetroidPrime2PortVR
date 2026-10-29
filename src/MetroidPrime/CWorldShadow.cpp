@@ -11,6 +11,10 @@
 #include "MetroidPrime/CWorld.hpp"
 #include "WorldFormat/CPVSAreaSet.hpp"
 #include "dolphin/gx/GXFrameBuffer.h"
+#ifdef TARGET_PC
+#include <aurora/gfx.h>
+#include <dolphin/gx.h>
+#endif
 
 CWorldShadow::CWorldShadow(uint width, uint height, bool rgba8)
 : mTexture(rs_new CTexture(rgba8 ? kTF_RGBA8 : kTF_RGB565, width, height, 1))
@@ -72,6 +76,11 @@ void CWorldShadow::BuildLightShadowTexture(const CStateManager& mgr, TAreaId are
   if (fov < 0.00001f)
     return;
 
+#ifdef TARGET_PC
+  // PortVr: the shadow texture is rendered from the light, not a view: the eyes do not draw it, and
+  // they sample the mono copy.
+  AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_SKIP);
+#endif
   lightToPoint.Normalize();
   mView = CTransform4f::LookAt(light.GetPosition(), center, CVector3f(0.f, 0.f, -1.f));
   mObjectPosition = center;
@@ -145,6 +154,9 @@ void CWorldShadow::BuildLightShadowTexture(const CStateManager& mgr, TAreaId are
                   mTexture->GetTexelFormat() == kTF_RGB565 ? GX_TF_RGB565 : GX_TF_RGBA8, GX_TRUE);
   mTexture->SetFlag1(true);
   GXCopyTex(mTexture->GetBitMapData(0), GX_TRUE);
+#ifdef TARGET_PC
+  AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+#endif
   mTexture->UnLock();
   gpRender->SetViewport(viewport.mLeft, viewport.mTop, viewport.mWidth, viewport.mHeight);
   CGraphics::SetDepthRange(depthNear, depthFar);

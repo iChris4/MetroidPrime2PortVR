@@ -94,6 +94,8 @@ void CGuiCamera::Draw(const CGuiWidgetDrawParms& parms) const {
       const float halfTan = tanf(0.5f * fov * 3.14159265f / 180.f) / portWiden;
       fov = 2.f * atanf(halfTan) * 180.f / 3.14159265f;
     }
+    mDrawTanY = tanf(0.5f * fov * 3.14159265f / 180.f);
+    mDrawTanX = mDrawTanY * aspect;
     CGraphics::SetPerspective(fov, aspect, mCameraParms.mPerspective.mNear,
                               mCameraParms.mPerspective.mFar);
 #else
@@ -102,6 +104,8 @@ void CGuiCamera::Draw(const CGuiWidgetDrawParms& parms) const {
 #endif
   } else {
 #ifdef TARGET_PC
+    mDrawTanX = 0.f;
+    mDrawTanY = 0.f;
     if (portHudScaled || portWiden != 1.f) {
       const float left = mCameraParms.mOrthographic.mLeft;
       const float right = mCameraParms.mOrthographic.mRight;

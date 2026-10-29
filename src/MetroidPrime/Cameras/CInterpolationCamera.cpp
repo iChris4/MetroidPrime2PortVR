@@ -11,8 +11,22 @@
 #include "MetroidPrime/Cameras/CFirstPersonCamera.hpp"
 #include "MetroidPrime/Player/CPlayer.hpp"
 #include "MetroidPrime/TCastTo.hpp"
+#ifdef TARGET_PC
+#include "vr/vr_camera_transition.h"
+#include "vr/vr_view.h"
+#endif
 
 namespace {
+#ifdef TARGET_PC
+// PortVr: a morph ball camera handoff while the headset runs (CameraTransition: bounded, eased).
+bool PortVrBallHandoff(const CStateManager& mgr, int playerIndex) {
+  const CPlayer* player = playerIndex == 0 ? mgr.GetPlayer(0) : nullptr;
+  return player != nullptr && PortVr::VrImmersive() &&
+         !mgr.GetCameraManager(0)->IsInCinematicCamera() &&
+         (player->GetMorphballTransitionState() == CPlayer::kMS_Morphed ||
+          player->GetMorphballTransitionState() == CPlayer::kMS_Morphing);
+}
+#endif
 // Guessed names.
 const CMaterialList skCollisionIncludeList =
     CMaterialList(kMT_Solid, kMT_Wall, kMT_Floor, kMT_Ceiling);
@@ -209,6 +223,12 @@ void CInterpolationCamera::SetInterpolation(const CTransform4f& xf, TUniqueId fr
   mInterpolateRotation = interpolateRotation;
   x2a4_1_ = flag;
   mDuration = duration;
+#ifdef TARGET_PC
+  // PortVr: an authored instant cut becomes a short eased handoff in the headset.
+  if (PortVrBallHandoff(mgr, GetControllerNumber())) {
+    mDuration = PortVr::CameraTransition::Duration(duration);
+  }
+#endif
   mPositionMode = positionMode;
   mRotationMode = rotationMode;
   x2a0_ = 0.f;
@@ -290,6 +310,25 @@ void CInterpolationCamera::Think(float dt, CStateManager& mgr) {
     return;
   }
 
+#ifdef TARGET_PC
+  if (PortVrBallHandoff(mgr, GetControllerNumber())) {
+    // PortVr: blend to the target camera's actual transform rather than rebuilding its rotation
+    // from a look point that fixed or path cameras need not use; the exact endpoint avoids a second
+    // cut when the interpolation ends.
+    const float blend = PortVr::CameraTransition::Blend(mTime, mDuration);
+    const CQuaternion rotation =
+        CQuaternion::SlerpLocal(CQuaternion::FromMatrix(mStartTransform),
+                                CQuaternion::FromMatrix(target->GetTransform()), blend);
+    const CVector3f origin =
+        mStartTransform.GetTranslation() * (1.f - blend) + target->GetTranslation() * blend;
+    SetTransform(rotation.BuildTransform4f(origin));
+    if (blend >= 1.f) {
+      EndInterpolation(kER_Completed, mgr);
+    }
+    CActor::Think(dt, mgr);
+    return;
+  }
+#endif
   const CVector3f position = target->GetTransform().GetTranslation();
   mLookPosition = target->GetScanObjectIndicatorPosition(mgr);
   bool done;
