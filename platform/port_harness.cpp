@@ -10,6 +10,11 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
+
+namespace aurora {
+void request_screenshot() noexcept;
+} // namespace aurora
 
 namespace {
 
@@ -58,11 +63,38 @@ void ReadIntroEnvOnce() {
                value, sIntroBudget);
 }
 
+// PrimedGun: MP2_SHOT_AT=<update>[,<update>...] takes the F12 capture at those game updates, so an
+// unattended desktop run can be checked by picture on Windows, where the console (and its
+// `screenshot`) is not available. Aurora writes screenshots/metroid-prime-<stamp>.bmp under the
+// working directory and logs the path.
+std::vector< int > sShotAt;
+
+void ReadShotEnv() {
+  const char* value = std::getenv("MP2_SHOT_AT");
+  if (value == nullptr) {
+    return;
+  }
+  for (const char* p = value; *p != '\0';) {
+    char* end = nullptr;
+    const long n = std::strtol(p, &end, 10);
+    if (end == p) {
+      break;
+    }
+    if (n > 0) {
+      sShotAt.push_back(static_cast< int >(n));
+    }
+    p = *end == ',' ? end + 1 : end;
+  }
+  std::fprintf(stderr, "[harness] MP2_SHOT_AT=%s: %zu screenshot(s) at those game updates\n", value,
+               sShotAt.size());
+}
+
 void ReadEnvOnce() {
   if (sReadEnv) {
     return;
   }
   sReadEnv = true;
+  ReadShotEnv();
   const char* value = std::getenv("MP2_FRAMES");
   if (value == nullptr) {
     return;
@@ -94,6 +126,12 @@ bool GameUpdate() {
   // stall report, so a second stall later in the run is reported too.
   sLastUpdateSeconds = Seconds();
   sWarned = false;
+  for (const int at : sShotAt) {
+    if (at == sUpdates) {
+      std::fprintf(stderr, "[harness] screenshot at game update %d\n", sUpdates);
+      aurora::request_screenshot();
+    }
+  }
   if (sLimit == 0 || sExitRequested) {
     return false;
   }
