@@ -4,8 +4,8 @@
 Prime 2: Echoes port. It is the PrimedGun v2 (Metroid Prime) launcher, adapted
 to this port. It is a separate Qt 6 program that sits next to
 `metroid_prime2_port.exe`, edits the game's `settings.cfg`, and starts the
-game. The tabs are Setup, Controller, Calibration, Layout, Port Config and
-About.
+game. The tabs are Setup, Controller, Calibration, Cannon Textures, Layout,
+Port Config and About.
 
 ## Building
 
@@ -72,9 +72,10 @@ the window (label `port`).
 - **Open Full Port Options (F1)** writes `open_options.request` in the user
   folder. A running game opens its F1 window and comes forward; otherwise the
   game starts with the window open (the Echoes port has no options-only start).
-- **Cannon Textures** is not shown. Its slots name the Metroid Prime cannon's
-  textures and its presets were painted for that cannon. Echoes' Power Beam
-  cannon uses other textures (`docs/PRIMEDGUN.md`, "Cannon texture slots").
+- **Cannon Textures** imports your own textures for Echoes' arm cannon (23
+  textures: the parts every beam shares, then each beam's own) into five slots
+  and applies one. No preset ships yet, so Remove Shine reports a missing
+  texture (`docs/PRIMEDGUN.md`, "Cannon texture slots").
 
 ## The Quest launcher
 

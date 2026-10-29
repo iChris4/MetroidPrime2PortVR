@@ -1,151 +1,103 @@
-# Echoes Unbound - Metroid Prime 2 native port
+# PrimedGun Echoes
 
-**[FIRST ALPHA RELEASE IS OUT NOW!!!](https://github.com/Odrannnn/MetroidPrime2Port/releases)**
+**Metroid Prime 2: Echoes in native VR, on Windows PC and standalone Meta Quest.**
 
-**Looking for the first game? See the [Metroid Prime Unbound](https://github.com/Odrannnn/MetroidPrimePort).**
+PrimedGun Echoes carries the VR layer of
+[PrimedGun v2](https://github.com/iChris4/MetroidPrimePortVR) (Metroid Prime in VR, by Nobbie and
+iChris4) onto [Echoes Unbound](https://github.com/Odrannnn/MetroidPrime2Port), Odrannnn's native
+port of Metroid Prime 2: Echoes. It keeps the controls and VR experience of
+[the original PrimedGun](https://github.com/Nobbie248/PrimedGun).
 
-**You can find all new features and enhancements in the F1 menu (or start + back on controller)**
-**I recommend checking out Portal Transition Skip in F1 > Game!**
+**This is an alpha.** Expect rough edges, and keep normal in-game saves as well as save states.
 
-[![Linux build](https://github.com/Odrannnn/MetroidPrime2Port/actions/workflows/linux-build.yml/badge.svg?branch=port)](https://github.com/Odrannnn/MetroidPrime2Port/actions/workflows/linux-build.yml)
+**No game content is included.** You need your own copy of the game: the port reads it from a disc
+image and never ships any of its assets. This repository ships no disc image, and neither does any
+package or release built from it.
 
-A native build of **Metroid Prime 2: Echoes** for Linux, Windows, macOS, Android and (experimentally) iOS,
-rendered through Aurora (SDL3/WebGPU). There's no emulator involved. Supported
-discs: USA GameCube (`G2ME01`), PAL (`G2MP01`) and
-Trilogy (`R3ME01` USA, `R3MP01` PAL).
-This is a pre-release: please report what issues you find.
+## Features
 
-**No game content is included.** You need your own copy of the game: the port
-reads it from a disc image and never ships any of its assets. This repository
-ships no disc image, and neither does any package or release built from it.
+- Native OpenXR VR on PC (Direct3D 12, or Vulkan for SteamVR headsets such as PSVR2) and standalone
+  Meta Quest (tested on Quest 3).
+- Room-scale movement with a modern VR control scheme, snap or smooth turning.
+- 6DOF arm cannon tracking for aiming, grapple and lock-on; left-handed play.
+- Head-locked HUD and helmet, visors in both eyes, look to scan.
+- Beam wheel and visor gestures, the 3D map held in your hand, pause screens and message boxes in
+  the headset.
+- One-click height calibration and adjustable cannon position and rotation.
+- In-headset VR menu for controls, calibration, graphics and more.
+- A PC launcher (`PrimedGunEchoes.exe`) and a Quest launcher panel for every PrimedGun setting.
 
-## What it adds over the console release
+## Getting started
 
-- **Cutscene skip** Switching between the dark and light world has never been so fast! Also try the warp cheat in Debug to swap world without portal!
-- **Widescreen** with a widescreen-aware HUD, **render scale**, vsync and high fps support with **frame interpolation**
-- **Graphics:** first-person FOV, MSAA, anisotropic filtering, dynamic resolution,
-  HUD scale, arm cannon offset, toggles to hide the helmet and visor effects
-- **Controls:** mouse and twin-stick aim, gyro aim, lock-on free aim, pointer aim, everything rebindable
-- **Optional tweaks:** Fast Morph, Spring Ball, Toggle Lock-On, Sticky Charge,
-  walk speed, scan speed, hint delay, elevator ride; an **Original experience**
-  switch puts the retail behaviour back
-- **Skippable cutscenes**
-- **Language** switching on PAL and Trilogy discs
-- **Save states** and **quick resume** after quitting
-- **Saves:** import and export memory card files, with Dolphin and PrimeHack
-  card folders
-- **Metroid Prime Trilogy:** Trilogy's HUD frames,
-  reticles and, opt-in, its radial beam and visor menus (mouse, pad and touch support)
-- **Suit colours** Change colours of Varia, Dark and Light suits
-- **Mods:** drop-in mod folders that replace disc data or single resources, and
-  an HD texture pack ([docs/MODS.md](docs/MODS.md))
-- **Photo mode** with a free camera and high-resolution capture
-- **In-game time display*
-- **Discord Rich Presence**
-- **Mobile touch overlay**
-- **F1 overlay** (Or Start + Back combo) This is the menu housing every setting!
+1. Get the latest build from the [releases page](https://github.com/iChris4/MetroidPrime2PortVR/releases).
+   **PC:** extract the `Windows-x64.zip` and run `PrimedGunEchoes.exe`. **Quest:** sideload the
+   `Quest.apk` (SideQuest or `adb install`) and open PrimedGun Echoes from Unknown Sources.
+2. Use **Select Game** to choose your own Metroid Prime 2: Echoes disc image. USA (`G2ME01`) is the
+   tested release; PAL (`G2MP01`) and Metroid Prime Trilogy (`R3ME01`, `R3MP01`) are experimental.
+   ISO, NKit ISO, GCM, RVZ, WIA, CISO and WBFS images are accepted.
+3. On PC, set your headset's OpenXR runtime as active and keep **Enable VR** on in **Port Config**.
+   Press **Play**.
+4. Check the **Layout** tab for the controller bindings.
+5. In game, click the right stick to set your height. Click the left stick to open or close the VR
+   menu.
+6. Use **Calibration** to place the arm cannon. **Cannon Textures** applies textures you import to
+   the cannon.
 
-## Downloads
+To bring over your VR settings from PrimedGun v2 (Metroid Prime) or from PrimedGun on Dolphin, use
+**Import PrimedGun Settings** in the launcher. Memory cards are not transferred by the launcher; the
+game can share or mirror a Dolphin or PrimeHack card itself (in game, F1 > System > Memory card, PC
+only).
 
-Releases are published on the
-[GitHub releases page](https://github.com/Odrannnn/MetroidPrime2Port/releases).
-**Every build needs your own disc image; none of them contains one.**
+## Where your data is
 
-| Platform | Asset |
-|---|---|
-| Linux x86_64 / aarch64 | `metroid-prime2-port-X-linux-{x86_64,aarch64}.tar.gz`, or the AppImage |
-| Linux x86_64 (Flatpak) | `MetroidPrime2Port.flatpak` (`flatpak install --user MetroidPrime2Port.flatpak`) |
-| Windows x86_64 / arm64 | `metroid-prime2-port-X-windows-{x86_64,arm64}.zip` |
-| macOS (Apple silicon) | `metroid-prime2-port-X-macos-arm64.zip` |
-| Android (arm64) | `metroid-prime2-port-X-android-arm64.apk` |
-| iPhone / iPad (experimental) | `MetroidPrime2Port.ipa`, unsigned: sign it yourself and sideload it ([docs/IOS.md](docs/IOS.md)) |
+- **PC:** the `user` folder next to the executables: settings (`settings.cfg`), memory cards, save
+  states, logs and caches. Keep it when you update: copy `user` into the new release's folder.
+- **Quest:** `/sdcard/Android/data/org.primedgun.echoes/files`. Install a new APK over the existing
+  app to keep your saves; uninstalling removes them.
 
-**Quick start:** download the build for your platform, start it, and pick your disc
-image when it asks (Android shows a file picker and copies the image into the
-app). Supported discs are the GameCube USA (`G2ME01`) and PAL (`G2MP01`)
-releases and the Wii Metroid Prime Trilogy (USA `R3ME01`, PAL `R3MP01`), as
-`.iso`, `.gcm`, `.rvz`, `.wia`, `.gcz`, `.ciso` or `.wbfs`. See [docs/PAL.md](docs/PAL.md)
-and [docs/TRILOGY.md](docs/TRILOGY.md) for what is verified on each. Press **F1**
-for every setting.
+## Not done yet
 
-On Linux the AppImage bundles no libraries: FreeType, libpng and a Vulkan
-driver, X11 or Wayland come from the system.
-
-## Running
-
-```sh
-./metroid_prime2_port "/path/to/Metroid Prime 2 - Echoes.iso"
-```
-
-The `MP2_DISC` environment variable works too. Headless and scripted runs,
-the gameplay harness and the area sweep are in [docs/RUNNING.md](docs/RUNNING.md).
+- Echoes-only systems keep the original pad behaviour for now: the Seeker missile multi-lock, the
+  Screw Attack's camera, turrets.
+- Cannon Textures has no preset textures for Echoes' cannon yet, so Remove Shine does not work.
+- Local multiplayer is not supported in VR.
 
 ## Building
 
-CMake 3.25+ and Ninja with a C++20 toolchain. A host build needs your disc only at run
-time, never to compile. The port configuration is `-DMP_SDK_HEADERS_ONLY=OFF`,
-which adds `extern/aurora` (it fetches its own SDL3 and Dawn) and builds the
-`metroid_prime2_port` executable:
+See [docs/PRIMEDGUN.md](docs/PRIMEDGUN.md) for the VR layer's engineering notes,
+[launcher/README.md](launcher/README.md) for the launchers, and `licenses/SOURCE.txt` in each release
+for the exact build commands of that release. The port itself builds as upstream documents it
+([docs/RUNNING.md](docs/RUNNING.md), [docs/ANDROID.md](docs/ANDROID.md)); VR needs
+`-DMP_ENABLE_OPENXR=ON` (on by default on Windows), the PC launcher `-DMP_BUILD_LAUNCHER=ON` and Qt
+6.5, and the Quest APK `quest/Build-Quest.ps1`.
 
-```sh
-cmake -S . -B build-port-link -G Ninja -DMP_SDK_HEADERS_ONLY=OFF
-cmake --build build-port-link --target metroid_prime2_port
-```
-
-[docs/RUNNING.md](docs/RUNNING.md) has the run, test and coverage commands,
-[docs/RELEASING.md](docs/RELEASING.md) what CI builds, [docs/ANDROID.md](docs/ANDROID.md) the
-Android build, and [PORT_NOTES.md](PORT_NOTES.md) how the port works (the REL
-runtime, `TARGET_PC` rules, SDK shims). The upstream matching build
-(`python3 configure.py && ninja`, see [docs/DECOMP_README.md](docs/DECOMP_README.md)) is kept
-intact; every port change to an upstream file sits in a `#ifdef TARGET_PC` block.
-
-## Troubleshooting
-
-- **Where is my data?** In a `user/` folder beside the executable (settings, controls, memory
-  cards, log, caches), so a copied build carries it with it; an AppImage keeps it in the folder the
-  `.AppImage` file is in. Where that folder cannot be written to (a Flatpak, a system package, a
-  macOS app bundle) it is the per-user folder (`%APPDATA%\Metroid Prime 2 Echoes`,
-  `~/.local/share/Metroid Prime 2: Echoes`, `~/Library/Application Support/Metroid Prime 2: Echoes`).
-  An older install whose `settings.cfg` is still in the per-user folder keeps using it until you
-  move its contents into `user/`. `MP2_USER_PATH` overrides all of this.
-- **Where are the logs?** `metroid_prime2_port.log` in the user folder (F1 > System
-  > Log); the previous run's is `metroid_prime2_port.old.log`. Attach it to a bug report.
-- **"unsupported disc"**: the image is not one of the releases above. Re-dump it,
-  or check you picked the right disc.
-- **Settings in a bad state**: F1 > System > Settings > **Reset configuration...**
-  backs up and resets every setting and mapping; saves are not touched.
+Branches: `OpenXR` holds the VR work; `master` tracks upstream's `port` branch.
 
 ## Credits and licensing
 
-This took the old echoes decomp as a base, expanded to get a fully playable port. Aurora (`extern/aurora`) is a vendored snapshot, and MusyX
-(`extern/musyx-port`) provides the audio engine; third-party licences are kept
-alongside them and copied into release packages.
+- PrimedGun Echoes: iChris4. PrimedGun's VR experience and controls: Nobbie and iChris4.
+- Echoes Unbound, the native port this builds on: Odrannnn and its contributors, from the
+  PrimeDecomp Echoes decompilation.
+- Aurora (`extern/aurora`), MusyX (`extern/musyx-port`) and the other third-party components keep
+  their own licences; release packages carry them in `licenses/`.
 
-`LICENSE` (MIT) covers this project's own work — the platform layer, the build and
-packaging scripts, and the Android integration. It does **not** cover the game code
-under `src/` and `include/`, which comes from the decompilation and remains
-Nintendo's. See `NOTICE` for the exact scope and the third-party terms.
-`LICENSE-decomp` is upstream PrimeDecomp's CC0 dedication, kept as it was.
+`LICENSE` (MIT) covers this project's own work: the platform layer, the VR layer (`platform/vr`,
+the stereo renderer files in `extern/aurora`, the launchers), the build and packaging scripts. It
+does **not** cover the game code under `src/` and `include/`, which comes from the decompilation and
+remains Nintendo's. See `NOTICE` for the exact scope and the third-party terms. `LICENSE-decomp` is
+upstream PrimeDecomp's dedication, kept as it was.
 
-Metroid Prime 2: Echoes is a trademark of Nintendo. This project is unaffiliated
-with Nintendo and Retro Studios, and ships no game data.
+Metroid Prime 2: Echoes is a trademark of Nintendo. This project is unaffiliated with Nintendo and
+Retro Studios, and ships no game data.
 
 ## Documentation
 
 | Document | What it covers |
 |---|---|
-| `docs/SETTINGS.md` | Every control, setting and environment variable |
-| `docs/QOL.md` | Quality-of-life features: what is in, what is next |
-| `docs/RUNNING.md` | Running the port: harness, console scripts, sweeps, coverage |
-| `docs/PAL.md` | The PAL disc: what is verified |
-| `docs/TRILOGY.md` | Metroid Prime Trilogy: mount, HUD, radial menus |
-| `docs/MODS.md` | The mods folder, suit colours, texture pack |
-| `docs/CONSOLE.md` | The debug console (`MP2_CONSOLE`) |
-| `docs/ANDROID.md` | The Android port's status and build |
-| `docs/RELEASING.md` | What a release contains and must carry |
-| `docs/DECOMP_README.md` | PrimeDecomp/echoes README (decomp build) |
-| `PORT_NOTES.md` | How the port works and non-obvious facts |
-
-## AI assistance
-
-Parts of this port were written with AI coding assistants, under my oversight.
+| `docs/PRIMEDGUN.md` | The VR layer: what was ported, how, and what was checked |
+| `launcher/README.md` | The PC launcher and the Quest launcher panel |
+| `docs/SETTINGS.md` | The port's settings and environment variables |
+| `docs/RUNNING.md` | Running the port: harness, console scripts, sweeps |
+| `docs/PAL.md`, `docs/TRILOGY.md` | The PAL and Trilogy discs |
+| `docs/MODS.md` | Mods, suit colours, texture packs |
+| `PORT_NOTES.md` | How the native port works (upstream's notes) |
