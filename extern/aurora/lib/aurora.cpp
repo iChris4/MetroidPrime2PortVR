@@ -109,6 +109,16 @@ using webgpu::g_device;
 using webgpu::g_queue;
 using webgpu::g_surface;
 
+// PrimedGun: AURORA_SCREENSHOT_DIR, when set, is the folder screenshots go to (on Android SDL reads
+// a relative path as an asset, so a relative `screenshots` cannot be written there).
+const std::string& screenshot_dir() noexcept {
+  static const std::string dir = [] {
+    const char* env = std::getenv("AURORA_SCREENSHOT_DIR");
+    return env != nullptr && env[0] != '\0' ? std::string(env) : std::string("screenshots");
+  }();
+  return dir;
+}
+
 void record_screenshot(wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback>& callbacks) {
   std::string pngPath;
   {
@@ -195,9 +205,9 @@ void record_screenshot(wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubm
             SDL_DestroySurface(surface);
           } else {
             std::error_code ec;
-            std::filesystem::create_directories("screenshots", ec);
+            std::filesystem::create_directories(screenshot_dir(), ec);
             const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
-            const std::string path = "screenshots/metroid-prime-" + std::to_string(stamp) + ".bmp";
+            const std::string path = screenshot_dir() + "/metroid-prime-" + std::to_string(stamp) + ".bmp";
             if (!SDL_SaveBMP(surface, path.c_str())) {
               Log.warn("Unable to save screenshot {}: {}", path, SDL_GetError());
             } else {
@@ -261,10 +271,10 @@ void record_eye_screenshot(wgpu::CommandEncoder& encoder, std::vector<gfx::After
                                                        const_cast<void*>(pixels), static_cast<int>(bytesPerRow));
           if (surface != nullptr) {
             std::error_code ec;
-            std::filesystem::create_directories("screenshots", ec);
+            std::filesystem::create_directories(screenshot_dir(), ec);
             const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
-            const std::string path =
-                "screenshots/metroid-prime-" + std::to_string(stamp) + "-eye" + std::to_string(eye) + ".bmp";
+            const std::string path = screenshot_dir() + "/metroid-prime-" + std::to_string(stamp) + "-eye" +
+                                     std::to_string(eye) + ".bmp";
             if (SDL_SaveBMP(surface, path.c_str())) {
               Log.info("Eye screenshot saved to {}", path);
             }

@@ -59,6 +59,8 @@ open class PrimedGunVrActivity : SDLActivity() {
         Os.setenv("MP2_NO_DISC_DIALOG", "1", true)
         Os.setenv("MP2_VR", "1", true)
         Os.setenv("MP2_LOG_FILE", "1", true)
+        // Screenshots (F12, MP2_SHOT_AT) need an absolute folder: SDL reads a relative path as an asset.
+        Os.setenv("AURORA_SCREENSHOT_DIR", File(user, "screenshots").absolutePath, true)
         // Test runs over adb, e.g. straight into a room:
         //   am start -n org.primedgun.echoes/.PrimedGunVrActivity --es MP2_WORLD 3bfa3eff:01_temple_landing
         for (name in TEST_ENVIRONMENT) {

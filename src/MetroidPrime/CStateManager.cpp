@@ -1211,7 +1211,16 @@ void CStateManager::DrawDarkVisor(const CInGameGuiManagerSet& gui) {
   int y;
   int width;
   int height;
+#ifdef TARGET_PC
+  // PortVr: the frame is the console's box around the visor's lens, 114..522 of a 640-wide view
+  // (on the left of a wide one). The replay takes it at the same part of each eye's image, which
+  // is not where the head-locked lens lies in that eye (well right of it in the left eye), so the
+  // red of the dark visor's targets stopped across that eye. In the headset the whole view is the
+  // frame, as in split screen.
+  if (IsMultiplayer() || (mCurrentRenderPlayerIndex == 0 && PortVr::VrImmersive())) {
+#else
   if (IsMultiplayer()) {
+#endif
     const CViewport& viewport = CGraphics::GetViewport();
     x = viewport.mLeft;
     y = viewport.mTop;

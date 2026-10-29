@@ -502,12 +502,16 @@ void VrHeadLockedScales(float& xy, float& depth) noexcept {
 namespace {
 float s_headLockedPlaneTanHalfWidth = 0.f;
 float s_headLockedPlaneTanHalfHeight = 0.f;
+float s_headLockedPlaneDistance = 0.f;
 } // namespace
 
-void VrNoteHeadLockedPlane(float tanHalfWidth, float tanHalfHeight) noexcept {
+void VrNoteHeadLockedPlane(float tanHalfWidth, float tanHalfHeight, float distance) noexcept {
     s_headLockedPlaneTanHalfWidth = tanHalfWidth;
     s_headLockedPlaneTanHalfHeight = tanHalfHeight;
+    s_headLockedPlaneDistance = distance;
 }
+
+float VrHeadLockedPlaneDistance() noexcept { return s_headLockedPlaneDistance; }
 
 bool VrHeadLockedPlaneRay(const CTransform4f& cameraXf, float ndcX, float ndcY, CVector3f& origin,
                           CVector3f& direction) noexcept {

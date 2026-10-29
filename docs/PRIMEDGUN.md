@@ -9,6 +9,36 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Dark visor targets and the scan crosshair in the headset (2026-10-29)
+
+From the second headset test.
+
+- Dark visor (`CStateManager::DrawDarkVisor`): the red of the visor's targets comes from an A8 copy
+  of a box, the disc tweak's `GetDarkVisorFrame`: 114,86 408x286, the box around the lens on a
+  640-wide view. On the port's 796x448 view that box sits left of centre. The replay takes it
+  at the same part of each eye's image, but the head-locked lens is not at the same place in
+  both eyes. In the Quest's left eye the lens reaches 82% of the image while the box ends at 66%,
+  so targets right of it stayed white. PSVR2 has the same geometry. In the headset the whole view
+  is now the box, as in split screen, and the red reaches every eye's edges.
+- The dark visor's mask (`CInGameGuiManager::DrawDarkVisorMask`: the HUD's frame and the lens
+  mask, drawn through the HUD camera) is head-locked like the HUD; it was on the world route, so it
+  stayed in front of the body.
+- Scan crosshair (`CCompoundTargetReticle::Draw`, `DrawScanTargetGroup`: the "( )" and its lock
+  brackets): it sat ahead of the body camera in the world. In the headset it is drawn head-locked,
+  turned as the camera is, and moved out to the head-locked plane's distance and grown by as much
+  (`PortVr::VrHeadLockedPlaneDistance`). Head-locked at its own distance it was ten times nearer
+  than the window, beside it in each eye.
+- Quest desk tool: `AURORA_SCREENSHOT_DIR` (aurora.cpp) names the screenshot folder. The Quest
+  activity sets it to `<user>/screenshots`, since SDL reads a relative path as an asset there, so
+  `MP2_SHOT_AT` and `AURORA_SCREENSHOT_EYES` work on the device (`adb pull` the folder). Give
+  `MP2_WORLD` as an area name alone on the Quest (`--es MP2_WORLD 0e_temple_hive_hall`): a comma
+  in an extra dropped all of them.
+- Checked:
+  - Quest 3: eye images in `0e_temple_hive_hall` show the Splinters red at the left eye's right
+    edge, and the crosshair centred in the window in both eyes.
+  - PC (PSVR2 on the desk): the same, before the PC headset was taken for other work.
+  - Desktop `MP2_VR=0` runs in the dark and scan visors match the untouched port's pixel for pixel.
+
 ## Scan visor in the headset: window highlight and look to scan (2026-10-29)
 
 From the first headset test: the scan visor's highlight did not line up, and look to scan did

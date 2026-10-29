@@ -51,6 +51,7 @@
 #include "vr/vr_settings.h"
 #include "vr/vr_view.h"
 #include "MetroidPrime/Enemies/CPatterned.hpp"
+#include <aurora/gfx.h>
 
 #include <algorithm>
 #include <vector>
@@ -1322,6 +1323,30 @@ void CCompoundTargetReticle::Draw(const CStateManager& mgr, bool hideLockOn) con
       DrawCurrLockOnGroup(rotation, mgr);
       DrawSeeker(rotation, mgr);
       DrawCrosshairs(rotation, mgr);
+#ifdef TARGET_PC
+      const float vrPlaneDistance =
+          mPlayerIndex == 0 && PortVr::VrImmersive() ? PortVr::VrHeadLockedPlaneDistance() : 0.f;
+      if (vrPlaneDistance > 0.f) {
+        // PortVr: the scan crosshair marks the middle of the scan window, which lies on the plane
+        // in front of the head in the headset (CPlayerVisor::DrawScanEffect). It is drawn
+        // head-locked, turned as the camera is, and moved out to the plane's distance, grown by
+        // as much, so it keeps its size against the window and both eyes see it on the window.
+        const CTransform4f simulationXf =
+            mgr.GetCameraManager(mPlayerIndex)->GetSimulationCameraTransform(mgr, true);
+        CVector3f& target = const_cast< CVector3f& >(mTargetPosition);
+        const CVector3f savedTarget = target;
+        const float along = (savedTarget - simulationXf.GetTranslation()).Magnitude();
+        const float grow = along > 0.f ? vrPlaneDistance / along : 1.f;
+        target = simulationXf.GetTranslation() + simulationXf.GetForward() * vrPlaneDistance;
+        AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED);
+        DrawScanTargetGroup(
+            (CTransform4f(cameraXf.BuildMatrix3f(), CVector3f::Zero()) * CTransform4f::Scale(grow))
+                .BuildMatrix3f(),
+            mgr);
+        AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+        target = savedTarget;
+      } else
+#endif
       DrawScanTargetGroup(rotation, mgr);
       DrawNextLockOnGroup(rotation, mgr);
 #ifdef TARGET_PC

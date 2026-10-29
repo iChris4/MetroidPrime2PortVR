@@ -138,9 +138,12 @@ void VrMapHologram(float& distance, float& halfHeight, float& clearance, float& 
 // The head-locked route's scales (vr_metroid_hud_size, vr_metroid_hud_distance):
 // a HUD position's x and z (Prime camera space) by `xy`, its depth (y) by `depth`.
 void VrHeadLockedScales(float& xy, float& depth) noexcept;
-// PrimedGun Echoes: the head-locked plane's tangents (AuroraSetStereoHeadLockedPlane,
-// from CInGameGuiManager::Draw), for VrHeadLockedPlaneRay.
-void VrNoteHeadLockedPlane(float tanHalfWidth, float tanHalfHeight) noexcept;
+// PrimedGun Echoes: the head-locked plane (AuroraSetStereoHeadLockedPlane, from
+// CInGameGuiManager::Draw): its tangents and its distance in the game camera's
+// units, before the head-locked scales.
+void VrNoteHeadLockedPlane(float tanHalfWidth, float tanHalfHeight, float distance) noexcept;
+// The noted plane's distance; 0 before one is noted.
+float VrHeadLockedPlaneDistance() noexcept;
 // The ray from the head through a point of the head-locked plane, given as its
 // place in the flat view (x right, y up, -1..1 across the viewport): from the
 // head's position, `direction` one unit along the head's forward axis and as far

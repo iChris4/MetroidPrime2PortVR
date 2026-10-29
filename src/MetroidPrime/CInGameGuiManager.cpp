@@ -209,8 +209,17 @@ void CInGameGuiManager::PreDraw(CStateManager& mgr, bool cameraActive) {
 void CInGameGuiManager::DrawDarkVisorMask(const CStateManager& mgr) const {
   if (mDarkMaskFrame.get() != nullptr) {
     CGraphics::SetDepthRange(1.f / 512.f, 1.f / 256.f);
+#ifdef TARGET_PC
+    // PortVr: the mask is the HUD's frame and the lens's, drawn through the HUD camera, so it is
+    // head-locked as the HUD it masks is (Draw), not left in front of the body.
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED);
     mSamusHud->GetLoadedHudFrame()->GetRootWidget()->Draw(CGuiWidgetDrawParms::Default());
     mDarkMaskFrame->GetRootWidget()->Draw(CGuiWidgetDrawParms::Default());
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+#else
+    mSamusHud->GetLoadedHudFrame()->GetRootWidget()->Draw(CGuiWidgetDrawParms::Default());
+    mDarkMaskFrame->GetRootWidget()->Draw(CGuiWidgetDrawParms::Default());
+#endif
   }
 }
 
@@ -344,7 +353,7 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
         AuroraSetStereoHeadLockedPlane(vrHudCamera->GetDrawTanHalfWidth(),
                                        vrHudCamera->GetDrawTanHalfHeight(), kHudBodyDepth);
         PortVr::VrNoteHeadLockedPlane(vrHudCamera->GetDrawTanHalfWidth(),
-                                      vrHudCamera->GetDrawTanHalfHeight());
+                                      vrHudCamera->GetDrawTanHalfHeight(), kHudBodyDepth);
       }
     }
 #endif
