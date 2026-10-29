@@ -9,6 +9,24 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Cannon texture slots: Echoes' arm cannon textures (2026-10-29, for the launcher phase)
+
+`launcher/core/cannon_textures.h` still names the Metroid Prime cannon's three Dolphin-named
+textures, which Echoes never draws, so the VR menu's cannon texture slots change nothing here. The
+shipped slot presets were painted for that cannon's UV layout and would not fit Echoes' cannon
+either, so the names stay until the launcher phase decides what Echoes ships. Found by a texture
+dump (`MP2_DUMP_TEXTURES=1`, files in the run's `cache/texture_dumps`) and a solid-colour user pack
+(`MP2_USER_TEXTURES`) per candidate, Power Beam, Temple Grounds:
+
+| Texture | Use on the cannon |
+|---|---|
+| `tex1_256x256_5607ec62ec28d99d_14` | body (teal metal, the whole arm) |
+| `tex1_64x64_8491a3cd135c2670_14` | shine (reflection map over the body) |
+
+Echoes' dump names carry no `_m` (mipmap) marker, and the replacement matched without one. The
+cannon's glowing stripes use a texture not among the candidates tried (not the 64x64 ones listed in
+the scratch notes); the other beams' cannons were not checked.
+
 ## Parity, part 7: custom layout gate, wrist visor pick (2026-10-29)
 
 - `CTweakPlayerControls::GetMapping`: the port's Scan/Echo visor swap (F1 Controls > Options) is
