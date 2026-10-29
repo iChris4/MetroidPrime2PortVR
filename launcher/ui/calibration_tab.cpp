@@ -61,7 +61,8 @@ void BuildCalibrationTab(TabContext& ctx, QTabWidget* tabs) {
             QObject::tr("The morph ball HUD and message boxes ease toward the headset; off, they "
                         "stay fixed"));
   ctx.Check(layout, QObject::tr("Enable visor helmet"), "vr_visor_helmet_enabled", {},
-            QObject::tr("Allows user to turn helmet back on in the pause menu"));
+            QObject::tr("Draws the helmet frame in the headset, at the pause menu's Helmet "
+                        "Opacity; off, the headset shows no helmet"));
   ctx.Check(layout, QObject::tr("Show floor position marker"), "vr_position_marker_enabled");
 
   ctx.Separator(layout);

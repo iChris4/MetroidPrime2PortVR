@@ -120,6 +120,10 @@ bool VrMessageBoxInView() noexcept;
 // the easing plane (AURORA_STEREO_ROUTE_FLOATING_HUD) instead of the held
 // screen (ANCHORED_SCREEN).
 bool VrFloatingHud() noexcept;
+// PrimedGun's VISOR HELMET (vr_visor_helmet_enabled, off by default): while the headset shows the
+// game, the helmet frame is drawn only when it is on, and then at the game's Helmet Opacity option,
+// as PrimedGun let the pause menu bring the helmet back (CInGameGuiManager::Draw).
+bool VrHideHelmet() noexcept;
 // The pause menu, the logbook or the map screen (kIGGS_PauseGame,
 // kIGGS_PauseLogBook, kIGGS_MapScreen), opening, open or closing. Game thread,
 // at the end of every CInGameGuiManager::Update (and false from its destructor).

@@ -468,6 +468,8 @@ bool VrMessageBoxCinematic() noexcept { return s_messageBoxCinematic; }
 
 bool VrFloatingHud() noexcept { return GetVrSettings().floating_hud; }
 
+bool VrHideHelmet() noexcept { return ImmersiveNow() && !GetVrSettings().visor_helmet_enabled; }
+
 namespace {
 bool s_gameMenuOpen = false; // game thread only, like the message box note
 // The 3D map: its centre 1.2 m ahead, the map camera's view 0.45 m above and

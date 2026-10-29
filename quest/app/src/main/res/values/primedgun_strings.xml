@@ -175,7 +175,7 @@
     <string name="primedgun_floating_hud_note">The morph ball HUD and message boxes ease toward the headset; off, they stay fixed</string>
     <string name="primedgun_message_box_immersive_note">Item pickup and save messages stay over the blurred world in the headset; off, they show on the cinema screen</string>
     <string name="primedgun_visor_helmet_enabled">Enable visor helmet</string>
-    <string name="primedgun_visor_helmet_note">Allows user to turn helmet back on in the pause menu</string>
+    <string name="primedgun_visor_helmet_note">Draws the helmet frame in the headset, at the pause menu\'s Helmet Opacity; off, the headset shows no helmet</string>
     <string name="primedgun_position_marker_enabled">Show floor position marker</string>
 
     <string name="primedgun_section_culling">Culling</string>

@@ -9,6 +9,18 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## VISOR HELMET in the headset (2026-10-29)
+
+The VR menu's VISOR HELMET and the launchers' "Enable visor helmet" (`vr_visor_helmet_enabled`, off
+by default) came over from PrimedGun with nothing reading them, here and in the Metroid Prime fork:
+the helmet frame was always drawn, head-locked. As PrimedGun had it, the headset now leaves the
+helmet out unless the setting is on (`PortVr::VrHideHelmet`, checked where `CInGameGuiManager::Draw`
+draws it, player 0 while the headset shows the game), and then it is drawn at the pause menu's
+Helmet Opacity. The launchers' note says so. Quest eye captures in the hive hall: no helmet with the
+setting off, the frame with it on (`settings vr_visor_helmet_enabled 1` from `MP2_CONSOLE_AT`; on the
+Quest the extra needs quoting for the device shell, `adb shell "am start ... --es MP2_CONSOLE_AT
+'t20:a b;t46:c d'"`).
+
 ## The stray pixel in the middle of the screen (2026-10-29)
 
 Echoes' known "stray pixel" (a small teal right triangle just above the middle of the picture at any
