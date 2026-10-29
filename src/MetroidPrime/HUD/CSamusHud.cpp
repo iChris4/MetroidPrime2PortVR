@@ -897,6 +897,10 @@ void CSamusHud::UpdateVisorAndBeamMenus(float dt, const CStateManager& mgr) {
     if (mBeamMenu.get() != nullptr) {
       mBeamMenu->SetSelection(currentBeam, nextBeam, mBeamMenuTransition);
       mBeamMenu->SetPlayerHas(BuildPlayerHasBeams(mgr));
+#ifdef TARGET_PC
+      // PortVr: the VR beam wheel's hover lights that beam's box.
+      mBeamMenu->PortVrSetHighlight(mPlayerIndex == 0 ? PortVr::VrBeamWheelHoverBeam() : -1);
+#endif
       mMenuBeam = currentBeam;
     }
     if (mVisorMenu.get() != nullptr) {

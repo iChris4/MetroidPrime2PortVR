@@ -73,6 +73,7 @@
 #include "port_overlay.h"
 #include "port_power_charge_release.h"
 #include "port_presentation_rules.h"
+#include "vr/vr_model_mirror.h"
 #include "vr/vr_view.h"
 #endif
 
@@ -1496,6 +1497,12 @@ void CPlayerGun::Render(const CStateManager& mgr, const CVector3f& cameraTransla
   const CTransform4f gunTransform = CTransform4f::Translate(cameraTranslation) * mGunWorldXf;
 #endif
   const CTransform4f elbowTransform = gunTransform * mElbowLocalXf;
+#ifdef TARGET_PC
+  // PortVr: left-handed, the models are reflected (VrWeaponModelTransform, with the cull flipped by
+  // ModelMirrorScope); the pose, the effects and the shots keep the tracked transform.
+  const CTransform4f portModelTransform = PortVr::VrWeaponModelTransform(gunTransform);
+  const CTransform4f portModelElbowTransform = portModelTransform * mElbowLocalXf;
+#endif
   const CGunMorph::EGunState gunState = mGunMorph.mGunState;
   const CTransform4f backupView(CGraphics::GetViewMatrix());
   CGraphics::SetViewPointMatrix(gunTransform.GetInverse() * backupView);
@@ -1534,11 +1541,24 @@ void CPlayerGun::Render(const CStateManager& mgr, const CVector3f& cameraTransla
     mAuxWeapon->RenderMuzzleFx();
   }
   mCurrentBeam->PreRenderGunFx(mgr, gunTransform);
+#ifdef TARGET_PC
+  if (!mgr.IsMultiplayer()) {
+    const PortVr::ModelMirrorScope portMirror;
+    mGunMotion->Draw(mgr, portModelTransform);
+  }
+  const bool drawSuitArm = !mGrappleArm->IsGrappling() && mGunHolsterState == kGHS_Drawn;
+  {
+    const PortVr::ModelMirrorScope portMirror;
+    (this->*mRender)(mgr, cameraTranslation, drawSuitArm, portModelElbowTransform,
+                     portModelTransform, flags, flags);
+  }
+#else
   if (!mgr.IsMultiplayer()) {
     mGunMotion->Draw(mgr, gunTransform);
   }
   const bool drawSuitArm = !mGrappleArm->IsGrappling() && mGunHolsterState == kGHS_Drawn;
   (this->*mRender)(mgr, cameraTranslation, drawSuitArm, elbowTransform, gunTransform, flags, flags);
+#endif
   CElementGen* underwaterParticles =
       GetPlayer(const_cast< CStateManager& >(mgr))->GetUnderwaterParticles();
   if (underwaterParticles != nullptr && underwaterParticles->GetParticleCount() > 0) {

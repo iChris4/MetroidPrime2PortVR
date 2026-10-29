@@ -31,6 +31,7 @@
 #include "MetroidPrime/CActor.hpp"
 #include "MetroidPrime/Player/CPlayerGun.hpp"
 #include "port_overlay.h"
+#include "vr/vr_model_mirror.h"
 #endif
 
 #include <string.h>
@@ -205,7 +206,14 @@ void CGrappleArm::Render(const CStateManager& mgr, const CVector3f& pos, const C
   if (mStateFlags == 0) {
     return;
   }
+#ifdef TARGET_PC
+  // PortVr: left-handed, the arm is reflected with the cannon (CPlayerGun::Render).
+  const PortVr::ModelMirrorScope portMirror;
+  const CTransform4f xf =
+      CTransform4f::Translate(pos) * PortVr::VrWeaponModelTransform(mTransform) * mAuxTransform;
+#else
   const CTransform4f xf = CTransform4f::Translate(pos) * mTransform * mAuxTransform;
+#endif
   const int shaderSet = mgr.MaskUIdNumPlayers(mPlayerId);
   if (mRainSplashGenerator.get() && mRainSplashGenerator->IsRaining()) {
     CSkinnedModel::SetPointGeneratorFunc(mRainSplashGenerator.get(), PointGenerator);
@@ -452,7 +460,12 @@ bool CGrappleArm::UpdateGrappleBeam(float dt, const CTransform4f& beamLocator, C
   CPlayer& player = *GetPlayer(mgr);
   const CActor* target = TCastToConstPtr< CActor >(mgr.GetObjectById(player.GetOrbitTargetId()));
   mGrapplePointPosition = target ? target->GetTranslation() : mTransform.GetTranslation();
+#ifdef TARGET_PC
+  // PortVr: the beam leaves the drawn (reflected, left-handed) nozzle.
+  const CVector3f gunPos = (PortVr::VrWeaponModelTransform(mTransform) * beamLocator).GetTranslation();
+#else
   const CVector3f gunPos = (mTransform * beamLocator).GetTranslation();
+#endif
   const CVector3f beamPos = CVector3f::Lerp(gunPos, mGrapplePointPosition, mBeamT);
   bool connected = false;
   switch (mAnimationState) {

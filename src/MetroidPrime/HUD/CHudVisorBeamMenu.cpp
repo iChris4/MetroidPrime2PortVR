@@ -314,6 +314,16 @@ void CHudVisorBeamMenu::Update(float dt, const bool init) {
   default:
     break;
   }
+#ifdef TARGET_PC
+  // PortVr: the VR beam wheel's hover. The hovered item's box and icon go to white over whatever
+  // the phase set: these colours modulate the models, and the game's own select flash stays under
+  // white, so it reads as a clear step up, as PrimedGun's frame around the hovered icon did. Beams
+  // not yet owned stay as they are.
+  if (mPortVrHighlight >= 0 && mPortVrHighlight < 4 && mItems[mPortVrHighlight].mOpacity > 0.f) {
+    mItems[mPortVrHighlight].mIcon->SetColor(CColor::White());
+    mItems[mPortVrHighlight].mLozenge->SetColor(CColor::White());
+  }
+#endif
 
   if (mTextFade > 0.f) {
     if (!mMultiplayer || mType == kVBM_Visor) {

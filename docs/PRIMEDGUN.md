@@ -9,6 +9,19 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Parity, part 2: beam wheel highlight, left-handed weapons (2026-10-29)
+
+- Beam wheel: Echoes keeps the Metroid Prime command slots for its beams (`kC_PowerBeam` Power,
+  `kC_IceBeam` Dark, `kC_WaveBeam` Light, `kC_PlasmaBeam` Annihilator) on the same C-stick directions
+  (the port's keyboard fallbacks say so), so the wheel's up/right/down/left pulses and its
+  `GameBeamId` index pick and light the right Echoes beams. `CHudVisorBeamMenu::PortVrSetHighlight`
+  (a member with a default initializer, no constructor change) turns the hovered box and icon white;
+  `CSamusHud::UpdateVisorAndBeamMenus` feeds it `VrBeamWheelHoverBeam` in first person.
+- Left-handed (`vr_use_right_hand` off): `CPlayerGun::Render` draws the gun motion model and the
+  beam/suit-arm models through `VrWeaponModelTransform` under `ModelMirrorScope`; the effects, the
+  pose and the shots keep the tracked transform. `CGrappleArm::Render` and the grapple beam's start
+  likewise. Not checkable on the desk (both controllers lie side by side).
+
 ## Parity, part 1: message boxes and menus in the headset view (2026-10-29)
 
 The Metroid Prime VR port's immersive paused screens, on Echoes (defaults: `vr_message_box_immersive`

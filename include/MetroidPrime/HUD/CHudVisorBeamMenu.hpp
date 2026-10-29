@@ -23,6 +23,10 @@ public:
   void SetPlayerHas(const rstl::reserved_vector< bool, 4 >& enables, int selection);
   void SetSelection(int selection, int pending, float interpolation);
   void RefreshText(); // Guessed name
+#ifdef TARGET_PC
+  // PortVr: item `item` (0..3 as EBeamId, -1 none) is drawn lit: the VR beam wheel's hover.
+  void PortVrSetHighlight(int item) { mPortVrHighlight = item; }
+#endif
 
 private:
   struct SMenuItem {
@@ -64,6 +68,9 @@ private:
   float mAnimationDuration;
   bool mSwapBeamControls : 1;
   bool mMultiplayer : 1;
+#ifdef TARGET_PC
+  int mPortVrHighlight = -1;
+#endif
 };
 CHECK_SIZEOF(CHudVisorBeamMenu, 0x98)
 
