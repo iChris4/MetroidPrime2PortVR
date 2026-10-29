@@ -6,6 +6,8 @@
 
 #include "port_env.h"
 #include "port_strings.h"
+// PrimedGun Echoes: the VR page (platform/vr/vr_debug_tab.cpp).
+#include "vr/vr_debug_tab.h"
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -38,6 +40,8 @@ const DebugPage kDebugPages[] = {
     {"Save states", DrawSaveStatesTab},
     {"System", DrawSystemTab},
     {"Debug", DrawDebugTab},
+    // PrimedGun Echoes.
+    {"VR", PortVr::DrawVrDebugTab},
 };
 const int kDebugPageCount = static_cast< int >(std::size(kDebugPages));
 

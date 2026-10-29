@@ -244,6 +244,9 @@ extern "C" void AIPortPoll(void);
 #include "port_mouse.h"
 #include "port_entry.h"
 #include "port_overlay.h"
+// PortVr (PrimedGun Echoes): the headset paces the loop; the policy reads the game mode.
+#include "vr/openxr_integration.h"
+#include "vr/vr_host.h"
 
 #include "MetroidPrime/PortSkipFrontEnd.hpp"
 
@@ -417,12 +420,15 @@ bool CGameArchitectureSupport::UpdateTicks() {
   // the elapsed time holds (none on a short frame) and keeps the rest for the presentation blend.
   // A slow frame (over 35 ms) and max speed still take exactly one tick, as retail does. Under the
   // cap the retail loop is kept unchanged.
-  if (!PortOverlay::FrameLimit()) {
+  // PortVr: the headset paces the loop at its own rate (72-120 Hz), so the clock runs the game's
+  // 60 Hz ticks under it whatever the cap says; the retail loop would tick once per headset frame.
+  const bool vrPaced = PortVr::OpenXRIsRunning();
+  if (!PortOverlay::FrameLimit() || vrPaced) {
     mPortTickClock.SetPeriod(1.0 / 60.0);
     const unsigned fixedTicks = PortTiming::FixedTicksPerFrame();
     const unsigned ticks = fixedTicks != 0 ? fixedTicks
                            : mPortTickClock.Advance(stopwatchTime, maxSpeed || stopwatchTime > 0.035f,
-                                                    PortOverlay::FrameLimit());
+                                                    PortOverlay::FrameLimit() && !vrPaced);
     mArchQueue.Push(MakeMsg::CreateFrameBegin(kAMT_Game, mGameFrameCount));
     for (unsigned tick = 0; tick < ticks; ++tick) {
       PortTiming::BeginTick();
@@ -725,6 +731,10 @@ void CMain::FillInAssetIDs() {
 
 inline CGameGlobalObjects::~CGameGlobalObjects() {}
 
+#ifdef TARGET_PC
+// PortVr: whether the last presented frame drew the world (the policy's game mode).
+static bool sVrLastGameFrameDrawn = false;
+#endif
 int CMain::RsMain(int argc, const char* const* argv) {
   PPCSetFpIEEEMode();
   CStopwatch startupTimer;
@@ -831,6 +841,12 @@ int CMain::RsMain(int argc, const char* const* argv) {
         }
       }
       if (drawFrame) {
+#ifdef TARGET_PC
+        // PortVr: what the headset may show this frame (vr/prime_vr_policy.h), from the game's state
+        // and whether the last presented frame drew the world.
+        PortVrHost::PublishGameMode(sVrLastGameFrameDrawn,
+                                    static_cast< uint64_t >(architecture->GetFramesDrawn()));
+#endif
         gpRender->BeginScene();
 #ifdef TARGET_PC
         // Port: MP1's CMain::RsMain draws only when BeginScene opened a frame. Aurora declines one
@@ -839,6 +855,11 @@ int CMain::RsMain(int argc, const char* const* argv) {
         // FIFO processor with no recording session and crashed it. EndScene would return early
         // and not pace the loop, so this sleeps like MP1's loader idle.
         // A held frame (PortSetHoldFrame) opens none either, and keeps the video rate.
+        if (CGraphics::PortSceneOpen()) {
+          // PortVr: a pacing-thread teardown is serviced here, between Aurora's begin and the
+          // seal of this frame.
+          PortVr::OpenXRServiceProducerFrameBoundary();
+        }
         if (!CGraphics::PortSceneOpen()) {
           drawFrame = false;
           if (CGraphics::PortFrameHeld()) {
@@ -859,7 +880,9 @@ int CMain::RsMain(int argc, const char* const* argv) {
           } else if (interpolation > 1.f) {
             interpolation = 1.f;
           }
-          if (PortOverlay::FrameLimit() || !PortOverlay::SmoothFrames()) {
+          // PortVr: the headset draws at its own rate, so its frames always blend between the
+          // last two ticks (as the Metroid Prime VR port does), whatever the cap and the setting say.
+          if (!PortVr::OpenXRIsRunning() && (PortOverlay::FrameLimit() || !PortOverlay::SmoothFrames())) {
             interpolation = -1.f;
           }
           // A held simulation sits on its last tick, so the camera does too (the console's
@@ -899,6 +922,10 @@ int CMain::RsMain(int argc, const char* const* argv) {
           }
         }
         gpRender->EndScene();
+#ifdef TARGET_PC
+        // PortVr: whether this presented frame drew the world, for the next frame's game mode.
+        sVrLastGameFrameDrawn = mGameFrameDrawn;
+#endif
         if (mGameFrameDrawn) {
           ++architecture->GetFramesDrawn();
           mGameFrameDrawn = false;

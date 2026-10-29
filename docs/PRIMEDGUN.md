@@ -9,6 +9,73 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## The VR host layer on Echoes (2026-10-29)
+
+`platform/vr` and `platform/include/vr` come from the Metroid Prime VR fork, with its 18 GPU-free
+tests (`tests/port_vr_*.cpp`, `cmake/PortTests.cmake`). They build as the object library
+`mp_port_vr` (CMakeLists.txt), which is linked into `metroid_prime2_port` and passed to the REL
+scoping step like the other platform objects. `MP_ENABLE_OPENXR` (ON on Windows) adds the OpenXR
+loader (OpenXR-SDK 1.1.61, static, fetched) and the OpenXR-only files; off, the always-built set
+compiles to stubs and the game's `PortVr` calls still link.
+
+What differs from the Metroid Prime fork's files (line counts against it):
+
+| File | Why |
+|---|---|
+| `vr/vr_host.h`, `vr/vr_host_echoes.cpp` (new) | What the VR layer needs from the port (settings file, the F1 switches, cheats, save states, user texture pack, the live game, the game mode), so `platform/vr` no longer calls one port's `PortDebug`. Worth taking back to the Metroid Prime fork. |
+| `vr_menu.cpp` (85), `vr_settings.cpp` (12), `vr_settings.h` (8) | Through `PortVrHost`; `MP2_VR`, `MP2_VR_MIRROR`, `MP2_VR_LOG`, `MP2_FOVEATION`. |
+| `openxr_integration.cpp` (2) | `MP2_FDM_DEVICE`. |
+| `vr_pad.cpp` (28) | Player 0 of Echoes' per-player accessors; Echoes' visors take the Metroid Prime bits by number (echo where X-ray was, dark where thermal was). |
+| `vr_view.cpp` (39), `vr_view.h` (2) | Player 0; the controls-frozen test is Echoes' control hints (`kDF_All`, `kDF_Movement`) plus the ice freeze and an attached actor; the ground mover is always `MoveGroundCollider_New`; the surface-culling volume only where `port_surface_culling_math.h` exists. |
+| `vr_look_scan.cpp` (60) | Echoes' orbit code: `GetUpdateFrameIdx`, `ValidateOrbitTargetId` returns 0 for OK, grapple points need the player's area and `GetTweakPlayer()->GetGrappleDistance()`, `GetConstrainToAxis` for a swing-locked point, no default `TUniqueId`. |
+| `vr_wrist_visor.cpp` (97) | Draws nothing yet: the wrist icons are the HUD visor menu's models, reached in the Metroid Prime port through `CGuiModel` additions. The selection logic (vr_pad) is there; the setting is off by default. |
+
+Platform hooks:
+
+- `platform/main.cpp`: after the settings load, `PortVrHost::SetUserFolder`,
+  `ApplyVrEnvironmentOverrides`, `PushVrSettingsToAurora`; after `PortVideo::BeginGpuStart`,
+  `OpenXRPrepareAurora(config)` (a renderer chosen in F1 other than Auto or D3D12 leaves the headset
+  off for the run); `aurora_initialize`'s `AuroraInfo` kept; after the first `aurora_update`,
+  `OpenXRStartAfterAurora`; `OpenXRShutdownBeforeAurora` before every `aurora_shutdown`.
+- `platform/port_events.cpp`: `PortPaceFrame` waits for the headset's frame request instead of the
+  60 FPS cap while the session runs; `PortPumpEvents` applies the controller state first and runs
+  `VrPadUpdate` last, after the binding engine's `PADSetPortOverride` (Aurora merges the virtual pad
+  after the override, `PADSetVirtualExclusive`).
+- `platform/input/port_input_devices.cpp`: the headset's input focus counts as focus.
+- F1: a VR page (`platform/debug_ui/search.cpp`, `PortVr::DrawVrDebugTab`).
+- `settings.cfg`: `vr_<name>` keys, read through `PortVr::ApplyVrSetting` and written after the
+  table (`platform/debug_ui/settings.cpp`). Not in the settings self-test yet.
+- `platform/debug_ui/cheats.cpp`: Full health and Grant everything are functions
+  (`PortDebug::CheatFullHealth`, `CheatGrantEverything`) the VR menu calls too.
+
+Game hooks (inside `#ifdef TARGET_PC`; `tools/primedgun/strip_diff.py master` is CLEAN):
+
+- `src/MetroidPrime/main.cpp`: the fixed 60 Hz tick clock runs whenever the headset paces the loop
+  (Echoes uses it only with the cap off; capped, the retail loop would tick once per headset frame);
+  interpolation always on under the headset; `PortVrHost::PublishGameMode` before `BeginScene`;
+  `OpenXRServiceProducerFrameBoundary` once the scene is open; the last frame's world draw kept.
+- `src/Kyoto/Graphics/DolphinCGraphics.cpp`: frames tagged with the policy's content tag
+  (`aurora_begin/end_frame_tagged`), no video-rate pacing under the headset, `VrMenuUpdate` before
+  the F1 overlay.
+- `src/MetroidPrime/CStateManager.cpp`: `PortVrHost::SetStateManager(this)` each update,
+  `ForgetStateManager` in the destructor. The front end's own state manager (game mode `FRND`)
+  reads as no game.
+
+Game mode (`PortVrHost::PublishGameMode`): in game when the last presented frame drew the world,
+cinematic while a cinematic camera runs, paused in the map or a pause; anything else (front end,
+transitions) on the virtual screen. Message boxes, the save prompt and the immersive pause menus
+come with the game hooks.
+
+Checked on this PC: `build/vr` 50/50 port tests (Echoes' 32 and the 18 VR tests). With
+`MP2_VR=0`, and with VR on but no runtime reachable (`XR_RUNTIME_JSON` pointing nowhere: the
+loader fails and the game falls back to the desktop), the new-game run's screenshots are
+pixel-identical to the untouched port's. A desk session on the user's PSVR2 through SteamVR 2.18.4
+(the active runtime): 120 Hz, eyes 3400x3468, the boot on the virtual screen and gameplay replayed
+per eye at a steady 120 Hz with ~6.7 ms GPU render a frame (short skip bursts during area
+streaming), the game ticking at 60 Hz underneath, clean session shutdown. Nobody wore the headset:
+the picture, the pad and the controllers are unverified, and without the game hooks the HUD and
+helmet are still drawn as world geometry.
+
 ## Aurora: the VR renderer merged over Echoes' aurora (2026-10-29)
 
 Echoes vendors MP1's aurora: re-vendored from MP1 upstream `174975c2c` on 2026-10-23, then changed

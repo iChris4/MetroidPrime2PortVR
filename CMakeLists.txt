@@ -98,6 +98,18 @@ set(MP_REL_FIXTURE "" CACHE PATH
 set(MP_DOL_SYMBOLS "${CMAKE_CURRENT_SOURCE_DIR}/config/G2ME01/symbols.txt" CACHE FILEPATH
     "DOL symbol list matching MP_REL_FIXTURE")
 
+# PrimedGun Echoes: OpenXR VR (docs/PRIMEDGUN.md), Windows D3D12/Vulkan first; the Quest
+# (Android Vulkan) comes later. The VR host layer is platform/vr, its Aurora side
+# extern/aurora/lib/stereo*. Off, the game builds without it (the PortVr calls compile to stubs).
+set(MP_ENABLE_OPENXR_DEFAULT OFF)
+if(WIN32)
+    set(MP_ENABLE_OPENXR_DEFAULT ON)
+endif()
+option(MP_ENABLE_OPENXR "Build OpenXR VR support (PrimedGun Echoes)" ${MP_ENABLE_OPENXR_DEFAULT})
+unset(MP_ENABLE_OPENXR_DEFAULT)
+set(MP_OPENXR_SDK_DIR "" CACHE PATH
+    "Optional OpenXR-SDK source tree; when empty, use a package or fetch the pinned SDK")
+
 # The decompiled sources are written for a *signed* plain `char`, as PowerPC/MWCC
 # and every host the Metroid Prime port has been verified on agree on that. ARM
 # defaults `char` to unsigned, which silently changes sentinels such as
@@ -125,6 +137,53 @@ target_compile_definitions(mp_game PUBLIC BUILD_VERSION=0 VERSION=0)
 # The host musyx-port target defines MUSY_TARGET_PC; headers that reach <musyx/musyx.h>
 # (CAudioSys.hpp, CAuxEffect.hpp) must agree, or its Dolphin typedefs clash with Aurora's.
 target_compile_definitions(mp_game PUBLIC MUSY_TARGET=MUSY_TARGET_PC)
+
+# PrimedGun Echoes: the OpenXR loader, a system package, an explicit SDK tree, or the pinned SDK
+# fetched at configure time (static loader), as the Metroid Prime VR fork does.
+set(MP_OPENXR_TARGET "")
+if(MP_ENABLE_OPENXR)
+    if(NOT WIN32)
+        message(WARNING "OpenXR is only wired for Windows in PrimedGun Echoes so far; disabling MP_ENABLE_OPENXR")
+        set(MP_ENABLE_OPENXR OFF)
+    else()
+        if(NOT MP_OPENXR_SDK_DIR AND NOT FETCHCONTENT_SOURCE_DIR_OPENXR)
+            find_package(OpenXR CONFIG QUIET)
+        endif()
+        if(NOT TARGET OpenXR::openxr_loader AND NOT TARGET openxr_loader)
+            include(FetchContent)
+            set(BUILD_API_LAYERS OFF CACHE BOOL "" FORCE)
+            set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+            set(BUILD_CONFORMANCE_TESTS OFF CACHE BOOL "" FORCE)
+            set(BUILD_SDK_TESTS OFF CACHE BOOL "" FORCE)
+            set(DYNAMIC_LOADER OFF CACHE BOOL "" FORCE)
+            if(MP_OPENXR_SDK_DIR)
+                if(NOT EXISTS "${MP_OPENXR_SDK_DIR}/CMakeLists.txt")
+                    message(FATAL_ERROR "MP_OPENXR_SDK_DIR does not contain OpenXR-SDK: ${MP_OPENXR_SDK_DIR}")
+                endif()
+                add_subdirectory("${MP_OPENXR_SDK_DIR}" "${CMAKE_BINARY_DIR}/openxr-sdk" EXCLUDE_FROM_ALL)
+            else()
+                FetchContent_Declare(openxr
+                    URL https://github.com/KhronosGroup/OpenXR-SDK/archive/refs/tags/release-1.1.61.tar.gz
+                    URL_HASH SHA256=d5e2773d282642e6e250bd10266f316fc3ff3b8602c83db009a1f434205998e6
+                    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+                    EXCLUDE_FROM_ALL)
+                FetchContent_MakeAvailable(openxr)
+            endif()
+        endif()
+        if(TARGET OpenXR::openxr_loader)
+            set(MP_OPENXR_TARGET OpenXR::openxr_loader)
+        elseif(TARGET openxr_loader)
+            set(MP_OPENXR_TARGET openxr_loader)
+        else()
+            message(FATAL_ERROR "OpenXR was enabled but no loader target was provided")
+        endif()
+        message(STATUS "OpenXR VR enabled (loader target ${MP_OPENXR_TARGET})")
+    endif()
+endif()
+if(MP_ENABLE_OPENXR)
+    # The game hooks and the host layer both test this.
+    target_compile_definitions(mp_game PUBLIC MP_ENABLE_OPENXR=1)
+endif()
 
 # DIAGNOSTIC ONLY, and off by default. Adds src/MetroidPrime/PortReachStubs.cpp, which
 # defines the undefined symbols that the boot path *does* reach, so a diagnostic build can
@@ -703,6 +762,54 @@ if(AURORA_SDL3_TARGET)
     # picker.
     target_include_directories(mp_port_entry PRIVATE
         $<TARGET_PROPERTY:${AURORA_SDL3_TARGET},INTERFACE_INCLUDE_DIRECTORIES>)
+
+    # PrimedGun Echoes: the VR host layer (platform/vr, from the Metroid Prime VR fork). The first
+    # set is always built, with stubs when OpenXR is off, so the game's PortVr calls link either
+    # way; the rest needs the OpenXR loader.
+    add_library(mp_port_vr OBJECT
+        platform/vr/vr_host_echoes.cpp
+        platform/vr/vr_settings.cpp
+        platform/vr/prime_vr_policy.cpp
+        platform/vr/openxr_controller_snapshot.cpp
+        platform/vr/openxr_integration.cpp
+        platform/vr/vr_pad.cpp
+        platform/vr/vr_view.cpp
+        platform/vr/vr_wrist_visor.cpp
+        platform/vr/vr_look_scan.cpp
+        platform/vr/vr_menu.cpp
+        platform/vr/vr_debug_tab.cpp)
+    target_include_directories(mp_port_vr PRIVATE
+        "${CMAKE_BINARY_DIR}/generated"
+        platform/include
+        platform
+        extern/aurora/include
+        extern/musyx-port/include
+        include
+        launcher/core
+        $<TARGET_PROPERTY:${AURORA_SDL3_TARGET},INTERFACE_INCLUDE_DIRECTORIES>)
+    target_compile_definitions(mp_port_vr PRIVATE TARGET_PC AURORA MUSY_TARGET=MUSY_TARGET_PC
+        BUILD_VERSION=0 VERSION=0)
+    mp_signed_char(mp_port_vr)
+    target_link_libraries(mp_port_vr PRIVATE ${AURORA_SDL3_TARGET} aurora::core)
+    if(MP_ENABLE_OPENXR)
+        target_sources(mp_port_vr PRIVATE
+            platform/vr/openxr_runtime.cpp
+            platform/vr/openxr_diagnostics.cpp
+            platform/vr/openxr_passthrough.cpp
+            platform/vr/openxr_settings_panel.cpp
+            platform/vr/openxr_input.cpp
+            # The VR menu's TEXTURES tab applies the launcher's cannon texture slots.
+            launcher/core/cannon_textures.cpp)
+        target_compile_definitions(mp_port_vr PRIVATE MP_ENABLE_OPENXR=1)
+        target_link_libraries(mp_port_vr PRIVATE ${MP_OPENXR_TARGET})
+        if(WIN32)
+            target_sources(mp_port_vr PRIVATE platform/vr/openxr_d3d12.cpp)
+        endif()
+        # The platform files that call into the VR layer (main.cpp, port_events.cpp, the F1 page).
+        target_compile_definitions(mp_port_entry PRIVATE MP_ENABLE_OPENXR=1)
+        target_compile_definitions(mp_port_audio PRIVATE MP_ENABLE_OPENXR=1)
+        target_compile_definitions(mp_platform PRIVATE MP_ENABLE_OPENXR=1)
+    endif()
 else()
     message(FATAL_ERROR
         "platform/ai_dma.cpp needs SDL3, but Aurora provided no AURORA_SDL3_TARGET. "
@@ -918,6 +1025,40 @@ if(AURORA_SDL3_TARGET)
     target_include_directories(port_input_bindings_tests PRIVATE platform/include)
     add_test(NAME port_input_bindings_tests COMMAND port_input_bindings_tests)
     set_tests_properties(port_input_bindings_tests PROPERTIES TIMEOUT 30 LABELS port)
+
+    # PrimedGun Echoes: the VR layer's GPU-free tests, as in the Metroid Prime VR fork
+    # (cmake/PortTests.cmake's mp_port_test, label "port").
+    include(cmake/PortTests.cmake)
+    mp_port_test(port_vr_visibility_tests
+        SOURCES tests/port_vr_visibility.cpp
+            src/Kyoto/Math/CFrustumPlanes.cpp src/Kyoto/Math/CAABox.cpp
+            src/Kyoto/Math/CVector3f.cpp src/Kyoto/Math/CVector2f.cpp
+            src/Kyoto/Math/CTransform4f.cpp src/Kyoto/Math/CUnitVector3f.cpp
+            src/Kyoto/Math/CPlane.cpp src/Kyoto/Math/RMathUtils.cpp
+        INCLUDES platform/include extern/aurora/include extern/musyx-port/include include
+        DEFINITIONS TARGET_PC VERSION=0 BUILD_VERSION=0 GC_SECTIONS)
+    # The Kyoto math sources read the game's compat.h (MSL's float constants), as mp_game does.
+    if(MSVC)
+        target_compile_options(port_vr_visibility_tests PRIVATE ${MP_MSVC_GAME_OPTIONS})
+    else()
+        target_compile_options(port_vr_visibility_tests PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:-include${CMAKE_CURRENT_SOURCE_DIR}/platform/compat.h>")
+    endif()
+    foreach(t stereo look_scan visor_dpad beam_wheel menu snap_turn action_view camera_transition
+              rumble eye_resize directional_move room_scale)
+        mp_port_test(port_vr_${t}_tests SOURCES tests/port_vr_${t}.cpp
+            INCLUDES platform/include extern/aurora/include extern/aurora/lib)
+    endforeach()
+    foreach(t wrist_visor controller_layout smooth_turn)
+        mp_port_test(port_vr_${t}_tests SOURCES tests/port_vr_${t}.cpp INCLUDES platform/include)
+    endforeach()
+    mp_port_test(port_vr_policy_tests SOURCES tests/port_vr_policy.cpp platform/vr/prime_vr_policy.cpp
+        INCLUDES platform/include extern/aurora/include extern/aurora/lib)
+    if(MP_ENABLE_OPENXR AND MP_OPENXR_TARGET)
+        mp_port_test(port_vr_panel_pose_tests SOURCES tests/port_vr_panel_pose.cpp
+            INCLUDES platform/include DEFINITIONS MP_ENABLE_OPENXR)
+        target_link_libraries(port_vr_panel_pose_tests PRIVATE ${MP_OPENXR_TARGET})
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -930,7 +1071,7 @@ endif()
 # `libmetroid_prime2_port.so` and calls `SDL_main` in it. `-Wl,-u,SDL_main` keeps the
 # entry point, which nothing in the library references, from being dropped.
 # ---------------------------------------------------------------------------
-mp_scope_modules(mp_game mp_platform mp_port_entry mp_port_audio)
+mp_scope_modules(mp_game mp_platform mp_port_entry mp_port_audio mp_port_vr)
 if(ANDROID)
     add_library(metroid_prime2_port SHARED)
 elseif(IOS)
@@ -975,11 +1116,19 @@ target_sources(metroid_prime2_port PRIVATE
     ${MP_SCOPED_MODULE_OBJECTS}
     $<TARGET_OBJECTS:mp_port_entry>
     $<TARGET_OBJECTS:mp_platform>
-    $<TARGET_OBJECTS:mp_port_audio>)
+    $<TARGET_OBJECTS:mp_port_audio>
+    $<TARGET_OBJECTS:mp_port_vr>)
 target_include_directories(metroid_prime2_port PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/platform/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_definitions(metroid_prime2_port PRIVATE TARGET_PC AURORA)
+# PrimedGun Echoes: the OpenXR loader, and the D3D12 bridge's own device calls.
+if(MP_ENABLE_OPENXR)
+    target_link_libraries(metroid_prime2_port PRIVATE ${MP_OPENXR_TARGET})
+    if(WIN32)
+        target_link_libraries(metroid_prime2_port PRIVATE d3d12 dxgi)
+    endif()
+endif()
 mp_signed_char(metroid_prime2_port)
 mp_websocket_tls(metroid_prime2_port)
 if(ANDROID AND OpenSSL_FOUND)

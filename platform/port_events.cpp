@@ -27,6 +27,10 @@
 #include "port_touch_activity.h"
 #include "port_warp.h"
 #include "port_watchdog.h"
+// PrimedGun Echoes: the headset paces the loop and drives pad 0 (platform/vr).
+#include "vr/openxr_integration.h"
+#include "vr/vr_host.h"
+#include "vr/vr_pad.h"
 
 #include <chrono>
 #include <cstdio>
@@ -354,6 +358,15 @@ void PortPaceFrame() {
     uint64_t& start;
     ~Restart() { start = SDL_GetTicksNS(); }
   } restart{sWorkStartNs};
+  // PrimedGun Echoes: the headset paces the loop instead of the 60 FPS cap. The pacing thread
+  // publishes one request per packet it hands Aurora, and the loop draws once per request; a
+  // timeout (session idle, headset off) keeps it turning.
+  if (PortVr::OpenXRIsRunning()) {
+    static PortVr::OpenXRFrameRequest sRequest;
+    PortVr::OpenXRWaitForFrameRequest(sRequest, PortVr::OpenXRFrameRequestTimeoutMs());
+    sNextFrameDeadline = 0;
+    return;
+  }
   if (!PortOverlay::FrameLimit() || PortHarness::Unpaced()) {
     sNextFrameDeadline = 0;
     return;
@@ -407,6 +420,9 @@ bool PortPumpEvents() {
   static unsigned sFrame = 0;
   PortWatchdog::Heartbeat(++sFrame);
   PortMemoryLog::Tick(SDL_GetTicksNS());
+  // PrimedGun Echoes: the headset controllers the pacing thread last published, as a gamepad
+  // (the Gamepad controller mode) where SDL polls controllers, before this pump.
+  PortVr::OpenXRApplyControllerState();
   static const bool sWatching = SDL_AddEventWatch(ResumeEventWatch, nullptr);
   (void)sWatching;
   PortWarp::ApplyEnvOnce();
@@ -504,6 +520,9 @@ bool PortPumpEvents() {
   // PollPortActions above is not gated: the F1 toggle, screenshot and the remap capture still work.
   PADBlockInput(PortOverlay::Visible());
   PADSetPortOverride(0, &sPad0);
+  // PrimedGun Echoes: PrimedGun's control scheme on port 0, from the headset controllers, before the
+  // ticks read the pads. Aurora merges it after the override above (PADSetVirtualExclusive).
+  PortVr::VrPadUpdate(PortVrHost::StateManager());
   // A device or pack change requested since the last iteration swaps the replacement set here,
   // and the binding icons follow the input used last (both throttle themselves).
   PortTextures::Poll();

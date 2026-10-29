@@ -102,6 +102,10 @@ extern void* gPortGameHeapHi;
 #include "port_disc_replace.h"
 #include "port_overlay_internal.h"
 #include "port_prompts.h"
+// PrimedGun Echoes: the OpenXR host layer (platform/vr).
+#include "vr/openxr_integration.h"
+#include "vr/vr_host.h"
+#include "vr/vr_settings.h"
 #include "port_mods.h"
 #include "port_textures.h"
 #include "port_touch.h"
@@ -1159,6 +1163,12 @@ int main(int argc, char** argv) {
   PortSettings::Initialize(touchUser != nullptr ? touchUser : std::string());
   // Read now: an earlier request (the Android view's, on its own thread) found no path and left it.
   PortOverlaySettings::LoadSettings();
+  // PrimedGun Echoes: the VR settings came with the file (vr_* keys); MP2_VR, MP2_VR_MIRROR,
+  // MP2_VR_LOG and MP2_FOVEATION override them for this run. The VR menu's cannon texture library
+  // and log file live in the user folder.
+  PortVrHost::SetUserFolder(touchUser != nullptr ? touchUser : std::string());
+  PortVr::ApplyVrEnvironmentOverrides();
+  PortVr::PushVrSettingsToAurora();
 
   // The log file (platform/port_logfile.cpp) starts here, before aurora_initialize below, so
   // Aurora's own startup lines and anything that aborts during it land in the file too.
@@ -1322,7 +1332,23 @@ int main(int argc, char** argv) {
   // F1 > Video > Compatibility (PortVideo, f1b): OpenGL ES, the storage clamp, the low-power
   // adapter and the driver workarounds' Dawn toggles, all read when the GPU device is made.
   PortVideo::BeginGpuStart(config.userPath != nullptr ? config.userPath : "", config);
-  aurora_initialize(argc, argv, &config);
+  // PrimedGun Echoes: the OpenXR instance and the adapter it wants come before Aurora picks a
+  // device, so the eyes are copied on the compositor's own GPU (D3D12 on Windows; a renderer
+  // chosen in F1 other than Auto or D3D12 leaves the headset off for the run). A runtime that is
+  // not there falls back to the desktop unless vr_required is set.
+  const PortVr::OpenXRStartupResult vrStartup = PortVr::OpenXRPrepareAurora(config);
+  if (vrStartup == PortVr::OpenXRStartupResult::Unavailable) {
+    std::fprintf(stderr, "port: OpenXR unavailable: %s\n", PortVr::OpenXRLastError().c_str());
+    if (PortVr::GetVrSettings().required) {
+      PortVr::OpenXRRequestAppQuit("The headset could not start: " + PortVr::OpenXRLastError());
+      // Every early exit from here on ends OpenXR itself: left to the static OpenXRIntegration's
+      // destructor, xrDestroyInstance would run after the static loader's own statics are gone.
+      PortVr::OpenXRShutdownBeforeAurora();
+      PortLogDrain();
+      return 1;
+    }
+  }
+  const AuroraInfo auroraInfo = aurora_initialize(argc, argv, &config);
   // The settings file, JSON and the logs read and write numbers in the "C" format. A toolkit loaded
   // with the window (a GTK decoration plugin, an input method) may call setlocale(LC_ALL, ""), and
   // under a comma-decimal locale "1.5" would then read as 1 (MP1's main.cpp:1304).
@@ -1419,6 +1445,7 @@ int main(int argc, char** argv) {
 #endif
   if (discImage.empty()) {
     ReportNoDisc(argc > 0 ? argv[0] : nullptr);
+    PortVr::OpenXRShutdownBeforeAurora();
     aurora_shutdown();
     PortLogDrain();
     return 1;
@@ -1482,6 +1509,7 @@ int main(int argc, char** argv) {
     }
 #endif
     if (!ShowDiscError(problem, discImage, kCanPick)) {
+      PortVr::OpenXRShutdownBeforeAurora();
       aurora_shutdown();
       PortLogDrain();
       return 1;
@@ -1491,6 +1519,7 @@ int main(int argc, char** argv) {
     discImage = PickDiscUntilChosen();
     if (discImage.empty()) {
       ReportNoDisc(argc > 0 ? argv[0] : nullptr);
+      PortVr::OpenXRShutdownBeforeAurora();
       aurora_shutdown();
       PortLogDrain();
       return 1;
@@ -1520,6 +1549,25 @@ int main(int argc, char** argv) {
   // Prime the window and event state so the game's first frame can succeed: the
   // console build submits GX during early initialization, before its main loop.
   aurora_update();
+
+  // PrimedGun Echoes: the session, the eye swapchains and the pacing thread, while Aurora's frame
+  // worker is still idle (CGraphicsSys below opens the first frame). A failure falls back to the
+  // desktop unless the settings require the headset.
+  if (vrStartup == PortVr::OpenXRStartupResult::Prepared) {
+    if (PortVr::OpenXRStartAfterAurora(auroraInfo.backend)) {
+      std::fprintf(stderr, "port: OpenXR session started\n");
+    } else {
+      std::fprintf(stderr, "port: OpenXR did not start: %s\n", PortVr::OpenXRLastError().c_str());
+      if (PortVr::GetVrSettings().required) {
+        PortVr::OpenXRRequestAppQuit("The headset session could not start: " + PortVr::OpenXRLastError());
+        PortVr::OpenXRShutdownBeforeAurora();
+        aurora_dvd_close();
+        aurora_shutdown();
+        PortLogDrain();
+        return 1;
+      }
+    }
+  }
 
   // The game's entry owns the OS context and memory system. It returns void, so
   // the exit code is the platform's: reaching the end means the game returned.
@@ -1598,6 +1646,8 @@ int main(int argc, char** argv) {
     port::modules::ShutdownAll();
   }
 
+  // PrimedGun Echoes: stop publishing stereo work and destroy the session before Aurora's device goes.
+  PortVr::OpenXRShutdownBeforeAurora();
   PortDiscReplace::Shutdown();
   aurora_dvd_close();
   aurora_shutdown();

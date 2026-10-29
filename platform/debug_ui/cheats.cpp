@@ -150,7 +150,46 @@ void DrawItemChecks(CPlayerState& ps, const char* tableId, const SItemCheck* ite
   }
 }
 
+// The game's player state, or null outside gameplay: the front end has its own player state and its
+// own Samus, and the page is about the game's.
+CPlayerState* GamePlayerState() {
+  CPlayerState* ps = gpGameState != nullptr ? gpGameState->GetPlayerState().GetPtr() : nullptr;
+  if (ps == nullptr ||
+      (gpGameState != nullptr && gpGameState->GetGameMode().GetGameModeType() == 'FRND')) {
+    return nullptr;
+  }
+  return ps;
+}
+
 } // namespace
+
+// PrimedGun Echoes: the Full health and Grant everything buttons, also run from the VR menu's DEBUG
+// tab (platform/vr/vr_host_echoes.cpp). Game thread only.
+void CheatFullHealth() {
+  if (CPlayerState* ps = GamePlayerState()) {
+    ps->HealthInfo()->SetHP(ps->CalculateHealth());
+  }
+}
+
+void CheatGrantEverything() {
+  CPlayerState* ps = GamePlayerState();
+  if (ps == nullptr) {
+    return;
+  }
+  for (const SItemCheck& item : kAbilityItems) {
+    GrantItem(*ps, item.type, 1, 1);
+  }
+  for (const SItemCheck& item : kKeyItems) {
+    GrantItem(*ps, item.type, 1, 1);
+  }
+  for (const CPlayerState::EItemType counter :
+       {CPlayerState::kIT_Missile, CPlayerState::kIT_Powerbomb, CPlayerState::kIT_EnergyTanks,
+        CPlayerState::kIT_DarkAmmo, CPlayerState::kIT_LightAmmo}) {
+    const int max = CPlayerState::GetPowerUpMaxValue(counter);
+    GrantItem(*ps, counter, max, max);
+  }
+  ps->HealthInfo()->SetHP(ps->CalculateHealth());
+}
 
 // The switches and readouts for working on what mods draw: the Collision view (port_collision_view.h)
 // and the frame statistics. MP1's PBR / room-geometry counters have no counterpart in this port.
@@ -199,23 +238,11 @@ void DrawCheatsSection() {
   CHealthInfo* health = ps->HealthInfo();
   ImGui::Text("Health: %.0f / %.0f", health->GetHP(), ps->CalculateHealth());
   if (ImGui::Button("Full health")) {
-    health->SetHP(ps->CalculateHealth());
+    CheatFullHealth();
   }
   ImGui::SameLine();
   if (ImGui::Button("Grant everything")) {
-    for (const SItemCheck& item : kAbilityItems) {
-      GrantItem(*ps, item.type, 1, 1);
-    }
-    for (const SItemCheck& item : kKeyItems) {
-      GrantItem(*ps, item.type, 1, 1);
-    }
-    for (const CPlayerState::EItemType counter :
-         {CPlayerState::kIT_Missile, CPlayerState::kIT_Powerbomb, CPlayerState::kIT_EnergyTanks,
-          CPlayerState::kIT_DarkAmmo, CPlayerState::kIT_LightAmmo}) {
-      const int max = CPlayerState::GetPowerUpMaxValue(counter);
-      GrantItem(*ps, counter, max, max);
-    }
-    health->SetHP(ps->CalculateHealth());
+    CheatGrantEverything();
   }
 
   ImGui::SeparatorText("Abilities");

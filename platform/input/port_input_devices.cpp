@@ -1,3 +1,4 @@
+#include "vr/openxr_integration.h" // PrimedGun Echoes: the headset's input focus
 #include "port_input_devices.h"
 
 // Ported from the Prime 1 port's platform/input/port_input_devices.cpp. What MP2 has no backend or
@@ -1325,7 +1326,10 @@ SPoll Poll(unsigned mouseHeld, bool focused) {
 }
 
 PADStatus Poll() {
-  const bool focused = SDL_GetKeyboardFocus() != nullptr || SDL_GetMouseFocus() != nullptr;
+  // PrimedGun Echoes: while the headset has the input focus the window may not: its controllers
+  // must keep working with the desktop window in the background.
+  const bool focused = SDL_GetKeyboardFocus() != nullptr || SDL_GetMouseFocus() != nullptr ||
+                       PortVr::OpenXRHeadsetHasInputFocus();
   return Poll(SdlMouseHeld(), focused).status;
 }
 

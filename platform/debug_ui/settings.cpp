@@ -3,6 +3,8 @@
 // debug_ui/settings.cpp; the keys and the variables they reach are MP2's. State shared with
 // port_overlay.cpp is in port_overlay_internal.h.
 
+// PrimedGun Echoes: the vr_* keys (platform/vr/vr_settings.cpp).
+#include "vr/vr_settings.h"
 #include "../port_overlay_internal.h"
 
 #include "port_discord.h"
@@ -598,6 +600,10 @@ std::string sBaseline;
 namespace PortOverlaySettings {
 
 bool ApplySetting(const std::string& key, const std::string& value) {
+  // PrimedGun Echoes: the VR settings are their own table (vr_<name> keys).
+  if (PortVr::ApplyVrSetting(key, value)) {
+    return true;
+  }
   for (const SettingKey& entry : kSettingKeys) {
     if (entry.key != nullptr && key == entry.key) {
       entry.read(value);
@@ -659,6 +665,8 @@ std::string SettingsText() {
     }
     file << entry.key << '=' << value.str() << '\n';
   }
+  // PrimedGun Echoes: then every VR setting.
+  PortVr::WriteVrSettings(file);
   return file.str();
 }
 

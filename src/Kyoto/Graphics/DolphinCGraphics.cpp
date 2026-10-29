@@ -8,6 +8,10 @@
 #include "port_harness.h"
 #include "port_overlay.h"
 #include "port_video.h"
+// PortVr (PrimedGun Echoes): the presentation policy's frame tags, the headset's pacing, the VR menu.
+#include "vr/openxr_integration.h"
+#include "vr/prime_vr_policy.h"
+#include "vr/vr_view.h"
 #include "MetroidPrime/PortEfbCopy.hpp"
 
 #include <chrono>
@@ -20,14 +24,17 @@ namespace {
 // must be open before it runs; the first EndScene closes it.
 bool s_auroraFrameOpen = false;
 bool AuroraFrameBegin() {
-  if (!s_auroraFrameOpen && aurora_begin_frame()) {
+  // PortVr: tagged with the presentation policy's content tag (vr/prime_vr_policy.h).
+  if (!s_auroraFrameOpen && aurora_begin_frame_tagged(PortVr::PrimeVRPolicyContentTag())) {
     s_auroraFrameOpen = true;
   }
   return s_auroraFrameOpen;
 }
 void AuroraFrameEnd() {
   if (s_auroraFrameOpen) {
-    aurora_end_frame();
+    // PortVr: the frame is sealed with the policy's safety tag, so the headset only ever replays a
+    // stereo packet built for this content.
+    aurora_end_frame_tagged(PortVr::PrimeVRPolicyContentTag());
     s_auroraFrameOpen = false;
   }
 }
@@ -70,7 +77,8 @@ void PaceFrame(long periodUs) {
 
 // The cap's pacing after a presented (or held) frame.
 void PaceVideoRate() {
-  if (!PortHarness::Unpaced()) {
+  // PortVr: the headset paces the loop (PortPaceFrame waits for its frame request).
+  if (!PortHarness::Unpaced() && !PortVr::OpenXRIsRunning()) {
     if (PortOverlay::FrameLimit()) {
       PaceFrame(CGraphics::Is50Hz() ? 20000 : 16667);
     } else if (const int cap = PortOverlay::FpsCap(); cap > 0) {
@@ -1081,6 +1089,8 @@ void CGraphics::EndScene() {
   VISetPostRetraceCallback(VideoPostCallback);
   GXFlush();
 #ifdef TARGET_PC
+  // PortVr: PrimedGun's VR menu, while it is open in the headset.
+  PortVr::VrMenuUpdate();
   // Port: the debug overlay draws into this frame before it is presented.
   if (s_auroraFrameOpen) {
     PortOverlay::Draw();

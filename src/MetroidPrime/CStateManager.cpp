@@ -155,6 +155,7 @@
 #include "rstl/vector.hpp"
 
 #ifdef TARGET_PC
+#include "vr/vr_host.h" // PortVr (PrimedGun Echoes): the live game for the VR layer
 #include "port_harness.h"
 #include "port_entry.h"
 #include "port_hold_toggle.h"
@@ -2423,6 +2424,8 @@ CStateManager::~CStateManager() {
     PortOverlay::ClearGameTime();
   }
   PortSaveState::Forget(this);
+  // PortVr: the VR layer must not read a state manager that is going away.
+  PortVrHost::ForgetStateManager(this);
 #endif
   mTearingDown = true;
   CMemory::OffsetFakeStatics(-(mObjectLists.size() * sizeof(CObjectList) +
@@ -4362,6 +4365,8 @@ void CStateManager::Update(float inputDt, CArchitectureQueue& queue) {
     }
     PortOverlay::SetGameState(gpGameState->CurrentWorldAssetId(), areaNow, w);
     PortOverlay::SetAreaLayers(mCurrentWorldLayerState.GetPtr(), areaNow);
+    // PortVr: the live game for the VR layer (the pad's mode, the policy's game mode).
+    PortVrHost::SetStateManager(this);
     // Discord Rich Presence: the area, energy, missiles and item percentage shown on the player's
     // profile while the desktop Discord client runs (platform/port_discord.cpp).
     PortDiscordTick(*this);
