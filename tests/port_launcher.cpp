@@ -653,7 +653,19 @@ void TestCannon(const fs::path& root) {
   Cannon::Folders folders{root / "user" / "primedgun" / "cannon_textures",
                           root / "exe" / "primedgun" / "cannon_textures",
                           root / "user" / "user_textures"};
-  for (int index = 0; index < 3; ++index) {
+  // Echoes' cannon: Aurora's names (no `_m`), each once, the shine on its 64x64 mask, and never the
+  // reflection map world objects share.
+  std::set<std::string_view> unique(Cannon::kTextureNames.begin(), Cannon::kTextureNames.end());
+  Check(unique.size() == Cannon::kTextureNames.size(), "each cannon texture is listed once");
+  bool namesOk = true;
+  for (std::string_view name : Cannon::kTextureNames) {
+    namesOk = namesOk && name.rfind("tex1_", 0) == 0 && name.find("_m_") == std::string_view::npos &&
+              name != "tex1_64x64_2eb482271cd2bc4c_14";
+  }
+  Check(namesOk, "cannon textures go by Aurora's names, without the shared reflection map");
+  Check(Cannon::kTextureNames[Cannon::kShineIndex] == "tex1_64x64_8491a3cd135c2670_14",
+        "the shine mask is the 64x64 shine");
+  for (int index = 0; index < Cannon::kTextureCount; ++index) {
     const std::string name(Cannon::kTextureNames[index]);
     WriteFile(folders.shippedLibrary / "slot_1" / (name + ".dds"), "slot1-" + name);
     WriteFile(folders.shippedLibrary / "default" / (name + ".dds"), "default-" + name);
@@ -672,6 +684,8 @@ void TestCannon(const fs::path& root) {
   const fs::path pack = folders.userTextures / std::string(Cannon::kPackFolder);
   Check(Cannon::ApplySlot(folders, 1, error), "slot 1 applies");
   Check(ReadFile(pack / (shine + ".dds")) == "edited", "the slot's files go to the managed folder");
+  const std::string last(Cannon::kTextureNames.back());
+  Check(ReadFile(pack / (last + ".dds")) == "slot1-" + last, "every texture of the slot is applied");
 
   const fs::path removed = Cannon::RemoveShine(folders, 1, error);
   Check(ReadFile(removed) == "noshine", "Remove Shine puts the preset in the slot");

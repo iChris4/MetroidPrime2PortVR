@@ -278,23 +278,51 @@ through off the headset):
 Checked on the desk: the dark world's motes and a lens flare render in both eyes with nothing
 stray. VR-off A/B identical (after the usual first-run bird difference).
 
-## Cannon texture slots: Echoes' arm cannon textures (2026-10-29, for the launcher phase)
+## Cannon texture slots: Echoes' arm cannon textures (2026-10-29)
 
-`launcher/core/cannon_textures.h` still names the Metroid Prime cannon's three Dolphin-named
-textures, which Echoes never draws, so the VR menu's cannon texture slots change nothing here. The
-shipped slot presets were painted for that cannon's UV layout and would not fit Echoes' cannon
-either, so the names stay until the launcher phase decides what Echoes ships. Found by a texture
-dump (`MP2_DUMP_TEXTURES=1`, files in the run's `cache/texture_dumps`) and a solid-colour user pack
-(`MP2_USER_TEXTURES`) per candidate, Power Beam, Temple Grounds:
+The slots now name Echoes' cannon. Echoes draws a cannon model of its own per beam (`CGunWeapon`'s
+solid model; the suit arm is a second model, `mSuitArmModelData`), so `launcher/core/cannon_textures.h`
+lists 23 textures by Aurora's names (as `MP2_DUMP_TEXTURES` names them, no `_m` mipmap marker; the
+Metroid Prime names with `_m` never matched here):
 
-| Texture | Use on the cannon |
+| Beams | Textures |
 |---|---|
-| `tex1_256x256_5607ec62ec28d99d_14` | body (teal metal, the whole arm) |
-| `tex1_64x64_8491a3cd135c2670_14` | shine (reflection map over the body) |
+| all four | collar band `642e777b467c55b0` (64x64, where the arm goes in), collar stripes `8d6f00b5d395f22f` (64x8), collar trim `38ee0f92b65d44f7` (64x64), parts `af8ceb8f74fa2048` and `bec6d78ea7dd739e` (128x128; the second is Metroid Prime's "Cannon texture B" too), detail `f31df448bb96f9e2` (8x8), ramps `3a038381a6d99bc9` and `8ccaa740b6342439` (8x8 I4, `_0`), shine `8491a3cd135c2670` (64x64, `kShineIndex`) |
+| Power | body `5607ec62ec28d99d` (256x256), `c29c6ac44a1eea38` (16x16), strip `9fa941b46459adc5` (8x64) |
+| Dark | body `f25b513bf95b45f7`, strips `0eb08aa0692d1837` and `b4b7ccaa1146b62f` (32x256), `f0d21841aa6e3a84` (32x32), `960d6073b77400bd` (64x64) |
+| Light | body `b4b337024b1924ab`, strips `0ba7b3fc6769569a` and `aab755b28bb2ff26` |
+| Annihilator | body `8afc770aee15820f`, strips `6070467fdcffbae4` and `b4fbbc827929c285` |
 
-Echoes' dump names carry no `_m` (mipmap) marker, and the replacement matched without one. The
-cannon's glowing stripes use a texture not among the candidates tried (seven other 64x64 and 64x128
-textures from the same dump); the other beams' cannons were not checked.
+Left out: the suit arm's four textures (`b51c785886bf4dfc`, `0cdb538d17965fe5`, `35f2fece808e0051`,
+`38b803a22eabb2ef`), two bound beside the gun draw (`096a3717bf66cc4a`, `cb8b58609aa75014`), and the
+cannon's reflection map `2eb482271cd2bc4c`, which world objects use too (a Splinter cocoon in Temple
+Grounds took the test colour). Of the 23, no other was bound outside the gun in the landing site,
+the hive hall and the dark world entrance.
+
+How they were found: a draw tag around each of `CPlayerGun::Render`'s model draws, `RenderGun`'s
+`DrawArm` and `CGunWeapon::Draw`'s solid and suit arm models, and in aurora's `resolve_static_texture`
+the replacement name of every texture bound under each tag, per beam (`give darkBeam` etc., `beam
+dark`). Then solid-colour user packs: per beam, then a two-pass colour code for the shared ones, then
+one colour each. The labels follow what the colours showed; the five shared ones not seen from the
+first-person view keep their sizes as names.
+
+Both launchers show the Cannon Textures tab again (Qt `BuildCannonTab`, the Quest's
+`CANNON_TEXTURES`), listing the 23 rows from the one list (the Quest's labels through the new JNI
+`cannonTextureLabels`). No slot textures ship yet (the Metroid Prime presets do not fit), so slots
+1-4 are empty and Custom is the one to fill; Remove Shine needs a `presets/remove_shine` file for the
+new shine, which does not exist yet. Checked: PC launcher (Custom filled with test colours, Apply
+through UI Automation: 23 files in `user_textures/000_primedgun_cannon`, the game then draws them on
+every beam, and a slot file wins over another pack folder's file for the same texture); Quest: the
+same 23 files in the user pack loaded and drawn (`[textures] loaded 23 user texture replacements`),
+the Cannon tab opens (`--es tab CANNON_TEXTURES`). Not clicked: Apply on the Quest panel, the VR menu's
+slot rows.
+
+The relicense changed the Dawn patch files' SPDX lines, and `Build-QuestDawn.ps1` keys its cached
+package on those files' text, so it started a Dawn rebuild for identical code, which fails in this
+tree: its partial re-extraction deletes the freshly extracted `src/` when the work folder holds the
+source folder (now missing from `build/qd/dawn-1155e0ed...`). The local `build/qd/dawn-package.json`
+was re-keyed instead (the old hash reproduced from the files before the relicense; only the seven
+SPDX lines differ; the previous manifest kept as `dawn-package.json.before-mit`).
 
 ## Parity, part 7: custom layout gate, wrist visor pick (2026-10-29)
 

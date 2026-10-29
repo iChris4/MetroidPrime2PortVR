@@ -218,9 +218,6 @@
     <string name="primedgun_cannon_slot_custom">Custom</string>
     <string name="primedgun_cannon_slot_n">Slot %1$d</string>
     <string name="primedgun_cannon_selected_slot_files">Selected Slot Files</string>
-    <string name="primedgun_cannon_texture_a">Cannon texture A</string>
-    <string name="primedgun_cannon_texture_b">Cannon texture B</string>
-    <string name="primedgun_cannon_shine_mask">Shine mask</string>
     <string name="primedgun_cannon_preview">Texture preview</string>
     <string name="primedgun_cannon_no_preview">No preview</string>
     <string name="primedgun_cannon_import">Import...</string>

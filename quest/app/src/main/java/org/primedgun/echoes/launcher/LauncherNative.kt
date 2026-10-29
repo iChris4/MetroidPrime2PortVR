@@ -51,6 +51,9 @@ object LauncherNative {
 
     @JvmStatic external fun cannonLibraryFolder(): String
 
+    /** The cannon's textures in slot order, as launcher/core/cannon_textures.h labels them. */
+    @JvmStatic external fun cannonTextureLabels(): Array<String>
+
     @JvmStatic external fun cannonPackFolders(): Array<String>
 
     @JvmStatic external fun cannonSource(slot: Int, index: Int): String

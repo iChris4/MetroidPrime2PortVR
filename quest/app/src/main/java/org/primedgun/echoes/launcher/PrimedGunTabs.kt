@@ -24,22 +24,23 @@ object PrimedGunTabs {
         SETUP(R.string.primedgun_tab_setup),
         CONTROLLER(R.string.primedgun_tab_controller),
         CALIBRATION(R.string.primedgun_tab_calibration),
-        // PrimedGun Echoes: no Cannon Textures tab; its slots are the Metroid Prime cannon's
-        // (docs/PRIMEDGUN.md, "Cannon texture slots").
+        // PrimedGun Echoes: the slots name Echoes' cannon textures; none ship yet, so Custom is
+        // the one to fill (docs/PRIMEDGUN.md, "Cannon texture slots").
+        CANNON_TEXTURES(R.string.primedgun_tab_cannon_textures),
         LAYOUT(R.string.primedgun_tab_layout),
         PORT_CONFIG(R.string.primedgun_tab_port_config),
         ABOUT(R.string.primedgun_tab_about)
     }
 
     /** The tabs whose rows edit settings, which lock while the game runs. */
-    val SETTINGS_TABS = setOf(Tab.CONTROLLER, Tab.CALIBRATION, Tab.PORT_CONFIG)
+    val SETTINGS_TABS = setOf(Tab.CONTROLLER, Tab.CALIBRATION, Tab.CANNON_TEXTURES, Tab.PORT_CONFIG)
 
     /** Rows for the list-based tabs. The other tabs have their own fragments. */
     fun itemsFor(context: Context, tab: Tab): List<PrimedGunItem> = when (tab) {
         Tab.CONTROLLER -> controllerItems(context)
         Tab.CALIBRATION -> calibrationItems(context)
         Tab.PORT_CONFIG -> portConfigItems(context)
-        Tab.SETUP, Tab.LAYOUT, Tab.ABOUT -> emptyList()
+        Tab.SETUP, Tab.CANNON_TEXTURES, Tab.LAYOUT, Tab.ABOUT -> emptyList()
     }
 
     // PrimedGun's Reset Controller (launcher/ui/controller_tab.cpp).

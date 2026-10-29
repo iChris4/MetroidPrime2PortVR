@@ -107,9 +107,9 @@ LauncherWindow::LauncherWindow()
   BuildSetupTab(m_tabs);
   BuildControllerTab(m_ctx, m_tabs);
   BuildCalibrationTab(m_ctx, m_tabs);
-  // PrimedGun Echoes: no Cannon Textures tab. Its slots name the Metroid Prime
-  // cannon's textures and its presets were painted for that cannon; Echoes'
-  // cannon is another model (docs/PRIMEDGUN.md, "Cannon texture slots").
+  // PrimedGun Echoes: the slots name Echoes' cannon textures; none ship yet (the
+  // Metroid Prime presets do not fit this cannon), so Custom is the one to fill.
+  BuildCannonTab(m_ctx, m_tabs);
   BuildLayoutTab(m_ctx, m_tabs);
   BuildPortConfigTab(m_ctx, m_tabs);
   BuildAboutTab(m_ctx, m_tabs);

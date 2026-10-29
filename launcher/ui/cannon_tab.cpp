@@ -80,14 +80,14 @@ QString SlotName(int slot) { return QString::fromStdString(Cannon::SlotName(slot
 struct CannonWidgets {
   QButtonGroup* slotGroup = nullptr;
   QLabel* status = nullptr;
-  std::array<QLabel*, 3> paths{};
-  std::array<QLabel*, 3> previews{};
-  std::array<QPushButton*, 3> imports{};
+  std::array<QLabel*, Cannon::kTextureCount> paths{};
+  std::array<QLabel*, Cannon::kTextureCount> previews{};
+  std::array<QPushButton*, Cannon::kTextureCount> imports{};
 };
 
 void RefreshRows(const TabContext& ctx, const CannonWidgets& w) {
   const int slot = w.slotGroup->checkedId();
-  for (int index = 0; index < 3; ++index) {
+  for (int index = 0; index < Cannon::kTextureCount; ++index) {
     w.imports[index]->setVisible(slot == Cannon::kCustomSlot);
     if (slot <= 0) {
       SetPathLabel(w.paths[index], QObject::tr("Default: no PrimedGun override"));
@@ -161,7 +161,7 @@ void BuildCannonTab(TabContext& ctx, QTabWidget* tabs) {
   auto* box = new QGroupBox(QObject::tr("Selected Slot Files"));
   auto* grid = new QGridLayout(box);
   grid->setColumnStretch(2, 1);
-  for (int index = 0; index < 3; ++index) {
+  for (int index = 0; index < Cannon::kTextureCount; ++index) {
     auto* target = new QLabel(QObject::tr(Cannon::kTextureLabels[index].data()), box);
     auto* path = new QLabel(box);
     path->setTextInteractionFlags(Qt::TextSelectableByMouse);

@@ -10,8 +10,8 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
 
 # PrimedGun Echoes: no memory-card transfer (the game shares or mirrors a
 # Dolphin or PrimeHack card itself, F1 > System > Memory card), so no Aurora
-# card library; the Cannon Textures tab is not shown (its slots are Metroid
-# Prime's), so no shipped slot textures either.
+# card library. No slot textures ship for the Cannon Textures tab yet: the
+# Metroid Prime presets do not fit Echoes' cannon.
 set(PRIMEDGUN_LAUNCHER_UI_SOURCES
     ui/about_tab.cpp
     ui/calibration_tab.cpp

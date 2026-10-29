@@ -503,6 +503,7 @@ class LauncherActivity : AppCompatActivity() {
 
     private fun createFragment(tab: PrimedGunTabs.Tab): Fragment = when (tab) {
         PrimedGunTabs.Tab.SETUP -> PrimedGunSetupFragment()
+        PrimedGunTabs.Tab.CANNON_TEXTURES -> PrimedGunCannonTexturesFragment()
         PrimedGunTabs.Tab.LAYOUT -> PrimedGunLayoutFragment()
         PrimedGunTabs.Tab.ABOUT -> PrimedGunAboutFragment()
         PrimedGunTabs.Tab.CONTROLLER,

@@ -39,11 +39,6 @@ class PrimedGunCannonTexturesFragment : Fragment(), PrimedGunRefreshable {
         const val SLOT_COUNT = 6
         private const val SLOT_KEY = "vr_cannon_texture_slot"
         private const val PREVIEW_SIDE = 256
-        private val TEXTURE_LABELS = intArrayOf(
-            R.string.primedgun_cannon_texture_a,
-            R.string.primedgun_cannon_texture_b,
-            R.string.primedgun_cannon_shine_mask,
-        )
     }
 
     private class TextureRow(val preview: ImageView, val noPreview: TextView, val path: TextView, val import: Button)
@@ -102,9 +97,11 @@ class PrimedGunCannonTexturesFragment : Fragment(), PrimedGunRefreshable {
         }
 
         rows.clear()
-        for (index in TEXTURE_LABELS.indices) {
+        // The texture list is the shared one (launcher/core/cannon_textures.h), so both launchers
+        // show the same rows in the same order.
+        for ((index, label) in LauncherNative.cannonTextureLabels().withIndex()) {
             val row = inflater.inflate(R.layout.list_item_primedgun_cannon_texture, b.cannonTextureRows, false)
-            row.findViewById<TextView>(R.id.cannon_texture_label).setText(TEXTURE_LABELS[index])
+            row.findViewById<TextView>(R.id.cannon_texture_label).text = label
             val import = row.findViewById<Button>(R.id.cannon_texture_import)
             import.setOnClickListener { onImportClicked(index) }
             b.cannonTextureRows.addView(row)

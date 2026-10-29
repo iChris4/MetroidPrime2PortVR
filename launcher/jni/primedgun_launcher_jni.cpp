@@ -401,6 +401,17 @@ LAUNCHER_JNI(jstring, cannonLibraryFolder)(JNIEnv* env, jclass) {
   return Guarded<jstring>(env, nullptr, [&] { return ToJava(env, PathToUtf8(gState.cannon.library)); });
 }
 
+// The cannon's textures in slot order, the index every other cannon call takes.
+LAUNCHER_JNI(jobjectArray, cannonTextureLabels)(JNIEnv* env, jclass) {
+  return Guarded<jobjectArray>(env, nullptr, [&] {
+    std::vector<std::string> labels;
+    for (std::string_view label : Cannon::kTextureLabels) {
+      labels.emplace_back(label);
+    }
+    return ToJavaArray(env, labels);
+  });
+}
+
 // Where an applied slot goes: the pack root, or each device folder of a pack
 // split by device.
 LAUNCHER_JNI(jobjectArray, cannonPackFolders)(JNIEnv* env, jclass) {
