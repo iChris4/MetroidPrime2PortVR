@@ -9,6 +9,21 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Parity, part 8: particle billboards face the head (2026-10-29)
+
+`CElementGen`'s camera-plane quads turn to face the head about their own centres in the headset
+(`VrParticleBillboard`, the Metroid Prime VR port's helper, already in the host layer): every
+billboard vertex of the eight `RenderBasicParticles*` helpers (centre `viewPos`), `RenderParticles`
+(32, centre `viewPoint`), `RenderParticlesFlameThrower` (4) and `RenderParticlesIndirectTexture`
+(4) goes through `VrParticleBillboard::Emit` under TARGET_PC, the retail `GXPosition3f32` under
+`#else` (converted by a script, the same 76 vertices the Metroid Prime port converts). The ORNT
+quads (oriented along their motion), the flamethrower's oriented quads, `RenderLines` and the model
+particles are left as they are, as there. Off the headset the helper passes the vertex through.
+
+Checked on the desk: floating debris and a beam shot render in both eyes with nothing stray; a
+VR-off A/B was identical twice. The other billboard sources (`CParticleSwoosh`, `CEnvFxManager`,
+`CHUDBillboardEffect`, `CVisorFlare`) are not converted yet.
+
 ## Cannon texture slots: Echoes' arm cannon textures (2026-10-29, for the launcher phase)
 
 `launcher/core/cannon_textures.h` still names the Metroid Prime cannon's three Dolphin-named
@@ -24,8 +39,8 @@ dump (`MP2_DUMP_TEXTURES=1`, files in the run's `cache/texture_dumps`) and a sol
 | `tex1_64x64_8491a3cd135c2670_14` | shine (reflection map over the body) |
 
 Echoes' dump names carry no `_m` (mipmap) marker, and the replacement matched without one. The
-cannon's glowing stripes use a texture not among the candidates tried (not the 64x64 ones listed in
-the scratch notes); the other beams' cannons were not checked.
+cannon's glowing stripes use a texture not among the candidates tried (seven other 64x64 and 64x128
+textures from the same dump); the other beams' cannons were not checked.
 
 ## Parity, part 7: custom layout gate, wrist visor pick (2026-10-29)
 

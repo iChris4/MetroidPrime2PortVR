@@ -28,6 +28,7 @@
 #include "port_overlay.h"
 #include "vr/vr_view.h"
 #include <dolphin/gx/GXAurora.h>
+#include "vr/vr_particle_billboard.h"
 #endif
 #ifdef TARGET_PC
 namespace {
@@ -1262,6 +1263,11 @@ void CElementGen::Render() {
 }
 
 void CElementGen::RenderBasicParticlesNoRotTS(const CTransform4f& xf) const {
+#ifdef TARGET_PC
+  // PortVr: each camera-plane quad faces the head, about its own centre (one facing per
+  // sprite, shared by both eyes); the retail quad otherwise.
+  VrParticleBillboard portVrBillboard;
+#endif
   for (int i = 0; i < mParticles.size(); ++i) {
     const CParticle& particle = mParticles[i];
     const CVector3f viewPos = xf * particle.mPos;
@@ -1275,28 +1281,49 @@ void CElementGen::RenderBasicParticlesNoRotTS(const CTransform4f& xf) const {
     const uint color = particle.mColor.GetColor_u32();
 #endif
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0202);
 
     x -= particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0002);
 
     z -= particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0000);
 
     x += particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0200);
   }
 }
 
 void CElementGen::RenderBasicParticlesRotTS(const CTransform4f& xf) const {
+#ifdef TARGET_PC
+  // PortVr: each camera-plane quad faces the head, about its own centre (one facing per
+  // sprite, shared by both eyes); the retail quad otherwise.
+  VrParticleBillboard portVrBillboard;
+#endif
   for (int i = 0; i < mParticles.size(); ++i) {
     const CParticle& particle = mParticles[i];
     const CVector3f viewPos = xf * particle.mPos;
@@ -1315,25 +1342,46 @@ void CElementGen::RenderBasicParticlesRotTS(const CTransform4f& xf) const {
     const float sinPlusCos = sinT + cosT;
     const float sinMinusCos = sinT - cosT;
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x + sinPlusCos, y, z - sinMinusCos);
+#else
     GXPosition3f32(x + sinPlusCos, y, z - sinMinusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0202);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x + sinMinusCos, y, z + sinPlusCos);
+#else
     GXPosition3f32(x + sinMinusCos, y, z + sinPlusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0002);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x - sinPlusCos, y, z + sinMinusCos);
+#else
     GXPosition3f32(x - sinPlusCos, y, z + sinMinusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0000);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x - sinMinusCos, y, z - sinPlusCos);
+#else
     GXPosition3f32(x - sinMinusCos, y, z - sinPlusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0200);
   }
 }
 
 void CElementGen::RenderBasicParticlesNoRotNoTS(const CTransform4f& xf) const {
+#ifdef TARGET_PC
+  // PortVr: each camera-plane quad faces the head, about its own centre (one facing per
+  // sprite, shared by both eyes); the retail quad otherwise.
+  VrParticleBillboard portVrBillboard;
+#endif
   for (int i = 0; i < mParticles.size(); ++i) {
     const CParticle& particle = mParticles[i];
     const CVector3f viewPos =
@@ -1348,28 +1396,49 @@ void CElementGen::RenderBasicParticlesNoRotNoTS(const CTransform4f& xf) const {
     const uint color = particle.mColor.GetColor_u32();
 #endif
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0202);
 
     x -= particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0002);
 
     z -= particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0000);
 
     x += particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0200);
   }
 }
 
 void CElementGen::RenderBasicParticlesRotNoTS(const CTransform4f& xf) const {
+#ifdef TARGET_PC
+  // PortVr: each camera-plane quad faces the head, about its own centre (one facing per
+  // sprite, shared by both eyes); the retail quad otherwise.
+  VrParticleBillboard portVrBillboard;
+#endif
   for (int i = 0; i < mParticles.size(); ++i) {
     const CParticle& particle = mParticles[i];
     const CVector3f viewPos =
@@ -1389,25 +1458,46 @@ void CElementGen::RenderBasicParticlesRotNoTS(const CTransform4f& xf) const {
     const float sinPlusCos = sinT + cosT;
     const float sinMinusCos = sinT - cosT;
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x + sinPlusCos, y, z - sinMinusCos);
+#else
     GXPosition3f32(x + sinPlusCos, y, z - sinMinusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0202);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x + sinMinusCos, y, z + sinPlusCos);
+#else
     GXPosition3f32(x + sinMinusCos, y, z + sinPlusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0002);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x - sinPlusCos, y, z + sinMinusCos);
+#else
     GXPosition3f32(x - sinPlusCos, y, z + sinMinusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0000);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x - sinMinusCos, y, z - sinPlusCos);
+#else
     GXPosition3f32(x - sinMinusCos, y, z - sinPlusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0200);
   }
 }
 
 void CElementGen::RenderBasicParticlesNoRotTSModulated(const CTransform4f& xf) const {
+#ifdef TARGET_PC
+  // PortVr: each camera-plane quad faces the head, about its own centre (one facing per
+  // sprite, shared by both eyes); the retail quad otherwise.
+  VrParticleBillboard portVrBillboard;
+#endif
   for (int i = 0; i < mParticles.size(); ++i) {
     const CParticle& particle = mParticles[i];
     const CVector3f viewPos = xf * particle.mPos;
@@ -1421,28 +1511,49 @@ void CElementGen::RenderBasicParticlesNoRotTSModulated(const CTransform4f& xf) c
     const float y = viewPos.GetY();
     float z = viewPos.GetZ() + halfSize;
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0202);
 
     x -= particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0002);
 
     z -= particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0000);
 
     x += particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0200);
   }
 }
 
 void CElementGen::RenderBasicParticlesRotTSModulated(const CTransform4f& xf) const {
+#ifdef TARGET_PC
+  // PortVr: each camera-plane quad faces the head, about its own centre (one facing per
+  // sprite, shared by both eyes); the retail quad otherwise.
+  VrParticleBillboard portVrBillboard;
+#endif
   for (int i = 0; i < mParticles.size(); ++i) {
     const CParticle& particle = mParticles[i];
     const CVector3f viewPos = xf * particle.mPos;
@@ -1461,25 +1572,46 @@ void CElementGen::RenderBasicParticlesRotTSModulated(const CTransform4f& xf) con
     const float y = viewPos.GetY();
     const float z = viewPos.GetZ();
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x + sinPlusCos, y, z - sinMinusCos);
+#else
     GXPosition3f32(x + sinPlusCos, y, z - sinMinusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0202);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x + sinMinusCos, y, z + sinPlusCos);
+#else
     GXPosition3f32(x + sinMinusCos, y, z + sinPlusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0002);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x - sinPlusCos, y, z + sinMinusCos);
+#else
     GXPosition3f32(x - sinPlusCos, y, z + sinMinusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0000);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x - sinMinusCos, y, z - sinPlusCos);
+#else
     GXPosition3f32(x - sinMinusCos, y, z - sinPlusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0200);
   }
 }
 
 void CElementGen::RenderBasicParticlesNoRotNoTSModulated(const CTransform4f& xf) const {
+#ifdef TARGET_PC
+  // PortVr: each camera-plane quad faces the head, about its own centre (one facing per
+  // sprite, shared by both eyes); the retail quad otherwise.
+  VrParticleBillboard portVrBillboard;
+#endif
   for (int i = 0; i < mParticles.size(); ++i) {
     const CParticle& particle = mParticles[i];
     const CVector3f viewPos =
@@ -1494,28 +1626,49 @@ void CElementGen::RenderBasicParticlesNoRotNoTSModulated(const CTransform4f& xf)
     const float y = viewPos.GetY();
     float z = viewPos.GetZ() + halfSize;
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0202);
 
     x -= particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0002);
 
     z -= particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0000);
 
     x += particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x, y, z);
+#else
     GXPosition3f32(x, y, z);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0200);
   }
 }
 
 void CElementGen::RenderBasicParticlesRotNoTSModulated(const CTransform4f& xf) const {
+#ifdef TARGET_PC
+  // PortVr: each camera-plane quad faces the head, about its own centre (one facing per
+  // sprite, shared by both eyes); the retail quad otherwise.
+  VrParticleBillboard portVrBillboard;
+#endif
   for (int i = 0; i < mParticles.size(); ++i) {
     const CParticle& particle = mParticles[i];
     const CVector3f viewPos =
@@ -1535,19 +1688,35 @@ void CElementGen::RenderBasicParticlesRotNoTSModulated(const CTransform4f& xf) c
     const float y = viewPos.GetY();
     const float z = viewPos.GetZ();
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x + sinPlusCos, y, z - sinMinusCos);
+#else
     GXPosition3f32(x + sinPlusCos, y, z - sinMinusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0202);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x + sinMinusCos, y, z + sinPlusCos);
+#else
     GXPosition3f32(x + sinMinusCos, y, z + sinPlusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0002);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x - sinPlusCos, y, z + sinMinusCos);
+#else
     GXPosition3f32(x - sinPlusCos, y, z + sinMinusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0000);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(viewPos, x - sinMinusCos, y, z - sinPlusCos);
+#else
     GXPosition3f32(x - sinMinusCos, y, z - sinPlusCos);
+#endif
     GXColor1u32(color);
     GXTexCoord1s16(0x0200);
   }
@@ -1561,6 +1730,11 @@ static CTevCombiners::CTevPass sParticleModulatePass(
                              CTevCombiners::kAS_TextureAlpha, CTevCombiners::kAS_Zero));
 
 void CElementGen::RenderParticles() {
+#ifdef TARGET_PC
+  // PortVr: each camera-plane quad faces the head, about its own centre (one facing per
+  // sprite, shared by both eyes); the retail quad otherwise.
+  VrParticleBillboard portVrBillboard;
+#endif
   CGlobalRandom gr(mRandState);
 
   CGraphics::SetCullMode(kCM_None);
@@ -1786,22 +1960,38 @@ void CElementGen::RenderParticles() {
             float y = viewPoint.GetY();
             float z = (particle.mLineLengthOrSize * 0.5f) + viewPoint.GetZ();
 
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, x, y, z);
+#else
             GXPosition3f32(x, y, z);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMax, uvs.yMax);
 
             x -= particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, x, y, z);
+#else
             GXPosition3f32(x, y, z);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMin, uvs.yMax);
 
             z -= particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, x, y, z);
+#else
             GXPosition3f32(x, y, z);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMin, uvs.yMin);
 
             x += particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, x, y, z);
+#else
             GXPosition3f32(x, y, z);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMax, uvs.yMin);
           } else {
@@ -1819,19 +2009,35 @@ void CElementGen::RenderParticles() {
             float vpY = viewPoint.GetY();
             float vpZ = viewPoint.GetZ();
 
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, sinPlusCos + vpX, vpY, cosMinusSin + vpZ);
+#else
             GXPosition3f32(sinPlusCos + vpX, vpY, cosMinusSin + vpZ);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMax, uvs.yMax);
 
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, sinMinusCos + vpX, vpY, sinPlusCos + vpZ);
+#else
             GXPosition3f32(sinMinusCos + vpX, vpY, sinPlusCos + vpZ);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMin, uvs.yMax);
 
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, vpX - sinPlusCos, vpY, vpZ - cosMinusSin);
+#else
             GXPosition3f32(vpX - sinPlusCos, vpY, vpZ - cosMinusSin);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMin, uvs.yMin);
 
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, negSinPlusCos + vpX, vpY, (-cosT - sinT) + vpZ);
+#else
             GXPosition3f32(negSinPlusCos + vpX, vpY, (-cosT - sinT) + vpZ);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMax, uvs.yMin);
           }
@@ -1840,22 +2046,38 @@ void CElementGen::RenderParticles() {
           float y = viewPoint.GetY();
           float z = (particle.mLineLengthOrSize * 0.5f) + viewPoint.GetZ();
 
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, x, y, z);
+#else
           GXPosition3f32(x, y, z);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0202);
 
           x -= particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, x, y, z);
+#else
           GXPosition3f32(x, y, z);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0002);
 
           z -= particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, x, y, z);
+#else
           GXPosition3f32(x, y, z);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0000);
 
           x += particle.mLineLengthOrSize;
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, x, y, z);
+#else
           GXPosition3f32(x, y, z);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0200);
         } else {
@@ -1871,19 +2093,35 @@ void CElementGen::RenderParticles() {
           float vpY = viewPoint.GetY();
           float vpZ = viewPoint.GetZ();
 
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, vpX + sinPlusCos, vpY, vpZ - sinMinusCos);
+#else
           GXPosition3f32(vpX + sinPlusCos, vpY, vpZ - sinMinusCos);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0202);
 
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, vpX + sinMinusCos, vpY, vpZ + sinPlusCos);
+#else
           GXPosition3f32(vpX + sinMinusCos, vpY, vpZ + sinPlusCos);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0002);
 
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, vpX - sinPlusCos, vpY, vpZ + sinMinusCos);
+#else
           GXPosition3f32(vpX - sinPlusCos, vpY, vpZ + sinMinusCos);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0000);
 
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, vpX - sinMinusCos, vpY, vpZ - sinPlusCos);
+#else
           GXPosition3f32(vpX - sinMinusCos, vpY, vpZ - sinPlusCos);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0200);
         }
@@ -2025,22 +2263,38 @@ void CElementGen::RenderParticles() {
             float y = viewPoint.GetY();
             float z = (0.5f * particle->mLineLengthOrSize) + viewPoint.GetZ();
 
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, x, y, z);
+#else
             GXPosition3f32(x, y, z);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMax, uvs.yMax);
 
             x -= particle->mLineLengthOrSize;
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, x, y, z);
+#else
             GXPosition3f32(x, y, z);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMin, uvs.yMax);
 
             z -= particle->mLineLengthOrSize;
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, x, y, z);
+#else
             GXPosition3f32(x, y, z);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMin, uvs.yMin);
 
             x += particle->mLineLengthOrSize;
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, x, y, z);
+#else
             GXPosition3f32(x, y, z);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMax, uvs.yMin);
           }
@@ -2063,19 +2317,35 @@ void CElementGen::RenderParticles() {
             float vpY = viewPoint.GetY();
             float vpZ = viewPoint.GetZ();
 
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, sinPlusCos + vpX, vpY, cosMinusSin + vpZ);
+#else
             GXPosition3f32(sinPlusCos + vpX, vpY, cosMinusSin + vpZ);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMax, uvs.yMax);
 
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, sinMinusCos + vpX, vpY, sinPlusCos + vpZ);
+#else
             GXPosition3f32(sinMinusCos + vpX, vpY, sinPlusCos + vpZ);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMin, uvs.yMax);
 
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, vpX - sinPlusCos, vpY, vpZ - cosMinusSin);
+#else
             GXPosition3f32(vpX - sinPlusCos, vpY, vpZ - cosMinusSin);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMin, uvs.yMin);
 
+#ifdef TARGET_PC
+            portVrBillboard.Emit(viewPoint, negSinPlusCos + vpX, vpY, (-cosT - sinT) + vpZ);
+#else
             GXPosition3f32(negSinPlusCos + vpX, vpY, (-cosT - sinT) + vpZ);
+#endif
             GXColor1u32(color);
             GXTexCoord2f32(uvs.xMax, uvs.yMin);
           }
@@ -2088,22 +2358,38 @@ void CElementGen::RenderParticles() {
           float y = viewPoint.GetY();
           float z = (0.5f * particle->mLineLengthOrSize) + viewPoint.GetZ();
 
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, x, y, z);
+#else
           GXPosition3f32(x, y, z);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0202);
 
           x -= particle->mLineLengthOrSize;
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, x, y, z);
+#else
           GXPosition3f32(x, y, z);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0002);
 
           z -= particle->mLineLengthOrSize;
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, x, y, z);
+#else
           GXPosition3f32(x, y, z);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0000);
 
           x += particle->mLineLengthOrSize;
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, x, y, z);
+#else
           GXPosition3f32(x, y, z);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0200);
         }
@@ -2123,19 +2409,35 @@ void CElementGen::RenderParticles() {
           float vpY = viewPoint.GetY();
           float vpZ = viewPoint.GetZ();
 
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, vpX + sinPlusCos, vpY, vpZ - sinMinusCos);
+#else
           GXPosition3f32(vpX + sinPlusCos, vpY, vpZ - sinMinusCos);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0202);
 
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, vpX + sinMinusCos, vpY, vpZ + sinPlusCos);
+#else
           GXPosition3f32(vpX + sinMinusCos, vpY, vpZ + sinPlusCos);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0002);
 
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, vpX - sinPlusCos, vpY, vpZ + sinMinusCos);
+#else
           GXPosition3f32(vpX - sinPlusCos, vpY, vpZ + sinMinusCos);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0000);
 
+#ifdef TARGET_PC
+          portVrBillboard.Emit(viewPoint, vpX - sinMinusCos, vpY, vpZ - sinPlusCos);
+#else
           GXPosition3f32(vpX - sinMinusCos, vpY, vpZ - sinPlusCos);
+#endif
           GXColor1u32(color);
           GXTexCoord1s16(0x0200);
         }
@@ -2160,6 +2462,11 @@ void CElementGen::RenderParticlesFlameThrower(CElementGen* const* gens, int coun
                                               const CTransform4f* globalOrientation,
                                               const CVector3f* globalScale,
                                               const CTransform4f* localScale) {
+#ifdef TARGET_PC
+  // PortVr: each camera-plane quad faces the head, about its own centre (one facing per
+  // sprite, shared by both eyes); the retail quad otherwise.
+  VrParticleBillboard portVrBillboard;
+#endif
   CTransform4f viewCopy(CGraphics::GetViewMatrix());
   CTransform4f systemModelMatrix(viewCopy);
   systemModelMatrix.SetTranslation(CVector3f::Zero());
@@ -2333,20 +2640,40 @@ void CElementGen::RenderParticlesFlameThrower(CElementGen* const* gens, int coun
       const float cosT = halfSize * CMath::FastCosR(theta);
       const CVector3f& viewPoint = item.mViewPoint;
 
+#ifdef TARGET_PC
+      portVrBillboard.Emit(viewPoint, viewPoint.GetX() + (sinT + cosT), viewPoint.GetY(),
+                     viewPoint.GetZ() + (cosT - sinT));
+#else
       GXPosition3f32(viewPoint.GetX() + (sinT + cosT), viewPoint.GetY(),
                      viewPoint.GetZ() + (cosT - sinT));
+#endif
       GXColor1u32(color);
       GXTexCoord2f32(uvs.xMax, uvs.yMax);
+#ifdef TARGET_PC
+      portVrBillboard.Emit(viewPoint, viewPoint.GetX() + (sinT - cosT), viewPoint.GetY(),
+                     viewPoint.GetZ() + (sinT + cosT));
+#else
       GXPosition3f32(viewPoint.GetX() + (sinT - cosT), viewPoint.GetY(),
                      viewPoint.GetZ() + (sinT + cosT));
+#endif
       GXColor1u32(color);
       GXTexCoord2f32(uvs.xMin, uvs.yMax);
+#ifdef TARGET_PC
+      portVrBillboard.Emit(viewPoint, viewPoint.GetX() - (sinT + cosT), viewPoint.GetY(),
+                     viewPoint.GetZ() - (cosT - sinT));
+#else
       GXPosition3f32(viewPoint.GetX() - (sinT + cosT), viewPoint.GetY(),
                      viewPoint.GetZ() - (cosT - sinT));
+#endif
       GXColor1u32(color);
       GXTexCoord2f32(uvs.xMin, uvs.yMin);
+#ifdef TARGET_PC
+      portVrBillboard.Emit(viewPoint, viewPoint.GetX() + (-sinT + cosT), viewPoint.GetY(),
+                     viewPoint.GetZ() + (-cosT - sinT));
+#else
       GXPosition3f32(viewPoint.GetX() + (-sinT + cosT), viewPoint.GetY(),
                      viewPoint.GetZ() + (-cosT - sinT));
+#endif
       GXColor1u32(color);
       GXTexCoord2f32(uvs.xMax, uvs.yMin);
       CGX::End();
@@ -2452,6 +2779,11 @@ void CElementGen::RenderParticlesFlameThrower(CElementGen* const* gens, int coun
 }
 
 void CElementGen::RenderParticlesIndirectTexture() {
+#ifdef TARGET_PC
+  // PortVr: each camera-plane quad faces the head, about its own centre (one facing per
+  // sprite, shared by both eyes); the retail quad otherwise.
+  VrParticleBillboard portVrBillboard;
+#endif
   CGlobalRandom gr(mRandState);
   if (sMoveRedToAlphaBuffer) {
     GXSetAlphaUpdate(GX_FALSE);
@@ -2687,7 +3019,11 @@ void CElementGen::RenderParticlesIndirectTexture() {
 #endif
     CGX::Begin(GX_QUADS, GX_VTXFMT0, 4);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(CVector3f(vpX, vpY, vpZ), sinPlusCos + vpX, vpY, (cosT - sinT) + vpZ);
+#else
     GXPosition3f32(sinPlusCos + vpX, vpY, (cosT - sinT) + vpZ);
+#endif
     GXColor1u32(color);
     GXTexCoord2f32(uvs.xMax, uvs.yMax);
 #ifdef TARGET_PC
@@ -2697,7 +3033,11 @@ void CElementGen::RenderParticlesIndirectTexture() {
 #endif
     GXTexCoord2f32(uvsInd.xMax, uvsInd.yMax);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(CVector3f(vpX, vpY, vpZ), (sinT - cosT) + vpX, vpY, sinPlusCos + vpZ);
+#else
     GXPosition3f32((sinT - cosT) + vpX, vpY, sinPlusCos + vpZ);
+#endif
     GXColor1u32(color);
     GXTexCoord2f32(uvs.xMin, uvs.yMax);
 #ifdef TARGET_PC
@@ -2707,7 +3047,11 @@ void CElementGen::RenderParticlesIndirectTexture() {
 #endif
     GXTexCoord2f32(uvsInd.xMin, uvsInd.yMax);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(CVector3f(vpX, vpY, vpZ), vpX - sinPlusCos, vpY, vpZ - (cosT - sinT));
+#else
     GXPosition3f32(vpX - sinPlusCos, vpY, vpZ - (cosT - sinT));
+#endif
     GXColor1u32(color);
     GXTexCoord2f32(uvs.xMin, uvs.yMin);
 #ifdef TARGET_PC
@@ -2717,7 +3061,11 @@ void CElementGen::RenderParticlesIndirectTexture() {
 #endif
     GXTexCoord2f32(uvsInd.xMin, uvsInd.yMin);
 
+#ifdef TARGET_PC
+    portVrBillboard.Emit(CVector3f(vpX, vpY, vpZ), (-sinT + cosT) + vpX, vpY, (-cosT - sinT) + vpZ);
+#else
     GXPosition3f32((-sinT + cosT) + vpX, vpY, (-cosT - sinT) + vpZ);
+#endif
     GXColor1u32(color);
     GXTexCoord2f32(uvs.xMax, uvs.yMin);
 #ifdef TARGET_PC
