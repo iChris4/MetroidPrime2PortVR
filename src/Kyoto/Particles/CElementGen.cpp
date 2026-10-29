@@ -26,6 +26,8 @@
 #include "MetroidPrime/CActor.hpp"
 #include "MetroidPrime/CCameraManager.hpp"
 #include "port_overlay.h"
+#include "vr/vr_view.h"
+#include <dolphin/gx/GXAurora.h>
 #endif
 #ifdef TARGET_PC
 namespace {
@@ -2568,6 +2570,16 @@ void CElementGen::RenderParticlesIndirectTexture() {
 #ifdef TARGET_PC
   PortDeclareParticleFormats();
   bool portScreenCopied = false;
+  // PortVr: the copy's coordinates are the body camera's screen, which the eyes do not share. In
+  // the headset they come from the position through a screen-projecting texture matrix the stereo
+  // replay derives again per eye (CGraphics::PortLoadScreenProjectionTexMtx,
+  // AuroraSetStereoScreenTexMtx), so each eye distorts what it sees behind the particle.
+  const bool portVrScreen = PortVr::VrImmersive();
+  if (portVrScreen) {
+    CGX::SetTexCoordGen(GX_TEXCOORD1, GX_TG_MTX3x4, GX_TG_POS, GX_TEXMTX0, false, GX_PTIDENTITY);
+    CGraphics::PortLoadScreenProjectionTexMtx(GX_TEXMTX0);
+    AuroraSetStereoScreenTexMtx(GX_TEXMTX0, GX_PNMTX0);
+  }
 #endif
 
 
@@ -2617,9 +2629,21 @@ void CElementGen::RenderParticlesIndirectTexture() {
         CVector3f((sinT - cosT) + vpX, vpY, sinPlusCos + vpZ),
         CVector3f(vpX - sinPlusCos, vpY, vpZ - (cosT - sinT)),
         CVector3f((-sinT + cosT) + vpX, vpY, (-cosT - sinT) + vpZ), kTF_RGB565);
+#ifdef TARGET_PC
+    // PortVr: the rectangle is the body camera's screen and the eyes look elsewhere, so in the
+    // headset any particle in front of the camera is drawn and the eyes clip it themselves.
+    if (!clipRect.IsValid() &&
+        !(portVrScreen &&
+          CGraphics::GetViewMatrix()
+                  .TransposeMultiply(CGraphics::GetModelMatrix() * CVector3f(vpX, vpY, vpZ))
+                  .GetY() > CGraphics::GetProjectionState().GetNear())) {
+      continue;
+    }
+#else
     if (!clipRect.IsValid()) {
       continue;
     }
+#endif
     const int indScale = mLoadedGenDesc->mINDM ? 1 : 0;
 #ifdef TARGET_PC
     // Retail skips a particle too big for the spare buffer; keep that, then copy once (see
@@ -2706,6 +2730,11 @@ void CElementGen::RenderParticlesIndirectTexture() {
     CGX::End();
   }
 
+#ifdef TARGET_PC
+  if (portVrScreen) {
+    AuroraSetStereoScreenTexMtx(GX_IDENTITY, GX_PNMTX0);
+  }
+#endif
   CGX::SetNumIndStages(0);
   CGX::SetTevDirect(GX_TEVSTAGE1);
   if (sMoveRedToAlphaBuffer) {

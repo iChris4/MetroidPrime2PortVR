@@ -153,6 +153,11 @@ public:
   void CacheReflection(void (*callback)(void*, const CVector3f&), void* context,
                        bool clear) override;
   void DrawSpaceWarp(const CVector3f& point, float strength) override;
+#ifdef TARGET_PC
+  // PortVr: the space warp anchored in the world around `point`, facing `viewer`, and warped in
+  // each eye from that eye's own view (CStateManager::DrawSpaceWarp while immersive).
+  void PortDrawSpaceWarpWorld(const CVector3f& point, const CVector3f& viewer, float strength);
+#endif
   void DrawModelDisintegrate(const SModelRenderData& model, const CTexture& texture,
                              const CColor& color, float amount) override;
   void DrawModelFlat(const SModelRenderData& model, const CModelFlags& flags,

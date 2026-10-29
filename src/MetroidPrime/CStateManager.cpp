@@ -1595,6 +1595,26 @@ void CStateManager::DrawSpaceWarp(const CVector3f& position, float strength) con
 
   const CGameCamera* camera = mCameraManager->GetCurrentCamera(*this, true);
 #ifdef TARGET_PC
+  // PortVr: the VR settings can turn the warp off in the headset (vr_space_warp). Projected through
+  // the body camera and drawn flat, it would land at the same spot of both eye images, where the
+  // body camera sees the point, not where each eye does; immersive, it is placed in the world
+  // around the point instead, facing the head, at half retail's strength (the full warp read as
+  // too strong in the headset: Metroid Prime VR user feedback, 2026-10-04).
+  if (mCurrentRenderPlayerIndex == 0 && PortVr::VrHideSpaceWarp()) {
+    return;
+  }
+  if (mCurrentRenderPlayerIndex == 0 && PortVr::VrImmersive()) {
+    CVector3f viewer = camera->GetTranslation();
+    CVector3f headOrigin(CVector3f::Zero());
+    CVector3f headDirection(CVector3f::Zero());
+    if (PortVr::VrHeadGaze(mCameraManager->GetCurrentCameraTransform(*this, true), headOrigin,
+                           headDirection)) {
+      viewer = headOrigin;
+    }
+    static const float kVrSpaceWarpStrengthScale = 0.5f;
+    gpRender->PortDrawSpaceWarpWorld(position, viewer, kVrSpaceWarpStrengthScale * strength);
+    return;
+  }
   // The scene is drawn from the presented camera: carry the point into the sim camera's frame as
   // the presented one sees it, so the warp stays on it between ticks. Identity when not blended.
   const CVector3f simPosition =

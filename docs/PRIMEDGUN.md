@@ -37,6 +37,18 @@ Same rules as part 1 (TARGET_PC, strip-diff CLEAN, `MP2_VR=0` pixel-identical, p
 - Scan window (`CPlayerVisor::DrawScanEffect`): copy and pane `HEAD_LOCKED_2D`, dim `FULLSCREEN`,
   back to `HEAD_LOCKED`; `vr_scan_zoom` off copies the pane's own size.
 - The wide HUD is off while the headset runs (`PortOverlay::HudWide`): its slices tore the helmet.
+- Space warp: in the headset `CStateManager::DrawSpaceWarp` hands the warp to
+  `CCubeRenderer::PortDrawSpaceWarpWorld` (a quad around the point facing the head, sampling a
+  whole-view copy through `CGraphics::PortLoadScreenProjectionTexMtx` and
+  `AuroraSetStereoScreenTexMtx`, half strength), or skips it with `vr_space_warp` off.
+- Indirect-texture particles (`CElementGen::RenderParticlesIndirectTexture`): Echoes' PC path
+  already copies the view once; in the headset the copy's coordinates come from the position
+  through the same per-eye screen matrix, and a particle the body camera clips is still drawn when
+  it is in front of the camera.
+- Morph ball on the desk (console `press x`, `vr_controller_mode=gamepad` so the console's pad
+  gets through): the ball view is level, its HUD on the held screen, the stand-up glide and the
+  return to first person work. One run showed no cannon after the unmorph; two repeats with a
+  diagnostic showed it drawn (holster state Drawn, alpha 1), so it was not reproduced.
 
 Checked on the desk (SteamVR, PSVR2 lying on the desk, so the eyes look elsewhere than the body
 camera): Dark Visor, Echo Visor, the scan visor's palette highlight and window, and the dark world

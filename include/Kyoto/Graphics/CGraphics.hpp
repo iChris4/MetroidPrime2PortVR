@@ -359,6 +359,11 @@ public:
   // this many seconds behind the last tick (wrapping at 900), so GUI frames and HUD materials
   // land between the last two ticks with everything else; 0 outside the draw.
   static void SetRenderTimePresentLag(float seconds);
+  // PortVr: loads `texMtx` with the matrix that takes an object-space position (the current model
+  // matrix, view and projection) to its screen texture coordinate (s, t, q): a copy of the viewport
+  // is then sampled where each pixel lies. The stereo replay derives it again per eye
+  // (AuroraSetStereoScreenTexMtx).
+  static void PortLoadScreenProjectionTexMtx(uint texMtx);
 #endif
   static bool Is50Hz() { return sIs50Hz; } // Guessed name.
   static CVector3f GetViewPoint() { return mViewMatrix.GetTranslation(); }

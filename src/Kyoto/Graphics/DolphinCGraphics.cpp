@@ -1807,6 +1807,34 @@ bool CGraphics::PortTakeRenderTimingsByTick() {
 
 void CGraphics::SetRenderTimePresentLag(float seconds) { sRenderTimePresentLag = seconds; }
 
+void CGraphics::PortLoadScreenProjectionTexMtx(uint texMtx) {
+  Mtx44 proj;
+  if (mProj.IsPerspective()) {
+    MTXFrustum(proj, mProj.GetTop(), mProj.GetBottom(), mProj.GetLeft(), mProj.GetRight(),
+               mProj.GetNear(), mProj.GetFar());
+  } else {
+    MTXOrtho(proj, mProj.GetTop(), mProj.GetBottom(), mProj.GetLeft(), mProj.GetRight(),
+             mProj.GetNear(), mProj.GetFar());
+  }
+  // s, t and q as functionals of the view-space point (x, y, z, 1).
+  float rows[3][4];
+  for (int i = 0; i < 4; ++i) {
+    rows[0][i] = 0.5f * (proj[0][i] + proj[3][i]);
+    rows[1][i] = 0.5f * (proj[3][i] - proj[1][i]);
+    rows[2][i] = proj[3][i];
+  }
+  // Then of the object-space point, through the modelview (its implicit fourth row (0, 0, 0, 1)).
+  Mtx tex;
+  for (int r = 0; r < 3; ++r) {
+    for (int c = 0; c < 4; ++c) {
+      tex[r][c] = rows[r][0] * mGxModelView[0][c] + rows[r][1] * mGxModelView[1][c] +
+                  rows[r][2] * mGxModelView[2][c];
+    }
+    tex[r][3] += rows[r][3];
+  }
+  GXLoadTexMtxImm(tex, texMtx, GX_MTX3x4);
+}
+
 #endif
 float CGraphics::GetSecondsMod900() {
   if (mpExternalTimeProvider != nullptr) {
