@@ -46,9 +46,10 @@ bool OpenXRSettingsPanelOpen() noexcept;
 void OpenXRPublishSettingsPanelPointer(bool valid, float x, float y, bool clicked) noexcept;
 // Game thread: the latest pointer, taking the clicks made since the last call.
 OpenXRSettingsPanelPointer OpenXRTakeSettingsPanelPointer() noexcept;
-// The shader compilation toast (VrMenu::BuildCompileToastPixels) has the panel's
-// image while the menu is closed: set by the game thread, which draws it, read by
-// the XR thread, which places it. Either thread.
+// The shader compilation toast (VrMenu::BuildCompileToastPixels), or the boot's
+// resume question in its place (BuildResumeToastPixels), has the panel's image
+// while the menu is closed: set by the game thread, which draws it, read by the
+// XR thread, which places it. Either thread.
 void OpenXRSetCompileToastShown(bool shown) noexcept;
 bool OpenXRCompileToastShown() noexcept;
 

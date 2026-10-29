@@ -98,6 +98,7 @@ extern void* gPortGameHeapHi;
 #include "port_logfile.h"
 #include "port_memory_log.h"
 #include "port_save.h"
+#include "port_savestate.h"
 #include "port_overlay.h"
 #include "port_disc_replace.h"
 #include "port_overlay_internal.h"
@@ -1664,6 +1665,9 @@ int main(int argc, char** argv) {
   PortDiscReplace::Shutdown();
   aurora_dvd_close();
   aurora_shutdown();
+  // PrimedGun Echoes: a clean quit; on Android the exit hook that removes the quick-resume crash
+  // marker never runs (port_savestate.h ResumeGameEnded).
+  PortSaveState::ResumeGameEnded();
 #ifdef MP_PORT_COVERAGE
   // The shutdown path's own dump: the run does not depend on the exit hook to leave a profile
   // behind. The counters are out by now, so this is the last write.

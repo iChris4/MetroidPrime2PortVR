@@ -9,6 +9,29 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Quest: the quick resume question in the headset (2026-10-29)
+
+From the third headset test: the Quest stayed black after the shader compile. Echoes' quick resume
+(`quick_resume`, on by default here, opt-in in the Metroid Prime fork) holds the first splash while it
+asks "Resume where you left off?" (`PortSaveState::ResumePromptTick`), and the question is an ImGui
+window (`debug_ui/window.cpp DrawResumePrompt`) that reaches the desktop window only. The headset
+showed the held, empty splash; the log said `resume: asking`.
+
+- The question now has the panel layer the compile toast uses (`VrMenu::BuildResumeToastPixels`,
+  `vr_menu.cpp UpdateToast`), ahead of the compile's progress, while the VR menu is closed; the host
+  hands it over through `PortVrHost::ResumeQuestionShown`. The panel cannot be pointed at, so while the
+  headset runs the pad answers it with fixed buttons: A yes, B no (the VR pad's menu A and B, or the
+  custom layout's Confirm and Back). Left/Right and Start, which move and take the desktop's
+  highlight, do nothing then. The font gained ':' for the time.
+- Why every launch asked "The game closed unexpectedly": the `savestates/running` marker is removed
+  by an `atexit` hook or SDL's `TERMINATING` event. On the Quest the process never exits (the
+  activity kills it after the game thread ends), and `TERMINATING` comes from the Android lifecycle
+  only while the game loop still pumps events, so a quit from inside the game (the VR menu's QUIT)
+  left the marker. `PortSaveState::ResumeGameEnded`, at the end of `main`, removes it when this run
+  wrote it.
+- Desk test without controllers: `MP2_RESUME_ANSWER=y|n` (now passed through by the Quest activity)
+  answers after 180 ticks.
+
 ## Dark visor targets and the scan crosshair in the headset (2026-10-29)
 
 From the second headset test.

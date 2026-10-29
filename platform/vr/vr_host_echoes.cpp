@@ -25,6 +25,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <ctime>
 
 namespace PortDebug {
 // platform/debug_ui/cheats.cpp, the Cheats page's buttons.
@@ -165,6 +166,32 @@ void StartLogFile() {
   if (!sUserFolder.empty()) {
     PortLogFile::Start(sUserFolder);
   }
+}
+
+// The splash's prompt (port_savestate.cpp ResumePromptTick), dated as the desktop window dates it
+// (debug_ui/window.cpp DrawResumePrompt).
+bool ResumeQuestionShown(ResumeQuestion& question) {
+  PortSaveState::ResumeInfo info;
+  bool yes = true;
+  if (!PortSaveState::ResumePromptShown(info, yes)) {
+    return false;
+  }
+  question.room = info.room;
+  question.afterCrash = info.crashedAfterThis;
+  question.crashedAgain = info.crashedAgain;
+  question.saved.clear();
+  const std::time_t t = static_cast< std::time_t >(info.savedAt);
+  std::tm local{};
+#if defined(_WIN32)
+  if (localtime_s(&local, &t) == 0) {
+#else
+  if (localtime_r(&t, &local) != nullptr) {
+#endif
+    char when[32] = "";
+    std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M", &local);
+    question.saved = when;
+  }
+  return true;
 }
 
 bool QuickResume() { return PortOverlay::QuickResume(); }

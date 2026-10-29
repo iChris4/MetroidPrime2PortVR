@@ -21,6 +21,8 @@
 #include "port_resume_logic.h"
 #include "port_save.h"
 #include "port_warp.h"
+// PrimedGun Echoes: the headset asks the resume question itself (vr/vr_menu.cpp).
+#include "vr/openxr_integration.h"
 
 #include "MetroidPrime/PortSkipFrontEnd.hpp"
 
@@ -1198,6 +1200,12 @@ void ResumeShutdown() {
   ResumeQuitCleanly();
 }
 
+void ResumeGameEnded() {
+  if (sInit) {
+    ResumeShutdown();
+  }
+}
+
 bool RoomRestoreOwnsArea(CStateManager& mgr, int area) {
   (void)mgr;
   if (!sRoom.active) {
@@ -1367,7 +1375,17 @@ bool ResumePromptTick() {
     // A real mouse button held is a click on the window, whose Yes/No buttons answer: one that
     // also reaches the pad as A must not accept the highlighted Yes first (MP1 6ab7c1e15).
     const bool mouseHeld = SDL_GetMouseState(nullptr, nullptr) != 0;
-    if (sPromptTicks > kPromptIgnoreTicks && gpController != nullptr) {
+    if (sPromptTicks > kPromptIgnoreTicks && gpController != nullptr &&
+        PortVr::OpenXRIsRunning()) {
+      // PrimedGun Echoes: the headset never shows this ImGui window; its own panel asks instead
+      // (vr/vr_menu.cpp), with no choice to move between: A answers yes and B no.
+      const auto& pad = gpController->GetGamepadData(0);
+      if (answer < 0 && !mouseHeld && pad.GetButton(kBU_A).GetPressEvent()) {
+        answer = 1;
+      } else if (answer < 0 && !mouseHeld && pad.GetButton(kBU_B).GetPressEvent()) {
+        answer = 0;
+      }
+    } else if (sPromptTicks > kPromptIgnoreTicks && gpController != nullptr) {
       const auto& pad = gpController->GetGamepadData(0);
       if (pad.GetButton(kBU_Left).GetPressEvent() || pad.GetButton(kBU_Right).GetPressEvent()) {
         sPromptYes.store(!sPromptYes.load());

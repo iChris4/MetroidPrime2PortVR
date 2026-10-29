@@ -857,6 +857,26 @@ void TestCompileToast() {
   Check(!CompileToastFloating(head, floating), "no floating toast looking straight up");
 }
 
+void TestResumeToast() {
+  // The toast's strip and frame, the two answer boxes side by side, nothing below.
+  const Pixels asked = BuildResumeToastPixels("Temple Grounds - Landing Site", "2026-10-29 17:40", false, false);
+  Check(asked.size() == static_cast<size_t>(kWidth) * kImageHeight, "resume image size");
+  Check(At(asked, 0, 0) == 0xE0FFB030u && At(asked, 0, kToastHeight - 1) == 0xE0FFB030u, "resume frame");
+  Check(At(asked, 20, 100) == 0xD0100804u, "resume background");
+  Check(At(asked, 20, kToastHeight) == 0u, "transparent below the resume question");
+  Check(At(asked, kWidth / 2 - 24 - 360 + 2, 230) == 0xF0201810u && At(asked, kWidth / 2 + 24 + 2, 230) == 0xF0201810u,
+        "yes and no boxes");
+  Check(At(asked, kWidth / 2, 230) == 0xD0100804u, "a gap between the boxes");
+  // The wording changes after a crash; a room too wide for the large letters takes the small ones.
+  Check(BuildResumeToastPixels("Room", "", true, false) != BuildResumeToastPixels("Room", "", false, false) &&
+            BuildResumeToastPixels("Room", "", true, true) != BuildResumeToastPixels("Room", "", true, false),
+        "crash wording");
+  const std::string wide(60, 'W');
+  const Pixels small = BuildResumeToastPixels(wide, "", false, false);
+  Check(At(small, (kWidth - TextWidth(wide.c_str(), 2)) / 2, 136) == 0xFFFFF0C8u, "a wide room in small letters");
+  Check(Glyph(':')[1] != 0 && Glyph('?')[0] == 0, "the time's colon is drawn");
+}
+
 void TestLiveSettings() {
   RecordingActions actions;
   PortVrSettings settings{};
@@ -900,6 +920,7 @@ int main() {
   TestControls();
   TestHeldGripsMenuRelease();
   TestCompileToast();
+  TestResumeToast();
   std::puts("vr menu tests passed");
   return 0;
 }

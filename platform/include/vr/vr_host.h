@@ -40,6 +40,16 @@ void PollSettingsFile(bool force);
 // The startup shader compile while it runs (as the desktop toast shows it).
 bool ShaderCompilationProgress(uint32_t& done, uint32_t& total);
 
+// The boot's quick resume question while the game waits on its answer: the desktop prompt is an
+// ImGui window the headset never shows. The pad answers it, A yes and B no.
+struct ResumeQuestion {
+  std::string room;
+  std::string saved;         // local time, "2026-10-29 17:40"; empty if unknown
+  bool afterCrash = false;   // the last run did not quit cleanly
+  bool crashedAgain = false; // ... right after resuming this very snapshot
+};
+bool ResumeQuestionShown(ResumeQuestion& question);
+
 // The VR menu's DEBUG tab.
 void CheatFullHealth();
 void CheatGrantEverything();

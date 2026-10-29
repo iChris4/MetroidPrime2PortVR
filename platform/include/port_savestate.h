@@ -91,6 +91,11 @@ void ResumeSave(bool frameLimit = false);
 // SDL background / terminate events (any thread): write the held snapshot / also remove the marker.
 void ResumeFlush();
 void ResumeShutdown();
+// PrimedGun Echoes: the end of main, the game having returned (a clean quit): ResumeShutdown, when
+// this run wrote the marker. On Android the process never exits (no atexit hook) and SDL sends
+// TERMINATING only while the game loop still pumps events, so a quit from inside the game (the VR
+// menu's QUIT) left the marker, and every launch after it reported a crash.
+void ResumeGameEnded();
 // ~CStateManager: the quit path must not capture from a destroyed manager; drops the snapshot.
 void Forget(const CStateManager* mgr);
 
@@ -112,7 +117,8 @@ void RequestResumeLoad();     // console: load the resume file
 
 // The boot's resume prompt. ResumePromptTick runs once per splash tick (game thread) and is true
 // while the splash must be held; ResumePromptShown fills what the overlay draws (any thread);
-// AnswerResumePrompt is the overlay's Yes/No.
+// AnswerResumePrompt is the overlay's Yes/No. PrimedGun Echoes: while the headset runs, its panel
+// asks (vr/vr_menu.cpp) and the pad's A answers yes, B no.
 bool ResumePromptTick();
 bool ResumePromptShown(ResumeInfo& out, bool& yes);
 void AnswerResumePrompt(bool yes);
