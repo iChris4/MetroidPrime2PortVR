@@ -16,6 +16,7 @@
 #include "MetroidPrime/ScriptObjects/CScriptTrigger.hpp"
 #include "MetroidPrime/TCastTo.hpp"
 #ifdef TARGET_PC
+#include "vr/vr_camera_transition.h"
 #include "vr/vr_view.h"
 #endif
 
@@ -195,6 +196,47 @@ bool CCameraHintManager::SetHint(CHintState* hint, CStateManager& mgr, bool area
                                   currentCamera->GetFov());
     }
   } else {
+#ifdef TARGET_PC
+    // PortVr: in the headset the morph ball camera's cut to the hint's camera, and its screen
+    // flash, are hard to take with the head inside the view: interpolate there instead, over the
+    // hint's own time (at least a tenth of a second, half a second for none), as the Metroid Prime
+    // VR port's UseCameraHint does. SetPlayerCamera would end that interpolation at once, so it is
+    // left out. Retail cuts where it switches cameras: a hint behaviour of its own, or a running
+    // interpolation ended.
+    const bool portVrSmooth =
+        GetPlayerIndex() == 0 && interpolate && PortVr::VrImmersive() &&
+        !cameras->IsInCinematicCamera() && (newHint->GetInfo().GetFlags() & 0x2000) == 0 &&
+        (mgr.GetPlayer(0)->GetMorphballTransitionState() == CPlayer::kMS_Morphed ||
+         mgr.GetPlayer(0)->GetMorphballTransitionState() == CPlayer::kMS_Morphing) &&
+        currentCamera->GetUniqueId() != cameras->FirstPersonCamera()->GetUniqueId() &&
+        currentCamera->GetUniqueId() != targetCamera->GetUniqueId() &&
+        ((newHint->GetInfo().GetBehaviourType() != CBallCamera::kBCB_Default &&
+          newHint->GetInfo().GetBehaviourType() != CBallCamera::kBCB_FreezeLookPosition) ||
+         cameras->IsInterpolationCameraActive());
+    if (portVrSmooth) {
+      cameras->UpdateCameraTriggers(targetCamera->GetUniqueId(), mgr);
+      cameras->SetupInterpolation(
+          oldXf, currentCamera->GetUniqueId(), targetCamera->GetUniqueId(), false,
+          CInterpolationCamera::kPM_Direct, CInterpolationCamera::kRM_LinearSlerp, mgr,
+          targetCamera->GetUniqueId() == cameras->BallCamera()->GetUniqueId(),
+          PortVr::CameraTransition::Duration(newHint->GetInfo().GetInterpolateOnTime()),
+          currentCamera->GetFov());
+      ballCamera->InvalidateSpline();
+      ballCamera->ResetFovInterpolation(ballCamera->GetTargetFov());
+    } else {
+      if (currentCamera->GetUniqueId() != cameras->FirstPersonCamera()->GetUniqueId() &&
+          newHint->GetInfo().GetBehaviourType() != CBallCamera::kBCB_Default &&
+          newHint->GetInfo().GetBehaviourType() != CBallCamera::kBCB_FreezeLookPosition) {
+        cameras->SetCurrentCameraId(targetCamera->GetUniqueId(), mgr);
+        if ((newHint->GetInfo().GetFlags() & 0x1000000) == 0) {
+          cameras->StartScreenFlash();
+        }
+      }
+      ballCamera->InvalidateSpline();
+      cameras->SetPlayerCamera(mgr, targetCamera->GetUniqueId());
+      ballCamera->ResetFovInterpolation(ballCamera->GetTargetFov());
+    }
+#else
     if (currentCamera->GetUniqueId() != cameras->FirstPersonCamera()->GetUniqueId() &&
         newHint->GetInfo().GetBehaviourType() != CBallCamera::kBCB_Default &&
         newHint->GetInfo().GetBehaviourType() != CBallCamera::kBCB_FreezeLookPosition) {
@@ -206,6 +248,7 @@ bool CCameraHintManager::SetHint(CHintState* hint, CStateManager& mgr, bool area
     ballCamera->InvalidateSpline();
     cameras->SetPlayerCamera(mgr, targetCamera->GetUniqueId());
     ballCamera->ResetFovInterpolation(ballCamera->GetTargetFov());
+#endif
   }
 
   cameras->UpdateCameraTriggers(targetCamera->GetUniqueId(), mgr);

@@ -9,6 +9,21 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Parity, part 6: camera hints interpolate in morph ball (2026-10-29)
+
+Echoes already interpolates most hint changes the Metroid Prime port cut (`CCameraHintManager`
+`SetHint` and `ClearHint` call `SetupInterpolation`), and `CInterpolationCamera::SetInterpolation`
+already turns a zero-length handoff into a short eased one in the headset. What still cut was
+`SetHint`'s other branch (hint flag 0x20, or 0x08000000 when forced): a camera switch with a
+screen flash, or `SetPlayerCamera` ending a running interpolation. In the headset, in or entering
+morph ball, outside cinematics and without flag 0x2000, that branch now interpolates from the
+current camera to the hint's over the hint's own time (`CameraTransition::Duration`), leaves out
+`SetPlayerCamera` (it would end the interpolation at once) and the flash. The clamp-velocity path
+of `ClearHint` (flag 0x1000) is a smooth chase already and stays.
+
+Not checked in play: no hint with those flags is reachable from the desk runs. A/B note: the first
+VR-off run after a build differed in the birds only, and both repeats were identical.
+
 ## Parity, part 5: the wrist visor display (2026-10-29)
 
 `vr_wrist_visor_enabled` (off by default) shows the four visors on the off-hand wrist, drawn with the
