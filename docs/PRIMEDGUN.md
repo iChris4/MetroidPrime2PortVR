@@ -9,6 +9,32 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Parity, part 3: the held 3D map, vsync off in the headset (2026-10-29)
+
+- `CAutoMapper::PortVrSetHologram` (statics, set and cleared by `CInGameGuiManager::Draw`): `Draw`
+  scales the map camera's space alike in every axis (the view's half-height to the hologram's) and
+  sets it ahead of the held anchor, instead of squashing it onto the HUD plane. Only the depth is
+  compressed, and only when the near side of the visible areas' volume (`CMapWorld::PortWorldVolume`,
+  measured by `RecalculateWorldSphere`) would come closer than the clearance; the compression eases
+  out and back in across the world map (hex view) transition. While the map opens or closes it grows
+  from the HUD minimap's place and size (`mapGrow` from the mapper's interpolation).
+- The frame and compass are drawn first on the held screen (`PortVrDrawFrame`, the end of `Draw`
+  alone); `Draw` skips them in the hologram. The player marker draws without the depth test (no
+  minimap mask to test against).
+- `GetMiniMapCameraOrientation` and the minimap's `camXf`: the HUD minimap turns with the head's yaw
+  (level right axis), not the body, for player 0 while immersive.
+- `CInGameGuiManager::Draw`, map in view: the Metroid Prime VR port's sequence (frame on
+  `ANCHORED_SCREEN` / `FLOATING_HUD`, then `ANCHORED_3D` with `AuroraSetStereoPlacement3DFollowHead`
+  from the minimap's head-locked place, a 55° mono perspective for the desktop mirror, identity view,
+  depth test off), projection and view restored after.
+- `PortOverlay::ApplyVsync`: no vsync while the OpenXR session runs (the headset paces the loop).
+
+Checked on the desk (eye captures): the map grows out of the minimap corner, sits in the held frame
+with its own disparity, its size against the frame matches the desktop map screen, the world map
+(hex view) and the exit back to gameplay work, and it shrinks back into the minimap on close.
+Harness note: a console `press` holds for game updates, and none run on the map screen, so a second
+press of the same button there is no new edge: close with B (`press b 6`) after opening with Z.
+
 ## Parity, part 2: beam wheel highlight, left-handed weapons (2026-10-29)
 
 - Beam wheel: Echoes keeps the Metroid Prime command slots for its beams (`kC_PowerBeam` Power,
@@ -38,7 +64,7 @@ on, `vr_game_menu_screen_enabled` off):
 - `CInGameGuiManager::Draw`: the visor and HUD stay drawn under a live blur and fade out as it comes
   up; the message box, the pause menu (with `VrResetEyeDepth`, `VrSetPauseScreenRoute`) and the quit
   prompt go on the held screen (`ANCHORED_SCREEN`, `FLOATING_HUD` with `vr_floating_hud`); the map
-  screen's map is laid flat on the held screen (the 3D held map is not ported yet).
+  screen's map is laid flat on the held screen (replaced by the held 3D map in part 3).
 - `CMFGame::DrawGui`: the save prompt on the held screen.
 - `PortVrHost::PublishGameMode`: the Metroid Prime port's classification (Message / Paused /
   Cinematic, FrontEnd while a menu waits for its area textures, held a few frames as a box closes);

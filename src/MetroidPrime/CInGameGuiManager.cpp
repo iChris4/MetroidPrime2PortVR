@@ -438,6 +438,65 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
     CGraphics::SetDepthRange(0.f, 1.f / 512.f);
     CGuiWidget* model = mSamusHud->GetAutomapperModel();
 #ifdef TARGET_PC
+    if (PortVrMapInView()) {
+      // PortVr: the map screen in the headset is a 3D map held in front of the player
+      // (AURORA_STEREO_ROUTE_ANCHORED_3D through the held screen's anchor): CAutoMapper::Draw
+      // builds it with real depth in the anchor's space, and its frame and compass go on the
+      // screen first. No depth mask and no depth test: the map draws back to front. It grows out
+      // of the HUD's minimap and shrinks back into it, from where the minimap stands on the
+      // head-locked HUD, turned to where the head has it less and less as it opens.
+      float distance = 0.f;
+      float halfHeight = 0.f;
+      float clearance = 0.f;
+      float nearPlane = 0.f;
+      PortVr::VrMapHologram(distance, halfHeight, clearance, nearPlane);
+      const CGraphics::CProjectionState vrProjection = CGraphics::GetProjectionState();
+      const CTransform4f vrViewPoint = CGraphics::GetViewMatrix();
+      AuroraSetStereoDrawRoute(PortVr::VrFloatingHud() ? AURORA_STEREO_ROUTE_FLOATING_HUD
+                                                       : AURORA_STEREO_ROUTE_ANCHORED_SCREEN);
+      mAutoMapper->PortVrDrawFrame(mVisorStaticAlpha * mapAlpha);
+      AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_ANCHORED_3D);
+      float mapGrow = 1.f;
+      if (!mAutoMapper->IsFullyOutOfMiniMapState()) {
+        mapGrow = mAutoMapper->GetNextState() != CAutoMapper::kAMS_MiniMap
+                      ? mAutoMapper->GetInterp()
+                      : 1.f - mAutoMapper->GetInterp();
+      }
+      float hudScaleXY = 1.f;
+      float hudScaleDepth = 1.f;
+      PortVr::VrHeadLockedScales(hudScaleXY, hudScaleDepth);
+      // The minimap's place in the HUD camera's space (no widescreen spread in the headset).
+      CVector3f miniCamera(0.f, distance, 0.f);
+      if (mSamusHud->GetLoadedHudFrame() != nullptr) {
+        miniCamera = mSamusHud->GetLoadedHudFrame()->GetFrameCamera()->GetWorldTransform()
+                         .GetQuickInverse() *
+                     mMapCameraTransform.GetTranslation();
+      }
+      const float miniHalfHud = gpTweakAutoMapper->GetMapPlaneScale().GetY();
+      const CVector3f miniStart(miniCamera.GetX() * hudScaleXY, miniCamera.GetY() * hudScaleDepth,
+                                miniCamera.GetZ() * hudScaleXY);
+      const float miniHalfHeight = miniHalfHud * hudScaleXY;
+      const float miniFollow = 1.f - mapGrow;
+      CAutoMapper::PortVrSetHologram(distance, halfHeight, clearance, miniStart, miniHalfHeight,
+                                     mapGrow);
+      // The placement takes GX camera axes: x right, y up, looking down -z.
+      AuroraSetStereoPlacement3DFollowHead(1.f, 0.f, 0.f, 0.f, miniStart.GetX(), miniStart.GetZ(),
+                                           -miniStart.GetY(), miniFollow);
+      // The mono picture (the desktop mirror) through a plain perspective; each eye puts its own
+      // frustum in its place.
+      CGraphics::SetPerspective(55.f,
+                                static_cast< float >(CGraphics::GetViewport().mWidth) /
+                                    static_cast< float >(CGraphics::GetViewport().mHeight),
+                                nearPlane, 100.f * distance);
+      CGraphics::SetViewPointMatrix(CTransform4f::Identity());
+      CGraphics::SetDepthRange(0.f, 1.f / 512.f);
+      CGraphics::SetDepthWriteMode(false, kE_LEqual, false);
+      mAutoMapper->Draw(mgr, CTransform4f::Identity(), mVisorStaticAlpha * mapAlpha);
+      CAutoMapper::PortVrSetHologram(0.f, 0.f, 0.f, CVector3f::Zero(), 0.f, 1.f);
+      AuroraSetStereoPlacement3D(1.f, 0.f, 0.f, 0.f);
+      CGraphics::SetProjectionState(vrProjection);
+      CGraphics::SetViewPointMatrix(vrViewPoint);
+    } else {
     // Port: widescreen HUD. The minimap and its depth mask are drawn outside CGuiFrame; spread both
     // with one transform so the map stays inside its mask, beside the strut it sits by. The spread
     // fades out as the map grows into the map screen.
@@ -474,6 +533,7 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
     mAutoMapper->Draw(mgr,
                       mapSpread * CTransform4f::Translate(0.f, 0.02f, 0.f) * mMapCameraTransform,
                       mVisorStaticAlpha * mapAlpha);
+    }
 #else
     if (model != nullptr) {
       model->SetIsVisible(true);

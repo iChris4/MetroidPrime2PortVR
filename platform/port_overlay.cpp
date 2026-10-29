@@ -361,7 +361,13 @@ void ApplyGraphicsQuality() {
 
 void ApplyVsync() {
   ReadEnv();
+#if defined(MP_ENABLE_OPENXR)
+  // PortVr: the headset paces the loop; a desktop present waiting on the monitor's vblank would hold
+  // up its frames (as the Metroid Prime VR port's EffectiveVsync).
+  const bool vsync = PortOverlay::Vsync() && !PortVr::OpenXRIsRunning();
+#else
   const bool vsync = PortOverlay::Vsync();
+#endif
   if (sAppliedVsync == (vsync ? 1 : 0)) {
     return;
   }

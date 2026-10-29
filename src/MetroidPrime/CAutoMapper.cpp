@@ -6,6 +6,20 @@
 
 #ifdef TARGET_PC
 #include "GuiSys/CGuiCamera.hpp"
+#include "vr/vr_view.h"
+
+namespace {
+// PortVr: CAutoMapper::PortVrSetHologram.
+float sPortVrHologramDistance = 0.f;
+float sPortVrHologramHalfHeight = 0.f;
+float sPortVrHologramClearance = 0.f;
+CVector3f sPortVrHologramStart = CVector3f::Zero();
+float sPortVrHologramStartHalfHeight = 0.f;
+float sPortVrHologramGrow = 1.f;
+// The last world map's depth compression (depth scale over scale), eased out and back in through a
+// world/universe transition.
+float sPortVrHologramDepthRatio = 1.f;
+} // namespace
 #endif
 #include "GuiSys/CGuiFrame.hpp"
 #include "GuiSys/CGuiTextPane.hpp"
@@ -1379,14 +1393,85 @@ void CAutoMapper::Draw(const CStateManager& mgr, const CTransform4f& xf, float a
       float(mRenderState0.mViewportSize.GetX()) / float(mRenderState0.mViewportSize.GetY());
   const float camAngleRad = mRenderState0.mCamAngle * (1.f / 360.f) * (2.f * M_PIF);
   const float yScale = mRenderState0.mCamDist / float(tan(M_PIF / 2.f - 0.5f * camAngleRad));
+#ifdef TARGET_PC
+  // PortVr: the minimap turns with the head on every presented frame, between ticks too; the map
+  // keeps its authored viewing inclination.
+  const CQuaternion portMapOrientation =
+      IsInMapperState(kAMS_MiniMap) && mPlayerIndex == 0 && PortVr::VrImmersive()
+          ? GetMiniMapCameraOrientation(mgr)
+          : mRenderState0.mCamOrientation;
+  const CTransform4f camXf = portMapOrientation.BuildTransform4f(mRenderState0.mAreaPoint);
+#else
   const CTransform4f camXf =
       mRenderState0.mCamOrientation.BuildTransform4f(mRenderState0.mAreaPoint);
+#endif
   const CTransform4f distScale(1.f / (yScale * aspect), 0.f, 0.f, 0.f, 0.f, 0.001f, 0.f, 0.f, 0.f,
                                0.f, 1.f / yScale, 0.f);
   const CTransform4f tweakScale =
       CTransform4f::Scale(gpTweakAutoMapper->GetMapPlaneScale().GetX(), 0.f,
                           gpTweakAutoMapper->GetMapPlaneScale().GetY());
+#ifdef TARGET_PC
+  CTransform4f planeXf = xf * tweakScale * distScale * camXf.GetQuickInverse();
+  // PortVr: the 3D map in the headset. The TV squashes the map camera's view onto the HUD's plane
+  // (depth scaled to nothing); here the map camera's space is scaled alike in every axis (the view's
+  // half-height to the hologram's; only the depth compressed where the map would reach the face)
+  // and set ahead of the held anchor: seen as the map camera sees it, with its depth.
+  const bool portVrHologram = sPortVrHologramDistance > 0.f && yScale > 0.f;
+  if (portVrHologram) {
+    // Between the HUD minimap's place (flat) and the 3D map's while it opens or closes.
+    const float grow = sPortVrHologramGrow;
+    const CVector3f center =
+        sPortVrHologramStart +
+        (CVector3f(0.f, sPortVrHologramDistance, 0.f) - sPortVrHologramStart) * grow;
+    const float half = sPortVrHologramStartHalfHeight +
+                       (sPortVrHologramHalfHeight - sPortVrHologramStartHalfHeight) * grow;
+    const float scale = half / yScale;
+    float depthScale = scale;
+    const bool universe = mState == kAMS_MapScreenUniverse || mNextState == kAMS_MapScreenUniverse;
+    if (!universe && mWorld != nullptr) {
+      // Zoomed in on a large world, the areas nearest the map camera would reach the face or pass
+      // behind the head: compress the depth (only that) so the near side of the visible areas'
+      // volume stays ahead. The game measures the volume once the map has opened; while it opens
+      // or closes it is measured here, from the visible areas as drawn.
+      const CMapWorld* volumeWorld = mWorld->IGetMapWorld();
+      if (!IsFullyOutOfMiniMapState()) {
+        const CMapWorldInfo& volumeInfo =
+            *gpGameState->StateForWorld(mWorld->IGetWorldAssetId()).GetMapWorldInfo().GetPtr();
+        volumeWorld->RecalculateWorldSphere(volumeInfo, *mWorld);
+      }
+      CVector3f volumeCenter = CVector3f::Zero();
+      float radius = 0.f;
+      float halfDepth = 0.f;
+      volumeWorld->PortWorldVolume(volumeCenter, radius, halfDepth);
+      if (radius > 0.f) {
+        const CVector3f forward = camXf.GetForward();
+        const float extent =
+            radius * sqrtf(forward.GetX() * forward.GetX() + forward.GetY() * forward.GetY()) +
+            halfDepth * CMath::AbsF(forward.GetZ());
+        const float nearSide = (camXf.GetQuickInverse() * volumeCenter).GetY() - extent;
+        const float room = center.GetY() - sPortVrHologramClearance;
+        if (nearSide < 0.f && room > 0.f) {
+          depthScale = rstl::min_val(scale, room / -nearSide);
+        }
+      }
+      sPortVrHologramDepthRatio = depthScale / scale;
+    } else if (universe) {
+      // The universe map needs none: ease the world's compression out as it opens and back in as
+      // it closes, rather than drop it at once.
+      float t = 1.f;
+      if (mState != kAMS_MapScreenUniverse) {
+        t = GetInterp();
+      } else if (mNextState != kAMS_MapScreenUniverse) {
+        t = 1.f - GetInterp();
+      }
+      depthScale = scale * (sPortVrHologramDepthRatio + (1.f - sPortVrHologramDepthRatio) * t);
+    }
+    planeXf = CTransform4f::Translate(center) *
+              CTransform4f::Scale(scale, depthScale * grow, scale) * camXf.GetQuickInverse();
+  }
+#else
   const CTransform4f planeXf = xf * tweakScale * distScale * camXf.GetQuickInverse();
+#endif
 
   float universeInterp = 0.f;
   if (mNextState == kAMS_MapScreenUniverse) {
@@ -1541,7 +1626,13 @@ void CAutoMapper::Draw(const CStateManager& mgr, const CTransform4f& xf, float a
       const CModelFlags flags =
           CModelFlags::AlphaBlended(gpTweakAutoMapper->GetPlayerModelColor().WithAlphaModulatedBy(
               worldAlpha * colorAlpha * mapAlpha));
+#ifdef TARGET_PC
+      // PortVr: no minimap mask to test against in the 3D map.
+      mMiniMapSamus.GetObject()->Draw(
+          flags.DepthBackwards().DepthCompareUpdate(!portVrHologram, false));
+#else
       mMiniMapSamus.GetObject()->Draw(flags.DepthBackwards().DepthCompareUpdate(true, false));
+#endif
     }
 
     if (IsInMapperState(kAMS_MapScreen)) {
@@ -1595,7 +1686,12 @@ void CAutoMapper::Draw(const CStateManager& mgr, const CTransform4f& xf, float a
   gpRender->SetDepthReadWrite(false, false);
   gpRender->SetAmbientColor(CColor::White());
   CGraphics::DisableAllLights();
+#ifdef TARGET_PC
+  // PortVr: the 3D map's frame was drawn first, on its screen behind it (PortVrDrawFrame).
+  if (mFrmeInitialized != nullptr && !portVrHologram) {
+#else
   if (mFrmeInitialized != nullptr) {
+#endif
     drawAlpha = IsFullyOutOfMiniMapState()   ? 1.f
                 : mNextState == kAMS_MiniMap ? 1.f - GetInterp()
                                              : GetInterp();
@@ -1626,6 +1722,55 @@ void CAutoMapper::Draw(const CStateManager& mgr, const CTransform4f& xf, float a
   }
 }
 
+#ifdef TARGET_PC
+void CAutoMapper::PortVrSetHologram(float distance, float halfHeight, float clearance,
+                                    const CVector3f& start, float startHalfHeight, float grow) {
+  sPortVrHologramDistance = distance;
+  sPortVrHologramHalfHeight = halfHeight;
+  sPortVrHologramClearance = clearance;
+  sPortVrHologramStart = start;
+  sPortVrHologramStartHalfHeight = startHalfHeight;
+  sPortVrHologramGrow = CMath::Clamp(0.f, grow, 1.f);
+}
+
+void CAutoMapper::PortVrDrawFrame(float alpha) const {
+  // The end of Draw, for the frame and the compass alone.
+  if (mFrmeInitialized == nullptr) {
+    return;
+  }
+  gpRender->SetDepthReadWrite(false, false);
+  gpRender->SetAmbientColor(CColor::White());
+  CGraphics::DisableAllLights();
+  const float drawAlpha = IsFullyOutOfMiniMapState()   ? 1.f
+                          : mNextState == kAMS_MiniMap ? 1.f - GetInterp()
+                                                       : GetInterp();
+  CGraphics::SetDepthRange(0.f, 0.f);
+  mFrmeInitialized->Draw(CGuiWidgetDrawParms(drawAlpha * alpha, CVector3f::Zero()));
+  CModel* compass = mCompassModel.GetObject();
+  CModel* shell = mCompassShellModel.GetObject();
+  if (compass != nullptr && shell != nullptr) {
+    gpRender->SetDepthReadWrite(false, false);
+    gpRender->SetViewportOrtho(true, -4096.f, 4096.f);
+    CGraphics::SetCullMode(kCM_None);
+    const CEulerAngles eulers = CEulerAngles::FromQuaternion(mRenderState0.mCamOrientation);
+    CTransform4f compassXf = CTransform4f::RotateX(CRelAngle::FromRadians(eulers.GetX()));
+    CTransform4f shellXf = compassXf;
+    compassXf *= CTransform4f::RotateZ(CRelAngle::FromRadians(eulers.GetYaw()));
+    compassXf *= CTransform4f::Scale(32.f);
+    compassXf.AddTranslation(CVector3f(224.f, 0.f, -60.f));
+    shellXf *= CTransform4f::Scale(32.f);
+    shellXf.AddTranslation(CVector3f(224.f, 0.f, -60.f));
+    const float compassAlpha = 0.5f * drawAlpha * alpha * (1.f - mBottomPanePos);
+    gpRender->SetModelMatrix(compassXf);
+    compass->Draw(CModelFlags::Additive(compassAlpha));
+    gpRender->SetModelMatrix(shellXf);
+    shell->Draw(CModelFlags::AlphaBlended(compassAlpha));
+    CGraphics::SetCullMode(kCM_Front);
+  }
+  CGraphics::SetDepthRange(0.f, 1.f / 512.f);
+}
+
+#endif
 CAssetId CAutoMapper::GetAreaHintDescriptionString(CAssetId areaId) {
   const rstl::vector< CHintOptions::SHintState >& hintStates =
       gpGameState->HintOptions().GetHintStates();
@@ -2421,6 +2566,18 @@ void CAutoMapper::LeaveMapScreenState() {
 
 CQuaternion CAutoMapper::GetMiniMapCameraOrientation(const CStateManager& mgr) const {
   const float miniCamXAngle = gpTweakAutoMapper->GetMiniCamXAngle();
+#ifdef TARGET_PC
+  if (mPlayerIndex == 0 && PortVr::VrImmersive()) {
+    // PortVr: the minimap turns with the head, not the body: the level right axis keeps the yaw
+    // even looking straight up or down.
+    const CMatrix3f head = PortVr::VrHeadViewRotation(
+        mgr.GetCameraManager(0)->GetCurrentCameraTransform(mgr, true));
+    const CVector3f right = head.GetColumn(kDX);
+    return CQuaternion::ZRotation(
+               CRelAngle::FromRadians(CMath::ClampRadians(atan2f(right.GetY(), right.GetX())))) *
+           CQuaternion::XRotation(CRelAngle::FromDegrees(miniCamXAngle));
+  }
+#endif
   const CGameCamera* camera = mgr.GetCameraManager(mPlayerIndex)->GetCurrentCamera(mgr, 1);
   const CEulerAngles angles =
       CEulerAngles::FromQuaternion(CQuaternion::FromMatrix(camera->GetTransform()));

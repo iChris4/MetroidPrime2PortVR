@@ -136,6 +136,12 @@ public:
   // The room picker reads each area's light/dark flag from its own MAPA token, without the
   // automapper's streaming lists.
   CAssetId PortMapAreaRes(int areaId) const { return mAreas[areaId].PortAreaRes(); }
+  // PortVr: the volume RecalculateWorldSphere measured (the 3D map keeps it ahead of the face).
+  void PortWorldVolume(CVector3f& center, float& radius, float& halfDepth) const {
+    center = mWorldSpherePoint;
+    radius = mWorldSphereRadius;
+    halfDepth = mWorldSphereHalfDepth;
+  }
 #endif
   CMapArea* GetMapArea(int areaId) const;
   void SetWhichMapAreasLoaded(const IWorld& world, int start, int count);

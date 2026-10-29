@@ -131,6 +131,15 @@ public:
   void ProcessControllerInput(const CFinalInput& input, CStateManager& mgr);
 #ifdef TARGET_PC
   void PortPointerInput(CFinalInput& input, const CStateManager& mgr);
+  // PortVr: the map screen as a 3D map held in the headset (CInGameGuiManager::Draw): Draw then
+  // builds the map in the held anchor's space, `distance` ahead with the map view's half-height
+  // `halfHeight` (game units), its near side at least `clearance` ahead, growing from the HUD
+  // minimap's place (`start`, `startHalfHeight`) as `grow` goes 0 to 1. A zero distance turns it off.
+  static void PortVrSetHologram(float distance, float halfHeight, float clearance,
+                                const CVector3f& start, float startHalfHeight, float grow);
+  // The end of Draw for the map screen's frame and compass alone, laid on the held screen before
+  // the 3D map.
+  void PortVrDrawFrame(float alpha) const;
 #endif
   void Update(float dt, CStateManager& mgr);
   void Draw(const CStateManager& mgr, const CTransform4f& xf, float alpha) const;
