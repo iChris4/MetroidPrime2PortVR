@@ -133,6 +133,34 @@ static void StopSound(CSfxHandle& sound) {
     sound.Clear();
   }
 }
+#ifdef TARGET_PC
+
+// PortVr: the beam the VR beam wheel's hover would select: the one whose command the player's
+// control map puts on the C-stick direction the wheel sends (CPlayerGun::HandleBeamChange's
+// commands, by beam), or -1. Echoes' beams sit on other directions than Metroid Prime's.
+static int PortVrBeamWheelHoverBeam(const CStateManager& mgr, int playerIndex) {
+  int x = 0;
+  int y = 0;
+  if (playerIndex != 0 || !PortVr::VrBeamWheelHoverDirection(x, y)) {
+    return -1;
+  }
+  const CControlMapper::EFunctionList direction =
+      y > 0   ? CControlMapper::kFL_RightStickUp
+      : y < 0 ? CControlMapper::kFL_RightStickDown
+      : x > 0 ? CControlMapper::kFL_RightStickRight
+              : CControlMapper::kFL_RightStickLeft;
+  static const CControlMapper::ECommands beamCommands[] = {
+      CControlMapper::kC_PowerBeam, CControlMapper::kC_IceBeam, CControlMapper::kC_WaveBeam,
+      CControlMapper::kC_PlasmaBeam};
+  const CControlMapper& mapper = mgr.GetPlayer(playerIndex)->GetControlMapper();
+  for (int i = 0; i < 4; ++i) {
+    if (mapper.GetMapping(beamCommands[i]) == direction) {
+      return i;
+    }
+  }
+  return -1;
+}
+#endif
 
 const char* CSamusHud::GetHudFrameName(int viewportLayout) {
 #ifdef TARGET_PC
@@ -899,7 +927,7 @@ void CSamusHud::UpdateVisorAndBeamMenus(float dt, const CStateManager& mgr) {
       mBeamMenu->SetPlayerHas(BuildPlayerHasBeams(mgr));
 #ifdef TARGET_PC
       // PortVr: the VR beam wheel's hover lights that beam's box.
-      mBeamMenu->PortVrSetHighlight(mPlayerIndex == 0 ? PortVr::VrBeamWheelHoverBeam() : -1);
+      mBeamMenu->PortVrSetHighlight(PortVrBeamWheelHoverBeam(mgr, mPlayerIndex));
 #endif
       mMenuBeam = currentBeam;
     }

@@ -352,11 +352,16 @@ press of the same button there is no new edge: close with B (`press b 6`) after 
 ## Parity, part 2: beam wheel highlight, left-handed weapons (2026-10-29)
 
 - Beam wheel: Echoes keeps the Metroid Prime command slots for its beams (`kC_PowerBeam` Power,
-  `kC_IceBeam` Dark, `kC_WaveBeam` Light, `kC_PlasmaBeam` Annihilator) on the same C-stick directions
-  (the port's keyboard fallbacks say so), so the wheel's up/right/down/left pulses and its
-  `GameBeamId` index pick and light the right Echoes beams. `CHudVisorBeamMenu::PortVrSetHighlight`
-  (a member with a default initializer, no constructor change) turns the hovered box and icon white;
-  `CSamusHud::UpdateVisorAndBeamMenus` feeds it `VrBeamWheelHoverBeam` in first person.
+  `kC_IceBeam` Dark, `kC_WaveBeam` Light, `kC_PlasmaBeam` Annihilator), and the wheel's
+  up/right/down/left C-stick pulses pick them. `CHudVisorBeamMenu::PortVrSetHighlight` (a member
+  with a default initializer, no constructor change) turns the hovered box and icon white. Corrected
+  after the third headset test: the commands do not sit on Metroid Prime's directions (Echoes' control
+  tweak, read from the USA disc: up Power, right Dark, down Annihilator, left Light, as the HUD's
+  `UpdateMenuWidgetTransform` lays the icons out; upstream's comments in `port_input_devices.cpp`
+  and `port_touch.cpp` say Dark left), so Metroid Prime's `GameBeamId` lit the wrong box
+  for all but up. `VrBeamWheelHoverDirection` now hands `CSamusHud` the hovered C-stick direction and
+  `PortVrBeamWheelHoverBeam` finds the beam whose command the player's control map puts there, as
+  `CPlayerGun::HandleBeamChange` does.
 - Left-handed (`vr_use_right_hand` off): `CPlayerGun::Render` draws the gun motion model and the
   beam/suit-arm models through `VrWeaponModelTransform` under `ModelMirrorScope`; the effects, the
   pose and the shots keep the tracked transform. `CGrappleArm::Render` and the grapple beam's start

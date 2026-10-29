@@ -186,12 +186,16 @@ private:
     bool active_ = false;
 };
 // The beam wheel's hover, for the HUD's beam menu (CHudVisorBeamMenu): the
-// beam the aim ray points at while the weapon hand's B holds the wheel open
-// (vr_pad.cpp), as CPlayerState::EBeamId (0 Power, 1 Ice, 2 Wave, 3 Plasma),
-// or -1 when the wheel is closed, nothing is hovered, or the
-// vr_beam_wheel_hud_highlight setting is off. The menu lights that beam's box,
-// where PrimedGun drew its own panel with a frame around the hovered icon.
-int VrBeamWheelHoverBeam() noexcept;
+// C-stick direction the wheel sends for the slot the aim ray points at while
+// the weapon hand's B holds it open (vr_pad.cpp, BeamWheel::CStickDirection:
+// x right, y up, one of them 0), or false when the wheel is closed, nothing is
+// hovered, or the vr_beam_wheel_hud_highlight setting is off. PrimedGun
+// Echoes: the HUD looks the direction up in the player's control map
+// (CSamusHud), as the gun does, since Echoes puts other beams on the four
+// directions (up Power, right Dark, down Annihilator, left Light) than Metroid
+// Prime's EBeamId order assumed. The menu lights that beam's box, where
+// PrimedGun drew its own panel with a frame around the hovered icon.
+bool VrBeamWheelHoverDirection(int& x, int& y) noexcept;
 
 // Uncalibrated tracking-space point to world space, shared by wrist UI geometry.
 CTransform4f VrTrackingToWorldTransform(const CPlayer& player, const CTransform4f& cameraXf) noexcept;

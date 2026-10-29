@@ -652,20 +652,23 @@ bool VrMessageBoxInView() noexcept {
     return PrimeVRPolicyPresentationFor(mode) == VRPresentationMode::Immersive;
 }
 
-int VrBeamWheelHoverBeam() noexcept {
+bool VrBeamWheelHoverDirection(int& x, int& y) noexcept {
     if (!GetVrSettings().beam_wheel_hud_highlight) {
-        return -1;
+        return false;
     }
     const VrPadState pad = GetVrPadState();
     if (!pad.active || !pad.gameplay || !pad.weapon_panel) {
-        return -1;
+        return false;
     }
-    // The wheel counts PrimedGun's way (Power, Wave, Ice, Plasma); the game's
-    // EBeamId puts Ice before Wave.
+    // The wheel counts PrimedGun's way (Power, Wave, Ice, Plasma: up, right,
+    // down, left); the game picks the beam from the direction.
     if (pad.weapon_selected < 0 || pad.weapon_selected > 3) {
-        return -1;
+        return false;
     }
-    return BeamWheel::GameBeamId(static_cast<BeamWheel::Beam>(pad.weapon_selected));
+    const std::array<int, 2> direction = BeamWheel::CStickDirection(static_cast<BeamWheel::Beam>(pad.weapon_selected));
+    x = direction[0];
+    y = direction[1];
+    return x != 0 || y != 0;
 }
 
 CTransform4f VrTrackingToWorldTransform(const CPlayer& player, const CTransform4f& cameraXf) noexcept {
