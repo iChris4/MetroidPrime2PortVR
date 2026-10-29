@@ -63,6 +63,15 @@ public:
   void DrawScanVisor(float time, const CStateManager& mgr, const CColor& sweepColor,
                      const CColor& inactiveColor, const CColor& inactiveExternalColor,
                      const CColor* palette, int paletteSize, const CVector3f& direction) const;
+#ifdef TARGET_PC
+  // PortVr: whether a message box or a menu is shown in the headset's immersive view decides what
+  // the next frames draw (the live world under the blur, the held screen); player 0, every tick.
+  void PortVrRefreshPausedScreens();
+  // The map screen in the headset's immersive view (on the held screen).
+  bool PortVrMapInView() const;
+  // The world under the pause blur is live (CPauseScreenBlur::PortVrLiveWorld).
+  bool PortVrLiveWorld() const;
+#endif
 
 private:
   typedef rstl::reserved_vector< TToken< CDependencyGroup >, 3 > TPauseScreenDGRPs;

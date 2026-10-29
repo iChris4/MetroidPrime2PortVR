@@ -12,6 +12,8 @@
 #include "port_savestate.h"
 #include "port_touch.h"
 #include "port_pipeline_context.h"
+#include "vr/vr_view.h"
+#include <aurora/gfx.h>
 #endif
 
 #include "Kyoto/Audio/CMidiManager.hpp"
@@ -803,7 +805,25 @@ void CMFGame::DrawGui(bool singleViewport) const {
     mGuiManager->DrawMultiplayerGui();
   }
   if (mStateManager->mSaveGameScreen.get()) {
+#ifdef TARGET_PC
+    // PortVr: the save prompt goes on the headset's held screen, as the message boxes do
+    // (CInGameGuiManager::Draw), over the live world under the blur.
+    const bool vrScreen = mGuiManager->GetPlayerGuiManager(0).PortVrLiveWorld();
+    const float vrDepthNear = CGraphics::GetDepthNear();
+    const float vrDepthFar = CGraphics::GetDepthFar();
+    if (vrScreen) {
+      AuroraSetStereoDrawRoute(PortVr::VrFloatingHud() ? AURORA_STEREO_ROUTE_FLOATING_HUD
+                                                       : AURORA_STEREO_ROUTE_ANCHORED_SCREEN);
+      CGraphics::SetDepthRange(0.f, 0.f);
+    }
     mStateManager->mSaveGameScreen->Draw();
+    if (vrScreen) {
+      CGraphics::SetDepthRange(vrDepthNear, vrDepthFar);
+      AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+    }
+#else
+    mStateManager->mSaveGameScreen->Draw();
+#endif
   }
 }
 

@@ -49,6 +49,7 @@
 #include "port_overlay.h"
 #include "port_pointer.h"
 #include "GuiSys/CGuiModel.hpp"
+#include "vr/vr_host.h"
 #include "vr/vr_pad.h"
 #include "vr/vr_view.h"
 #include <algorithm>
@@ -297,6 +298,15 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
         true, reticleVisor && CCameraManager::PortLookIsFree(mgr, mPlayerIndex));
   }
 #endif
+#ifdef TARGET_PC
+  // PortVr: while a message box or a menu blurs the live world in the headset
+  // (CPauseScreenBlur::PortVrLiveWorld), the visor and the HUD keep being drawn under the blur, as
+  // the TV's frozen copy holds them, and the head-locked HUD dissolves out as the blur comes up
+  // (and back in as it lifts) rather than staying blurred in front of the eyes.
+  const bool vrLiveWorld = mPauseScreenBlur->PortVrLiveWorld();
+  const bool vrHudUnderBlur = mPauseScreenBlur->PortVrHudUnderBlur();
+  const float vrHudFade = vrLiveWorld ? 1.f - mPauseScreenBlur->GetBlurAmt() : 1.f;
+#endif
   if (mPauseScreenBlur->IsGameDraw()) {
     if (mHelmetVisMode != 0 && notInCine) {
 #ifdef TARGET_PC
@@ -315,7 +325,7 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
 #endif
     }
 #ifdef TARGET_PC
-    if (!PortFreeCam::Active())
+    if (!PortFreeCam::Active() && vrHudFade >= 1.f)
 #endif
     if (mgr.GetPlayer(mPlayerIndex)->GetMorphballTransitionState() == CPlayer::kMS_Unmorphed) {
       mSamusHud->GetTargetingManager().Draw(mgr, true);
@@ -339,9 +349,15 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
     CGraphics::SetDepthRange(1.f / 64.f, 1.f / 32.f);
     const CPlayer::EPlayerMorphBallState morphState =
         mgr.GetPlayer(mPlayerIndex)->GetMorphballTransitionState();
+#ifdef TARGET_PC
+    const bool drawVisor = !inTurret && notInCine &&
+                           (mPrevState == kIGGS_InGame || mNextState == kIGGS_InGame ||
+                            morphState == CPlayer::kMS_Morphed || vrHudUnderBlur);
+#else
     const bool drawVisor = !inTurret && notInCine &&
                            (mPrevState == kIGGS_InGame || mNextState == kIGGS_InGame ||
                             morphState == CPlayer::kMS_Morphed);
+#endif
     const bool targeting = morphState != CPlayer::kMS_Morphed;
     if (inTurret && !mTurretHud.null()) {
       mTurretHud->Draw();
@@ -365,8 +381,9 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
       }
 #ifdef TARGET_PC
       // Port: the free camera draws no HUD.
-      if (!PortFreeCam::Active()) {
-        mSamusHud->Draw(mgr, mVisorStaticAlpha * (1.f - staticAlpha), 1, true, targeting);
+      if (!PortFreeCam::Active() && vrHudFade > 0.f) {
+        mSamusHud->Draw(mgr, mVisorStaticAlpha * (1.f - staticAlpha) * vrHudFade, 1, true,
+                        targeting && vrHudFade >= 1.f);
         mSamusHud->DrawHudMemo();
       }
 #else
@@ -397,7 +414,10 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
 #ifdef TARGET_PC
     // PortVr: the minimap is drawn in the HUD frame camera's space: head-locked, or on the morph
     // ball HUD's screen with it (CSamusHud::Draw), where it keeps its place in the ball's layout.
-    if (mSamusHud->PortVrBallHudShown()) {
+    if (PortVrMapInView()) {
+      // The map screen in the headset: on the held screen (the 3D map comes later).
+      AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_ANCHORED_SCREEN);
+    } else if (mSamusHud->PortVrBallHudShown()) {
       AuroraSetStereoDrawRoute(PortVr::VrFloatingHud() ? AURORA_STEREO_ROUTE_FLOATING_HUD
                                                        : AURORA_STEREO_ROUTE_ANCHORED_SCREEN);
     } else {
@@ -474,12 +494,45 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
   if (!preDrawBlur) {
     mPauseScreenBlur->Draw(mgr);
   }
+#ifdef TARGET_PC
+  // PortVr: in the headset's immersive view the message box is laid on a 2D screen of the morph
+  // ball HUD's size and distance, placed ahead of the head when the box opens and then held still
+  // (AURORA_STEREO_ROUTE_ANCHORED_SCREEN, held by PortVrRefreshPausedScreens), or with
+  // vr_floating_hud on the ball HUD's easing plane, over the live world the blur covers. Its depth
+  // window is the nearest there is: the world, the HUD and the minimap were drawn this frame.
+  const uint vrScreenRoute = PortVr::VrFloatingHud() ? AURORA_STEREO_ROUTE_FLOATING_HUD
+                                                     : AURORA_STEREO_ROUTE_ANCHORED_SCREEN;
+  const float vrDepthNear = CGraphics::GetDepthNear();
+  const float vrDepthFar = CGraphics::GetDepthFar();
+  if (vrLiveWorld && !mMessageScreen.null()) {
+    AuroraSetStereoDrawRoute(vrScreenRoute);
+    CGraphics::SetDepthRange(0.f, 0.f);
+    mMessageScreen->Draw();
+    CGraphics::SetDepthRange(vrDepthNear, vrDepthFar);
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+  } else if (!mMessageScreen.null()) {
+    mMessageScreen->Draw();
+  }
+  if (vrLiveWorld && !mPauseScreen.null()) {
+    // PortVr: the pause menu and logbook go on the same screen, over every eye's depth reset to the
+    // far plane so their 3D models keep their own depth against the live world under the blur.
+    PortVr::VrResetEyeDepth();
+    AuroraSetStereoDrawRoute(vrScreenRoute);
+    PortVr::VrSetPauseScreenRoute(vrScreenRoute);
+    mPauseScreen->Draw();
+    PortVr::VrSetPauseScreenRoute(0);
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+  } else if (!mPauseScreen.null()) {
+    mPauseScreen->Draw();
+  }
+#else
   if (!mMessageScreen.null()) {
     mMessageScreen->Draw();
   }
   if (!mPauseScreen.null()) {
     mPauseScreen->Draw();
   }
+#endif
 
   if (deathTime > 0.f) {
     const float alpha = CMath::Clamp(0.f, deathTime / 2.5f, 1.f);
@@ -539,7 +592,18 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
   }
   if (!mQuitScreen.null()) {
     CGraphics::SetDepthRange(1.f / 512.f, 0.f);
+#ifdef TARGET_PC
+    // PortVr: the quit prompt goes on the held screen with the menu it came from.
+    if (vrLiveWorld) {
+      AuroraSetStereoDrawRoute(vrScreenRoute);
+    }
     mQuitScreen->Draw();
+    if (vrLiveWorld) {
+      AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+    }
+#else
+    mQuitScreen->Draw();
+#endif
   }
 }
 
@@ -645,9 +709,6 @@ void CInGameGuiManager::Update(const CStateManager& mgr, float dt, CRandom16& ra
       player.SetViewportScaleX(1.f);
       player.SetViewportScaleY(1.f);
     }
-    // PortVr: the morph ball HUD's screen (AURORA_STEREO_ROUTE_ANCHORED_SCREEN) is placed where
-    // the head faces when the HUD comes up and held while it stays, unless it floats.
-    aurora_set_stereo_screen_anchor(!PortVr::VrFloatingHud() && mSamusHud->PortVrBallHudShown());
   }
 #endif
   mPauseScreenBlur->Update(dt, mgr, mDumpedTextures.empty());
@@ -675,8 +736,52 @@ void CInGameGuiManager::Update(const CStateManager& mgr, float dt, CRandom16& ra
       TryCompleteStateTransition();
     }
   }
+#ifdef TARGET_PC
+  if (mPlayerIndex == 0) {
+    // PortVr: a message box or the save prompt, and the pause menu, the logbook and the map, noted
+    // after this tick's state changes so the frame drawn next is published with them
+    // (PortVrHost::PublishGameMode). Shown in the immersive view, the world keeps being drawn under
+    // the pause blur; brought into view after the area textures were dumped, they come back first.
+    PortVr::VrNoteMessageBox((mPrevState == kIGGS_PauseHUDMessage || mNextState == kIGGS_PauseHUDMessage) ||
+                                 (mPrevState == kIGGS_PauseSaveGame || mNextState == kIGGS_PauseSaveGame),
+                             mgr.GetCameraManager(0)->IsInCinematicCamera());
+    PortVr::VrNoteGameMenu((mPrevState == kIGGS_MapScreen || mNextState == kIGGS_MapScreen) ||
+                           (mPrevState == kIGGS_PauseGame || mNextState == kIGGS_PauseGame) ||
+                           (mPrevState == kIGGS_PauseLogBook || mNextState == kIGGS_PauseLogBook));
+    if ((PortVr::VrMessageBoxInView() || PortVr::VrGameMenuInView()) && !mDumpedTextures.empty()) {
+      TryReloadAreaTextures();
+    }
+    PortVrHost::NoteAreaTexturesDumped(!mDumpedTextures.empty());
+    PortVrRefreshPausedScreens();
+  }
+#endif
 }
 
+#ifdef TARGET_PC
+void CInGameGuiManager::PortVrRefreshPausedScreens() {
+  if (mPauseScreenBlur.null()) {
+    return;
+  }
+  mPauseScreenBlur->PortVrSetLiveWorld(
+      (PortVr::VrMessageBoxInView() || PortVr::VrGameMenuInView()) && mDumpedTextures.empty());
+  // The held screen (AURORA_STEREO_ROUTE_ANCHORED_SCREEN), unless it floats (vr_floating_hud):
+  // placed where the head faces when a box or the morph ball's HUD comes into view, and held while
+  // either stays (read at the next frame's begin). The map is held even with vr_floating_hud.
+  const bool ballHud = mSamusHud.get() != nullptr && mSamusHud->PortVrBallHudShown();
+  aurora_set_stereo_screen_anchor(PortVrMapInView() ||
+                                  (!PortVr::VrFloatingHud() &&
+                                   (mPauseScreenBlur->PortVrLiveWorld() || ballHud)));
+}
+
+bool CInGameGuiManager::PortVrMapInView() const {
+  return !mAutoMapper.null() && PortVr::VrGameMenuInView() && mDumpedTextures.empty() &&
+         (mPrevState == kIGGS_MapScreen || mNextState == kIGGS_MapScreen) && !mAutoMapper->IsFullyInMiniMapState();
+}
+
+bool CInGameGuiManager::PortVrLiveWorld() const {
+  return !mPauseScreenBlur.null() && mPauseScreenBlur->PortVrLiveWorld();
+}
+#endif
 void CInGameGuiManager::ProcessControllerInput(const CStateManager& mgr,
                                                const CFinalInput& input,
                                                CArchitectureQueue& queue) {
@@ -903,6 +1008,16 @@ bool CInGameGuiManager::IsInPausedState() const {
 }
 
 void CInGameGuiManager::EnsureStates(const CStateManager& mgr) {
+#ifdef TARGET_PC
+  // PortVr: the pause menu, logbook or map shown in the headset's view keeps the world drawn under
+  // the blur, so its area textures stay (the PC has the memory the GameCube freed here) and the
+  // screen is made at once.
+  if (mDeferTransition && mPauseScreenBlur->PortVrLiveWorld()) {
+    mDeferTransition = false;
+    DoStateTransition(mgr);
+    return;
+  }
+#endif
   if (mDeferTransition && !mPauseScreenBlur->IsGameDraw()) {
     DestroyAreaTextures(mgr);
     mDeferTransition = false;

@@ -7,6 +7,8 @@
 #include "vr/vr_host.h"
 
 #include "vr/prime_vr_policy.h"
+#include "vr/vr_pad.h"
+#include "vr/vr_view.h"
 #include "MetroidPrime/CCameraManager.hpp"
 #include "MetroidPrime/CStateManager.hpp"
 #include "MetroidPrime/Player/CGameState.hpp"
@@ -47,8 +49,14 @@ CStateManager* StateManager() noexcept {
 }
 
 // As the Metroid Prime VR port's main.cpp: the world counts as in game when the previous presented
-// frame drew it; anything else (the front end, transitions) goes on the virtual screen. Message
-// boxes, the save prompt and the immersive pause menus come with the game hooks (docs/PRIMEDGUN.md).
+// frame drew it; anything else (the front end, transitions) goes on the virtual screen; message
+// boxes, the save prompt and the paused menus as CInGameGuiManager notes them.
+namespace {
+bool sAreaTexturesDumped = false; // game thread
+} // namespace
+
+void NoteAreaTexturesDumped(bool dumped) noexcept { sAreaTexturesDumped = dumped; }
+
 void PublishGameMode(bool lastFrameDrewWorld, uint64_t framesDrawn) noexcept {
   PortVr::VRGameMode mode = lastFrameDrewWorld ? PortVr::VRGameMode::InGame : PortVr::VRGameMode::FrontEnd;
   if (lastFrameDrewWorld) {
@@ -63,6 +71,29 @@ void PublishGameMode(bool lastFrameDrewWorld, uint64_t framesDrawn) noexcept {
       mode = PortVr::VRGameMode::FrontEnd;
     }
   }
+  // As the Metroid Prime VR port's main.cpp: a message box or the save prompt reports itself
+  // whether or not the world was drawn (on the virtual screen the world stops after the pause
+  // blur's first copy). Its mode is kept for the frame it closes on, which draws the world again
+  // but follows one that did not: a FrontEnd frame there would re-anchor the virtual screen for one
+  // frame. The pause menu, the logbook and the map report Paused the same way; one brought into
+  // view after its room's textures were dumped stays on the virtual screen until they are back.
+  static PortVr::VRGameMode sBoxMode = PortVr::VRGameMode::Message;
+  static int sBoxHoldFrames = 0;
+  const bool menuWaits =
+      !PortVr::VrMessageBoxOpen() && PortVr::VrGameMenuInView() && sAreaTexturesDumped;
+  if (PortVr::VrMessageBoxOpen() || PortVr::VrGameMenuOpen()) {
+    mode = menuWaits                        ? PortVr::VRGameMode::FrontEnd
+           : !PortVr::VrMessageBoxOpen()     ? PortVr::VRGameMode::Paused
+           : PortVr::VrMessageBoxCinematic() ? PortVr::VRGameMode::Cinematic
+                                             : PortVr::VRGameMode::Message;
+    sBoxMode = mode;
+    sBoxHoldFrames = 8;
+  } else if (sBoxHoldFrames > 0 && !lastFrameDrewWorld && StateManager() != nullptr) {
+    mode = sBoxMode;
+    --sBoxHoldFrames;
+  } else {
+    sBoxHoldFrames = 0;
+  }
   PortVr::PrimeVRPolicyPublishGameMode(mode, framesDrawn);
 }
 
@@ -70,7 +101,14 @@ void SetStateManager(CStateManager* mgr) noexcept { sStateManager.store(mgr, std
 
 void ForgetStateManager(const CStateManager* mgr) noexcept {
   CStateManager* expected = const_cast< CStateManager* >(mgr);
-  sStateManager.compare_exchange_strong(expected, nullptr, std::memory_order_acq_rel);
+  if (sStateManager.compare_exchange_strong(expected, nullptr, std::memory_order_acq_rel)) {
+    // No message box, menu or held screen outlives the game (the loop would keep publishing it).
+    PortVr::VrNoteMessageBox(false, false);
+    PortVr::VrNoteGameMenu(false);
+    PortVr::VrNoteInGameMenu(false);
+    aurora_set_stereo_screen_anchor(false);
+    sAreaTexturesDumped = false;
+  }
 }
 
 const std::string& UserFolder() noexcept { return sUserFolder; }

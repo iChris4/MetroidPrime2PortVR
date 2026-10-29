@@ -71,13 +71,41 @@ void ReadIntroEnvOnce() {
 // `screenshot`) is not available. Aurora writes screenshots/metroid-prime-<stamp>.bmp under the
 // working directory and logs the path.
 std::vector< int > sShotAt;
+// `t<seconds>` entries: wall seconds since the loop started (Seconds), served by IdleCheck every
+// loop iteration, so they fire while the game is paused too (a paused game performs no update).
+struct STimedShot {
+  double at;
+  bool done;
+};
+std::vector< STimedShot > sTimedShots;
+struct STimedCommand {
+  double at;
+  std::string command;
+  bool done;
+};
+std::vector< STimedCommand > sTimedCommands;
+// MP2_EXIT_AT=<seconds>: the run ends itself then, whatever the game is doing.
+double sExitAt = 0.0;
 
 void ReadShotEnv() {
+  if (const char* exitAt = std::getenv("MP2_EXIT_AT")) {
+    sExitAt = std::atof(exitAt);
+  }
   const char* value = std::getenv("MP2_SHOT_AT");
   if (value == nullptr) {
     return;
   }
   for (const char* p = value; *p != '\0';) {
+    if (*p == 't') {
+      char* end = nullptr;
+      const double at = std::strtod(p + 1, &end);
+      if (end == p + 1) {
+        break;
+      }
+      sTimedShots.push_back(STimedShot{at, false});
+      p = *end == ',' ? end + 1 : end;
+      continue;
+    }
     char* end = nullptr;
     const long n = std::strtol(p, &end, 10);
     if (end == p) {
@@ -111,7 +139,10 @@ void ReadConsoleEnv() {
     }
     const std::string item = all.substr(start, end - start);
     const size_t colon = item.find(':');
-    if (colon != std::string::npos) {
+    if (colon != std::string::npos && !item.empty() && item[0] == 't') {
+      sTimedCommands.push_back(
+          STimedCommand{std::atof(item.substr(1, colon - 1).c_str()), item.substr(colon + 1), false});
+    } else if (colon != std::string::npos) {
       const int at = std::atoi(item.substr(0, colon).c_str());
       if (at > 0) {
         sConsoleAt.emplace_back(at, item.substr(colon + 1));
@@ -211,6 +242,31 @@ bool Unpaced() {
 }
 
 void IdleCheck() {
+  ReadEnvOnce();
+  // Only with timed entries: Seconds() anchors its clock on its first call, and the skip-intro flow
+  // times its steps on it, so reading it here earlier than a plain run does would change that run.
+  const double now =
+      sTimedShots.empty() && sTimedCommands.empty() && !(sExitAt > 0.0) ? 0.0 : Seconds();
+  for (STimedShot& shot : sTimedShots) {
+    if (!shot.done && now >= shot.at) {
+      shot.done = true;
+      std::fprintf(stderr, "[harness] screenshot at %.1f s (game update %d)\n", now, sUpdates);
+      aurora::request_screenshot();
+    }
+  }
+  for (STimedCommand& command : sTimedCommands) {
+    if (!command.done && now >= command.at) {
+      command.done = true;
+      std::fprintf(stderr, "[harness] console at %.1f s (game update %d): %s\n", now, sUpdates,
+                   command.command.c_str());
+      PortConsole::Run(command.command);
+    }
+  }
+  if (sExitAt > 0.0 && now >= sExitAt && !sExitRequested) {
+    std::fprintf(stderr, "[harness] MP2_EXIT_AT=%.1f: the run ends itself at %.1f s\n", sExitAt,
+                 now);
+    sExitRequested = true;
+  }
   if (sUpdates == sCountStart) {
     // Nothing to compare against until the game has updated once: the boot's own loading is long
     // and is not a stall.

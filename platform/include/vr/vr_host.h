@@ -23,6 +23,9 @@ CStateManager* StateManager() noexcept;
 void PublishGameMode(bool lastFrameDrewWorld, uint64_t framesDrawn) noexcept;
 void SetStateManager(CStateManager* mgr) noexcept;
 void ForgetStateManager(const CStateManager* mgr) noexcept;
+// Player 0's in-game GUI dumped its area textures for a paused screen (CInGameGuiManager::Update):
+// a menu brought into the headset's view then waits on the virtual screen until they are back.
+void NoteAreaTexturesDumped(bool dumped) noexcept;
 
 // The user folder (settings, cards, the cannon texture library); set at boot.
 const std::string& UserFolder() noexcept;

@@ -9,6 +9,36 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Parity, part 1: message boxes and menus in the headset view (2026-10-29)
+
+The Metroid Prime VR port's immersive paused screens, on Echoes (defaults: `vr_message_box_immersive`
+on, `vr_game_menu_screen_enabled` off):
+
+- `CPauseScreenBlur`: `PortVrSetLiveWorld` keeps the world drawn under the blur and retakes the
+  blur's copy every frame (per eye), drops the quarters' vignette and draws the scan lines in the
+  world (`AURORA_STEREO_ROUTE_SKY`); leaving the live view mid-box takes one copy and stops the world
+  as the TV does. The two flags sit in the retail bitfield.
+- `CInGameGuiManager::Update` notes the message box / save prompt (`VrNoteMessageBox`) and the
+  pause menu, logbook and map (`VrNoteGameMenu`), reloads dumped area textures when one comes into
+  view, and runs `PortVrRefreshPausedScreens` (live world, held screen anchor: a box, the ball HUD,
+  the map). `EnsureStates` skips the area texture dump while the world stays live.
+- `CInGameGuiManager::Draw`: the visor and HUD stay drawn under a live blur and fade out as it comes
+  up; the message box, the pause menu (with `VrResetEyeDepth`, `VrSetPauseScreenRoute`) and the quit
+  prompt go on the held screen (`ANCHORED_SCREEN`, `FLOATING_HUD` with `vr_floating_hud`); the map
+  screen's map is laid flat on the held screen (the 3D held map is not ported yet).
+- `CMFGame::DrawGui`: the save prompt on the held screen.
+- `PortVrHost::PublishGameMode`: the Metroid Prime port's classification (Message / Paused /
+  Cinematic, FrontEnd while a menu waits for its area textures, held a few frames as a box closes);
+  `ForgetStateManager` clears the notes and the anchor.
+
+Checked on the desk: the pause menu and a paused HUD memo show on the held screen in both eyes over
+each eye's live blur. The pause screen's 3D view is drawn flat on the screen (no 3D dolls yet).
+
+Harness: `MP2_SHOT_AT` and `MP2_CONSOLE_AT` take `t<seconds>` entries and `MP2_EXIT_AT=<seconds>`
+ends a run, for paused states (no game update runs there). Timed entries read the harness clock
+only when present: the skip-intro flow times its steps on that clock, and reading it earlier changed
+a plain run's world (the birds) though nothing else differed.
+
 ## Game hooks, part 2: cannon, controls, look targeting, visors (2026-10-29)
 
 Same rules as part 1 (TARGET_PC, strip-diff CLEAN, `MP2_VR=0` pixel-identical, player 0 only).
