@@ -18,6 +18,7 @@
 
 #include "MetroidPrime/CStateManager.hpp"
 #include "MetroidPrime/CCameraManager.hpp"
+#include "MetroidPrime/Player/CMorphBall.hpp"
 #include "MetroidPrime/Player/CPlayer.hpp"
 #include "MetroidPrime/Player/CPlayerState.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptGrapplePoint.hpp"
@@ -357,6 +358,32 @@ float ApplyGameplay(const OpenXRControllerState& left, const OpenXRControllerSta
     return turnSpeedScale;
 }
 
+// PrimedGun Echoes: the Screw Attack is a morph ball state (CMorphBall::InScrewAttackMode), so the
+// classic layout has the controllers while Samus spins, but each further screw jump is the jump
+// button again (CMorphBall::ComputeScrewAttackMovement): the first-person jump input that started
+// the spin stays on B. When that is the right stick pushed up, it is not the C-stick's as well.
+void ApplyScrewAttackJump(const OpenXRControllerState& left, const OpenXRControllerState& right,
+                          uint32_t weapon_hand, const PortVrSettings& settings, PADStatus& pad) {
+    bool jump = false;
+    if (settings.custom_layout_enabled) {
+        const std::array<OpenXRControllerState, 2> hands{left, right};
+        const auto thresholds = ControllerLayout::Thresholds(settings);
+        jump = ControllerLayout::Pressed(hands, settings.custom_jump, thresholds) ||
+               ControllerLayout::Pressed(hands, settings.custom_jump_extra, thresholds);
+    } else if (settings.combat_jump_use_primary_button) {
+        jump = (weapon_hand == 1 ? right : left).primary;
+    } else if (settings.directional_movement_use_right_stick) {
+        jump = left.thumbstick_y > kJumpStickThreshold;
+    } else {
+        jump = right.thumbstick_y > kJumpStickThreshold;
+        pad.substickY = std::min<int8_t>(pad.substickY, 0);
+    }
+    if (jump) {
+        pad.button |= PAD_BUTTON_B;
+        pad.analogB = kTriggerFull;
+    }
+}
+
 } // namespace
 
 void VrPadUpdate(const CStateManager* mgr) noexcept {
@@ -411,8 +438,10 @@ void VrPadUpdate(const CStateManager* mgr) noexcept {
     bool grapple = false;
     bool visor_press_accepted = false;
     bool visor_changing = false;
+    bool screw_attack = false;
     if (mgr != nullptr && mgr->GetPlayer(0) != nullptr) {
         const CPlayer* player = mgr->GetPlayer(0);
+        screw_attack = player->GetMorphBall() != nullptr && player->GetMorphBall()->InScrewAttackMode();
         const bool first_person = player->GetCameraState() == CPlayer::kCS_FirstPerson;
         const bool unmorphed = player->GetMorphballTransitionState() == CPlayer::kMS_Unmorphed;
         const bool cinematic = mgr->GetCameraManager(0) != nullptr && mgr->GetCameraManager(0)->IsInCinematicCamera();
@@ -568,6 +597,9 @@ void VrPadUpdate(const CStateManager* mgr) noexcept {
                                        snapshot.interaction_profiles, pad);
     } else {
         ApplyClassic(left, right, weapon_hand, morph_ball, settings, snapshot.interaction_profiles, pad);
+        if (screw_attack) {
+            ApplyScrewAttackJump(left, right, weapon_hand, settings, pad);
+        }
     }
     // The beam wheel owns the weapon hand's B while it is held; the orbit lock
     // keeps its L (the game does the locking) and the pad's C-stick is free.

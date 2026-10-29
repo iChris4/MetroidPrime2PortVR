@@ -9,6 +9,19 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Screw Attack: the jump input keeps chaining screw jumps (2026-10-29)
+
+From the headset: after the Screw Attack started, the jump on the right stick (pushed up) made no
+further screw jumps. Echoes' Screw Attack is a morph ball state (`CMorphBall::kBS_ScrewAttack`,
+`InScrewAttackMode`), so the VR pad drops the first-person layout for the classic (morph ball) one
+as soon as Samus spins, where the right stick is the C-stick and B only the right controller's B;
+each further screw jump is the jump button again (`ComputeScrewAttackMovement` reads
+`CPlayer::JumpPressed`). `vr_pad.cpp` `ApplyScrewAttackJump`: while the Screw Attack runs, the
+first-person jump input (the look stick up, the weapon hand's primary with
+`vr_combat_jump_use_primary_button`, or the custom layout's jump bindings) also presses B, and the
+look stick's push up is no longer the C-stick's. Not checkable on the desk (no controllers); the
+rest of the spin (camera, steering comfort) is Phase 7's.
+
 ## The VR layer is MIT (2026-10-29)
 
 The user's decision: the VR files are relicensed from GPL-3.0-or-later to MIT, so the VR layer sits
