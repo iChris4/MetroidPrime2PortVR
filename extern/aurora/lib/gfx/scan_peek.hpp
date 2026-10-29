@@ -31,12 +31,24 @@ struct Request {
   // Port: GX_SCAN_PEEK_DEPTH_ONLY / GX_SCAN_PEEK_IF_RENDERED (GXCpu2Efb.h).
   bool depthOnly = false;  // no EFB-alpha diagnostics: the caller reads only depth
   bool ifRendered = false; // do not force the frame rendered; dropped on a frame that is not
+  // PrimedGun: a peek requested under AURORA_STEREO_ROUTE_HEAD_LOCKED_2D on an immersive frame
+  // reads eye `eye`'s image instead, over eyeX..eyeHeight (that eye's texels): what the eye sees
+  // behind the requested rectangle of the head-locked plane (recording.cpp queue_scan_peek). The
+  // scan visor's window follows the head there, so its scan target is what lies behind it. -1:
+  // the EFB, as always; also when the pass is not replayed per eye after all.
+  int32_t eye = -1;
+  int32_t eyeX = 0;
+  int32_t eyeY = 0;
+  int32_t eyeWidth = 0;
+  int32_t eyeHeight = 0;
 };
 
 // Copies a snapshot of a region of `color` and `depth` to the buffers in `req`, once the frame
-// being encoded has been submitted. Called from the frame encoder, between passes.
+// being encoded has been submitted. Called from the frame encoder, between passes. `layer` is the
+// array layer both are read from (a multiview eye's). Without `depth` (a multisampled eye depth,
+// which cannot be copied out) only the ids are read, and the depth comes back zero.
 void encode(const wgpu::CommandEncoder& cmd, const wgpu::Texture& color, const wgpu::Texture& depth,
-            uint32_t msaaSamples, const Request& req) noexcept;
+            uint32_t msaaSamples, const Request& req, uint32_t layer = 0) noexcept;
 
 void after_submit() noexcept;
 void shutdown() noexcept;

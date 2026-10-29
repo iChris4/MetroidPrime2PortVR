@@ -534,7 +534,10 @@ void AuroraSetStereoHeadLockedPlane(f32 tanHalfWidth, f32 tanHalfHeight, f32 dis
  * modelview; each eye's copy of the draw's uniform gets it derived again from that eye's projection and position
  * matrix, so a draw that samples the viewport's EFB copy through it reads what lies behind it in that eye's own copy
  * rather than where the mono camera put it. GX_IDENTITY ends it. Ordered with the draws through the FIFO; resets at
- * every frame begin.
+ * every frame begin. PrimedGun: an orthographic draw on AURORA_STEREO_ROUTE_HEAD_LOCKED_2D gets it too, derived from
+ * the plane's projection for that eye, so a rectangle laid on the plane samples the eye's copy where it lies.
+ * GXRequestScanPeek made under that route on an immersive frame reads the first eye's image behind the requested
+ * rectangle of the plane instead of the EFB (gfx/scan_peek.hpp Request::eye).
  */
 void AuroraSetStereoScreenTexMtx(u32 texMtx, u32 pnMtx);
 

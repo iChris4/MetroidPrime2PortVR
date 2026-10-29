@@ -68,8 +68,10 @@ bool ensure_multiview_targets(const std::array<StereoEyeParams, AURORA_STEREO_EY
                                   wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding |
                                       wgpu::TextureUsage::CopySrc | wgpu::TextureUsage::CopyDst,
                                   "Stereo eye targets (multiview)");
+  // CopySrc: a scan peek of an eye reads its depth (scan_peek.cpp).
   const auto depth = make_layered(width, height, depthFormat,
-                                  wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
+                                  wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding |
+                                      wgpu::TextureUsage::CopySrc,
                                   "Stereo eye depth (multiview)");
   if (!color.texture || !depth.texture) {
     release_stereo_eye_targets();

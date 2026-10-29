@@ -2243,7 +2243,18 @@ void CStateManager::CapturePlayerTextures() {
       // gets written; ask for a CPU read-back of the same region first (it has to be issued
       // before the copies, which seal the pass holding the frame's scene draws) and then fill
       // the player's buffers from the previous frame's read-back. See PortScanTarget.
+      // PortVr: look to scan. In the headset the scan window lies on the plane in front of the
+      // head (CPlayerVisor::DrawScanEffect), so the region is read where it lies on that plane,
+      // from an eye's image (Aurora takes it through the plane under this route), and the target
+      // is what the window shows wherever the body camera looks. The id copy below stays mono.
+      portPick.vrHeadLocked = i == 0 && scanVisor && !lensPick && PortVr::VrLookToScanFromEye();
+      if (portPick.vrHeadLocked) {
+        AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED_2D);
+      }
       PortScanTarget::Request(pickLeft, pickTop, pickWidth, pickHeight);
+      if (portPick.vrHeadLocked) {
+        AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+      }
       PortScanTarget::SetPick(portPick);
 #endif
       gpRender->CopyTextureRegion(mPlayers[i]->GetScanTargetIdTextureData(), 0, textureLeft,

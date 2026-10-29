@@ -110,6 +110,12 @@ struct StereoEyePass {
   // from this eye read (a foveated view is a render attachment only).
   wgpu::TextureView copySourceView;
   wgpu::Extent3D size{};
+  // PrimedGun: the eye's single-sample image and depth, and their layer, for
+  // a scan peek of this eye (scan_peek.hpp Request::eye). No depth when the
+  // eye is multisampled: that cannot be copied out.
+  wgpu::Texture peekColor;
+  wgpu::Texture peekDepth;
+  uint32_t peekLayer = 0;
 
   const wgpu::TextureView& copy_view(bool depth) const noexcept {
     // Retail fog copies Z16, then samples its converted IA8 texture. It must

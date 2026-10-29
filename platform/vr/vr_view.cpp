@@ -499,6 +499,50 @@ void VrHeadLockedScales(float& xy, float& depth) noexcept {
     xy = settings.metroid_hud_size * settings.metroid_hud_distance;
 }
 
+namespace {
+float s_headLockedPlaneTanHalfWidth = 0.f;
+float s_headLockedPlaneTanHalfHeight = 0.f;
+} // namespace
+
+void VrNoteHeadLockedPlane(float tanHalfWidth, float tanHalfHeight) noexcept {
+    s_headLockedPlaneTanHalfWidth = tanHalfWidth;
+    s_headLockedPlaneTanHalfHeight = tanHalfHeight;
+}
+
+bool VrHeadLockedPlaneRay(const CTransform4f& cameraXf, float ndcX, float ndcY, CVector3f& origin,
+                          CVector3f& direction) noexcept {
+    if (!(s_headLockedPlaneTanHalfWidth > 0.f) || !(s_headLockedPlaneTanHalfHeight > 0.f)) {
+        return false;
+    }
+    CVector3f gaze;
+    if (!VrHeadGaze(cameraXf, origin, gaze)) {
+        return false;
+    }
+    OpenXRFrameRequest request{};
+    if (!OpenXRLatestFrameRequest(request) || !request.head_valid) {
+        return false;
+    }
+    // As VrHeadGaze, roll included: the plane turns with the head.
+    const float leanBack = GetVrSettings().lean_back_degrees * kDegreesToRadians;
+    const CQuaternion leanInverse = AxisQuaternion(1.f, 0.f, 0.f, -leanBack);
+    const CQuaternion head = (leanInverse * PrimeFromXr(request.head_orientation)).BuildNormalized();
+    const CTransform4f view = cameraXf.GetRotation() * head.BuildTransform4f();
+    // The plane's half extents over its distance (stereo_replay.hpp head_locked_plane_screen):
+    // the HUD camera's tangents, scaled across by the route's size and along by its distance.
+    float xy = 1.f;
+    float depth = 1.f;
+    VrHeadLockedScales(xy, depth);
+    const float across = depth > 0.f ? xy / depth : 1.f;
+    direction = view.GetForward() + view.GetRight() * (ndcX * s_headLockedPlaneTanHalfWidth * across) +
+                view.GetUp() * (ndcY * s_headLockedPlaneTanHalfHeight * across);
+    return true;
+}
+
+bool VrLookToScanFromEye() noexcept {
+    const PortVrSettings settings = GetVrSettings();
+    return ImmersiveNow() && settings.patch_gun_ray_target && !settings.CannonTargetingForVisor(true);
+}
+
 void VrResetEyeDepth() noexcept {
     const CGraphics::CProjectionState projection = CGraphics::GetProjectionState();
     const CTransform4f viewPoint = CGraphics::GetViewMatrix();

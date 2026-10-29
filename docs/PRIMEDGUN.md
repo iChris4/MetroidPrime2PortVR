@@ -9,6 +9,56 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Scan visor in the headset: window highlight and look to scan (2026-10-29)
+
+From the first headset test: the scan visor's highlight did not line up, and look to scan did
+nothing useful.
+
+- Highlight (`CCubeRenderer::DrawScanVisor`): the colours come from an A8 copy of the view that the
+  replay takes again from each eye, so they lay right on the objects. But the window's two passes
+  (the brighter rectangle inside the window, and the rectangles that dim the rest) sat at the middle
+  of each eye's image, while the window's frame lies on the head-locked plane
+  (`CPlayerVisor::DrawScanEffect`). On PSVR2 the middle of an eye's image is well off its forward
+  axis, so the bright rectangle sat beside the frame, at a different place in each eye. In the
+  headset these rectangles are now laid on the head-locked plane. Each eye samples its own copy where
+  a rectangle lies in that eye: the copy coordinates come from the position through
+  `CGraphics::PortLoadScreenProjectionTexMtx` and `AuroraSetStereoScreenTexMtx`. The ramp (scan
+  lines) uses the same coordinates through a post-transform matrix, so the lines inside the window
+  keep retail's offset. The dimming rectangles reach eight views out, past an eye's field. The
+  whole-view pass and the sweep bars stay full eye.
+- Aurora (`recording.cpp`): the per-eye screen texture matrix is derived on
+  `AURORA_STEREO_ROUTE_HEAD_LOCKED_2D` too, from the plane's projection for that eye.
+- Look to scan: Metroid Prime's head-cone picker (`vr_look_scan.cpp` `UpdateScan`) measures objects
+  by position and bounds. Most of Echoes' scans are points of interest standing for world geometry
+  (the gunship's is one, `u0510` in the Landing Site), with no place of their own: the game moves
+  each one where its scan peek sees that geometry (`CPlayer::FindScanTargetId`). The picker replaced
+  that call, so those points could not be picked and were never placed. Now
+  `UpdateOrbitableObjects` calls `FindScanTargetId` again, as retail does, and in the headset the
+  peek reads what lies behind the head-locked scan window:
+  - `CStateManager::CapturePlayerTextures` requests the peek under
+    `AURORA_STEREO_ROUTE_HEAD_LOCKED_2D` (player 0, scan visor, `PortVr::VrLookToScanFromEye`:
+    immersive, `vr_patch_gun_ray_target` on, scan visor not aimed by the cannon).
+  - Aurora's `queue_scan_peek` maps the region through the plane into eye 0's texels
+    (`head_locked_plane_uv_rect`, as a copy made under the route). `encoding.cpp` reads that eye's
+    image after its pass (`StereoEyePass::peekColor/peekDepth/peekLayer`, filled at seal).
+  - A multisampled eye has its resolved colour read with no depth; the multiview eye depth gained
+    `CopySrc`.
+  - `FindScanTargetId` places the point along `PortVr::VrHeadLockedPlaneRay` (the head through the
+    pick's centroid on the plane, using the plane's tangents noted by `CInGameGuiManager::Draw`), at
+    the eye's depth: the eye projection keeps the game's depth rows. Without depth (MSAA) the ray
+    stops at the world or an actor (`RayWorldIntersection`).
+- Checked on the desk (SteamVR, PSVR2 lying on the desk):
+  - Both eyes show the window's rectangle under its frame.
+  - Turning the body (`face`) moves eye 0's pick across the room's scannables.
+  - Holding L scans the gunship's point of interest to the end (logbook entry), with its point
+    placed on the ship: 25 units out with depth, 21 with 4x MSAA and the raycast.
+  - Desktop (`MP2_VR=0`) scan-visor runs match the untouched port's pixel for pixel, apart from the
+    minimap's player marker, which jitters between two runs of the untouched port too.
+  - Port tests 53/53, `gfx_recording_tests` 135/135.
+  - `gx_fifo_tests` passes test by test, but the whole suite dies at random points, on the
+    committed code as well (not this change).
+- Not checked: anything worn, and the Quest (multiview reads eye 0 as layer 0).
+
 ## Quest: the APK (2026-10-29)
 
 `quest/` is PrimedGun v2's Quest project, adapted: package `org.primedgun.echoes`, version
@@ -298,8 +348,9 @@ Same rules as part 1 (TARGET_PC, strip-diff CLEAN, `MP2_VR=0` pixel-identical, p
   `ComputeMovement` takes directional movement (`VrDirectionalMove`, default on: the pad then
   leaves the sideways stick to it) and the smooth turn's rate.
 - Look targeting: `CPlayer::UpdateOrbitInput` runs `VrLookTargetUpdate` before Echoes'
-  `UpdateOrbitableObjects`, which takes `VrLookToScanTarget` in the scan visor instead of the scan
-  peek (`FindScanTargetId`) and `VrLookToLockTarget` in `FindOrbitTargetId`; a head-picked scan
+  `UpdateOrbitableObjects`, which takes `VrLookToLockTarget` in `FindOrbitTargetId` (the scan
+  visor's pick was `VrLookToScanTarget` here at first; it is now the scan peek read behind the
+  head-locked window, see "Scan visor in the headset" above); a head-picked scan
   lock holds the body (`ValidateCurrentOrbitTargetId`, `UpdateOrbitOrientation`); the body points
   at a lock at once in the headset; `SetOrbitState` releases a lost target (`ReleaseLostTarget`).
 - Reticles: they face the head (`VrHeadViewRotation`); the crosshair shows all the time in the

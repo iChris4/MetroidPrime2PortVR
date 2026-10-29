@@ -138,6 +138,20 @@ void VrMapHologram(float& distance, float& halfHeight, float& clearance, float& 
 // The head-locked route's scales (vr_metroid_hud_size, vr_metroid_hud_distance):
 // a HUD position's x and z (Prime camera space) by `xy`, its depth (y) by `depth`.
 void VrHeadLockedScales(float& xy, float& depth) noexcept;
+// PrimedGun Echoes: the head-locked plane's tangents (AuroraSetStereoHeadLockedPlane,
+// from CInGameGuiManager::Draw), for VrHeadLockedPlaneRay.
+void VrNoteHeadLockedPlane(float tanHalfWidth, float tanHalfHeight) noexcept;
+// The ray from the head through a point of the head-locked plane, given as its
+// place in the flat view (x right, y up, -1..1 across the viewport): from the
+// head's position, `direction` one unit along the head's forward axis and as far
+// across as the point is, so a depth along that axis reaches it. False when not
+// immersive, the head is unknown or no plane was noted.
+bool VrHeadLockedPlaneRay(const CTransform4f& cameraXf, float ndcX, float ndcY, CVector3f& origin,
+                          CVector3f& direction) noexcept;
+// Immersive with look to scan on (vr_patch_gun_ray_target) and the scan visor not
+// aimed by the cannon: the scan target is read behind the head-locked scan window
+// (CStateManager::CapturePlayerTextures).
+bool VrLookToScanFromEye() noexcept;
 // Every eye's depth back to the far plane (an orthographic quad through a
 // far-only depth window, depth written, no colour), keeping the projection,
 // view and model. Draw it on a route that covers the whole eye (WORLD).

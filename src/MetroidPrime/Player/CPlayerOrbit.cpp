@@ -941,18 +941,7 @@ TUniqueId CPlayer::FindBestOrbitableObject(const rstl::reserved_vector< TUniqueI
 void CPlayer::UpdateOrbitableObjects(CStateManager& mgr) {
   if (mPlayerState->GetCurrentVisor() == CPlayerState::kPV_Scan && !mgr.IsMultiplayer()) {
     if (mPlayerState->GetVisorTransitionFactor() > 0.5f) {
-#ifdef TARGET_PC
-      // PortVr: look to scan (PrimedGun's gun ray / scan target hook): the head picks the scan
-      // target, not the body camera's scan peek.
-      TUniqueId vrLookTarget = kInvalidUniqueId;
-      if (mgr.GetPlayer(0) == this && PortVr::VrLookToScanTarget(mgr, vrLookTarget)) {
-        mOrbitNextTargetId = vrLookTarget;
-      } else {
-        mOrbitNextTargetId = FindScanTargetId(mgr);
-      }
-#else
       mOrbitNextTargetId = FindScanTargetId(mgr);
-#endif
     }
     return;
   }
@@ -2277,7 +2266,38 @@ TUniqueId CPlayer::FindScanTargetId(const CStateManager& mgr) const {
       position += float(distance) *
                   mCameraManager->GetCurrentCamera(mgr, false)->GetTransform().GetForward();
 #ifdef TARGET_PC
-      if (sampleCount != 0 && PortScanTarget::GetPick().regionWidth > 0) {
+      if (sampleCount != 0 && PortScanTarget::GetPick().vrHeadLocked) {
+        // PortVr: the ids came from an eye behind the head-locked plane: the point lies along the
+        // ray from the head through the pick's centroid on that plane, at the depth the eye saw
+        // (the eye's depth mapping is the game camera's). A multisampled eye returns no depth;
+        // the ray then stops at the first solid thing it meets.
+        const PortScanTarget::Pick& pick = PortScanTarget::GetPick();
+        const float regionX = static_cast< float >(sumCellX / sampleCount) * pick.regionWidth / width;
+        const float regionY = static_cast< float >(sumCellY / sampleCount) * pick.regionHeight / height;
+        const float ndcX = (pick.regionLeft + regionX) / (0.5f * static_cast< float >(pick.viewportWidth));
+        const float ndcY = (pick.regionTop + regionY) / (0.5f * static_cast< float >(pick.viewportHeight));
+        CVector3f origin;
+        CVector3f ray;
+        if (PortVr::VrHeadLockedPlaneRay(PortVr::VrRoomScaleCameraTransform(GetFirstPersonCameraTransform()),
+                                         ndcX, -ndcY, origin, ray)) {
+          float along = float(distance);
+          if (!(totalDepth > 0.)) {
+            // The world and its actors (a gunship is one), as the scan's line of sight sees them.
+            const float reach = GetTweakPlayer()->GetScanMaxTargetDistance();
+            const float length = reach * ray.Magnitude();
+            const CVector3f unit = ray.AsNormalized();
+            const CMaterialFilter filter = CMaterialFilter::MakeIncludeExclude(
+                CMaterialList(kMT_Solid),
+                CMaterialList(kMT_ProjectilePassthrough, kMT_ScanPassthrough, kMT_Player));
+            rstl::reserved_vector< TUniqueId, 1024 > nearList;
+            mgr.BuildNearList(nearList, origin, unit, length, filter, this);
+            TUniqueId hitId = kInvalidUniqueId;
+            const CRayCastResult hit = mgr.RayWorldIntersection(hitId, origin, unit, length, filter, nearList);
+            along = hit.IsValid() ? CVector3f::Dot(hit.GetPoint() - origin, ray) / ray.MagSquared() : reach;
+          }
+          position = origin + ray * along;
+        }
+      } else if (sampleCount != 0 && PortScanTarget::GetPick().regionWidth > 0) {
         // The depth is along the view axis, and the object sits off it where the pick is: step
         // sideways to the pick's centroid, so the scan line and brackets land on the object.
         const PortScanTarget::Pick& pick = PortScanTarget::GetPick();

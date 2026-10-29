@@ -42,6 +42,11 @@ struct Pick {
   float centreX = 0.f;
   float centreY = 0.f;
   float radius = 0.f;
+#ifdef TARGET_PC
+  // PrimedGun: the region was read from an eye's image behind the head-locked plane (the scan
+  // window's place in the headset), so a point of it lies along PortVr::VrHeadLockedPlaneRay.
+  bool vrHeadLocked = false;
+#endif
 };
 // Called right after Request, with the geometry of the request just made.
 void SetPick(const Pick& pick);

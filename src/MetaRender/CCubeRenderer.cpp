@@ -14,6 +14,7 @@
 #include "MetroidPrime/Tweaks/CTweakGuiColors.hpp"
 #include "vr/vr_view.h"
 #include "vr/vr_visibility.h"
+#include <aurora/gfx.h>
 #include <dolphin/gx/GXAurora.h>
 #include <cstdio>
 #include <cstdlib>
@@ -3705,6 +3706,9 @@ void CCubeRenderer::DrawScanVisor(float scanTime, float width, float height, con
   GXTexCoord2f32(rampScale, 0.f);
   CGX::End();
 
+#ifdef TARGET_PC
+  const bool portVrWindow = PortVr::VrImmersive();
+#endif
   {
     const float windowLeft = ((screen.second[0] + screen.first[0]) - width) * 0.5f;
     const float windowRight = (width + (screen.second[0] + screen.first[0])) * 0.5f;
@@ -3720,6 +3724,32 @@ void CCubeRenderer::DrawScanVisor(float scanTime, float width, float height, con
     const float rampBottom = rampTop + (windowBottom - windowTop) / mScanRamp.GetHeight();
     const float rampLeft = 2.f / mScanRamp.GetWidth() + windowLeft / mScanRamp.GetWidth();
     const float rampRight = rampLeft + (windowRight - windowLeft) / mScanRamp.GetWidth();
+#ifdef TARGET_PC
+    if (portVrWindow) {
+      // PortVr: in the headset the scan window's frame lies on the head-locked plane
+      // (CPlayerVisor::DrawScanEffect), not at the middle of each eye's image, so the window's
+      // rectangles here (this one and the dimming ones below) are laid on that plane too. Each
+      // eye then samples its own copy where the rectangle lies in that eye, through the
+      // screen-projecting matrix the replay derives per eye; the ramp's coordinates are the
+      // same screen coordinates scaled as retail's (rampLeft..rampBottom), so the lines inside
+      // the window keep their offset from the ones the whole-view pass above drew.
+      AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED_2D);
+      CGraphics::PortLoadScreenProjectionTexMtx(GX_TEXMTX0);
+      AuroraSetStereoScreenTexMtx(GX_TEXMTX0, GX_PNMTX0);
+      const float rampWidth = static_cast< float >(mScanRamp.GetWidth());
+      const float rampHeight = static_cast< float >(mScanRamp.GetHeight());
+      // On the projective coordinates (s, t, q): the offsets go in the q column, so they hold
+      // after the divide.
+      const float rampMtx[3][4] = {
+          {screenWidth / rampWidth, 0.f, (2.f + screen.first[0]) / rampWidth, 0.f},
+          {0.f, screenHeight / rampHeight, (2.f + screen.first[1]) / rampHeight, 0.f},
+          {0.f, 0.f, 1.f, 0.f},
+      };
+      GXLoadTexMtxImm(rampMtx, GX_PTTEXMTX0, GX_MTX3x4);
+      CGX::SetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX3x4, GX_TG_POS, GX_TEXMTX0, false, GX_PTIDENTITY);
+      CGX::SetTexCoordGen(GX_TEXCOORD1, GX_TG_MTX3x4, GX_TG_POS, GX_TEXMTX0, false, GX_PTTEXMTX0);
+    }
+#endif
     CGX::Begin(GX_TRIANGLESTRIP, GX_VTXFMT0, 4);
     GXPosition3f32(windowLeft, 0.f, windowTop);
     GXTexCoord2f32(maskLeft, maskBottom);
@@ -3807,6 +3837,28 @@ void CCubeRenderer::DrawScanVisor(float scanTime, float width, float height, con
     for (uint i = 0; i < 5; ++i) {
       rectangles[i].color = (i == 2 ? scanColor : maskColor).GetColor_GX();
     }
+    if (portVrWindow) {
+      // PortVr: on the head-locked plane the view's edges are the HUD camera's, well inside an
+      // eye's: an edge of the view moves out far enough to cover the eye's whole view (the
+      // coordinates come from the positions, above).
+      const float reachX = 8.f * (screen.second[0] - screen.first[0]);
+      const float reachY = 8.f * (screen.second[1] - screen.first[1]);
+      for (uint i = 0; i < 5; ++i) {
+        for (int j = 0; j < 4; ++j) {
+          float* const position = rectangles[i].positions[j];
+          if (position[0] <= screen.first[0] + 1.f) {
+            position[0] = screen.first[0] - reachX;
+          } else if (position[0] >= screen.second[0] - 1.f) {
+            position[0] = screen.second[0] + reachX;
+          }
+          if (position[1] <= screen.first[1]) {
+            position[1] = screen.first[1] - reachY;
+          } else if (position[1] >= screen.second[1]) {
+            position[1] = screen.second[1] + reachY;
+          }
+        }
+      }
+    }
 #endif
     for (uint i = 0; i < sizeof(rectangles) / sizeof(rectangles[0]); ++i) {
       const SScanRect& rectangle = rectangles[i];
@@ -3823,6 +3875,15 @@ void CCubeRenderer::DrawScanVisor(float scanTime, float width, float height, con
       CGX::End();
     }
   }
+#ifdef TARGET_PC
+  if (portVrWindow) {
+    // PortVr: the sweep bars cover each eye's view again, with their vertex coordinates.
+    AuroraSetStereoScreenTexMtx(GX_IDENTITY, GX_PNMTX0);
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+    CGX::SetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX3x4, GX_TG_TEX0, GX_IDENTITY, false, GX_PTIDENTITY);
+    CGX::SetTexCoordGen(GX_TEXCOORD1, GX_TG_MTX3x4, GX_TG_TEX1, GX_IDENTITY, false, GX_PTIDENTITY);
+  }
+#endif
 
   CGX::SetBlendMode(GX_BM_BLEND, GX_BL_ONE, GX_BL_ONE, GX_LO_CLEAR);
   CGX::SetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_RASC, GX_CC_TEXC, GX_CC_ZERO);

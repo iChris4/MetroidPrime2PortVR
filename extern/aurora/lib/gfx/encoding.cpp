@@ -743,8 +743,20 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
   }
 
   if (passInfo.scanPeek.has_value()) {
-    scan_peek::encode(cmd, passInfo.copySourceTexture, passInfo.copySourceDepthTexture, passInfo.msaaSamples,
-                      *passInfo.scanPeek);
+    // PrimedGun: a peek through the head-locked plane reads its eye's image (queue_scan_peek),
+    // which the eye pass above has just drawn; the EFB when the pass was not replayed per eye.
+    const auto& peek = *passInfo.scanPeek;
+    const int32_t peekEye = peek.eye;
+    if (peekEye >= 0 && peekEye < static_cast<int32_t>(AURORA_STEREO_EYE_COUNT) && passInfo.stereo.enabled &&
+        passInfo.stereo.eyes[peekEye].peekColor) {
+      const auto& eyePass = passInfo.stereo.eyes[peekEye];
+      scan_peek::encode(cmd, eyePass.peekColor, eyePass.peekDepth, 1, peek, eyePass.peekLayer);
+    } else {
+      scan_peek::Request monoPeek = peek;
+      monoPeek.eye = -1;
+      scan_peek::encode(cmd, passInfo.copySourceTexture, passInfo.copySourceDepthTexture, passInfo.msaaSamples,
+                        monoPeek);
+    }
   }
 
   // Stereo replay: the same copy from each eye's image, over the same part of

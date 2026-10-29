@@ -37,6 +37,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <new>
@@ -932,6 +933,9 @@ void stereo_seal_pass(FramePacket& frame, uint32_t passIndex) {
         .depthView = target.depth.view,
         .copySourceView = target.color.view,
         .size = {target.width, target.height, 1},
+        .peekColor = target.output().texture,
+        .peekDepth = target.sampleCount > 1 ? wgpu::Texture{} : target.depth.texture,
+        .peekLayer = target.layer,
     };
   }
   if (state.multiview) {
@@ -1583,9 +1587,11 @@ std::array<uint32_t, 2> stage_stereo_uniforms(const uint8_t* mono, Range monoRan
   const float positionScaleXY = headLocked ? state.headLockedScaleXY : placed3D ? placement.scale : 1.0f;
   const float positionScaleZ = headLocked ? state.headLockedScaleZ : placed3D ? placement.scale : 1.0f;
   // A screen-projecting texture matrix (AuroraSetStereoScreenTexMtx) differs per eye:
-  // under multiview such a draw takes the full eye copies (MultiviewFull).
+  // under multiview such a draw takes the full eye copies (MultiviewFull). PrimedGun: on the
+  // head-locked plane too, where the scan visor's window rectangles sample each eye's copy
+  // where they lie in that eye.
   const auto screenTexMtx = g_recorder.stereoScreenTexMtx;
-  const bool perEyeTexMtx = !onPlane && !onScreen && screenTexMtx.texSlot != 0xFF;
+  const bool perEyeTexMtx = !onScreen && screenTexMtx.texSlot != 0xFF;
   if (!perEyeTexMtx) {
     std::array<Mat4x4<float>, AURORA_STEREO_EYE_COUNT> clips;
     for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
@@ -1665,6 +1671,9 @@ std::array<uint32_t, 2> stage_stereo_uniforms(const uint8_t* mono, Range monoRan
                                     .renderScaleX = renderScaleX,
                                     .renderScaleY = renderScaleY,
                                 });
+      if (screenTexMtx.texSlot != 0xFF) {
+        compose_stereo_screen_tex_mtx(scratch.data(), eyeLayout, screenTexMtx.texSlot, screenTexMtx.pnSlot);
+      }
     } else {
       // A sky draw (AURORA_STEREO_ROUTE_SKY) takes the eye's rotation only; an
       // anchored 3D draw (AURORA_STEREO_ROUTE_ANCHORED_3D) the eye's view from the held anchor.
@@ -1934,6 +1943,40 @@ void queue_scan_peek(scan_peek::Request req) {
     }
   } else {
     gx::fifo::force_frame_rendered(gx::fifo::FrameRenderReason::Readback);
+  }
+  // PrimedGun: under AURORA_STEREO_ROUTE_HEAD_LOCKED_2D on an immersive frame, the peek reads what
+  // the first eye sees behind the requested rectangle of the head-locked plane, the region an EFB
+  // copy made under the route takes from that eye (resolve_pass_into). The scan visor's window is
+  // laid on that plane in the headset, so its scan target is what lies behind it there, wherever
+  // the body camera looks. The EFB region stays in the request for a pass that is not replayed.
+  const auto& stereo = current_frame_packet().stereo;
+  if (stereo.immersive && g_recorder.stereoRoute == AURORA_STEREO_ROUTE_HEAD_LOCKED_2D &&
+      g_recorder.headLockedPlane.valid() && !g_recorder.inOffscreen) {
+    constexpr uint32_t eye = 0;
+    const auto& params = stereo.eyes[eye];
+    const auto& efbSize = renderPass.colorAttachments[SceneColorAttachmentIndex].size;
+    if (params.width != 0 && params.height != 0 && efbSize.width != 0 && efbSize.height != 0) {
+      const float srcW = static_cast<float>(efbSize.width);
+      const float srcH = static_cast<float>(efbSize.height);
+      const auto plane =
+          stereo_replay::head_locked_plane_screen(g_recorder.headLockedPlane, stereo.headLockedScaleXY,
+                                                  stereo.headLockedScaleZ);
+      const float ndcLeft = 2.0f * static_cast<float>(req.srcX) / srcW - 1.0f;
+      const float ndcRight = 2.0f * static_cast<float>(req.srcX + req.srcWidth) / srcW - 1.0f;
+      const float ndcTop = 1.0f - 2.0f * static_cast<float>(req.srcY) / srcH;
+      const float ndcBottom = 1.0f - 2.0f * static_cast<float>(req.srcY + req.srcHeight) / srcH;
+      const auto uv = stereo_replay::head_locked_plane_uv_rect(params.projection, params.headLockedViewFromCenter,
+                                                               plane, ndcLeft, ndcTop, ndcRight, ndcBottom);
+      if (uv.valid()) {
+        const float eyeW = static_cast<float>(params.width);
+        const float eyeH = static_cast<float>(params.height);
+        req.eye = static_cast<int32_t>(eye);
+        req.eyeX = static_cast<int32_t>(std::floor(uv.u * eyeW));
+        req.eyeY = static_cast<int32_t>(std::floor(uv.v * eyeH));
+        req.eyeWidth = std::max(1, static_cast<int32_t>(std::lround(uv.width * eyeW)));
+        req.eyeHeight = std::max(1, static_cast<int32_t>(std::lround(uv.height * eyeH)));
+      }
+    }
   }
   renderPass.scanPeek = std::move(req);
 }

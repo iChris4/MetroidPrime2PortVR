@@ -343,6 +343,8 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
         static const float kHudBodyDepth = 20.f;
         AuroraSetStereoHeadLockedPlane(vrHudCamera->GetDrawTanHalfWidth(),
                                        vrHudCamera->GetDrawTanHalfHeight(), kHudBodyDepth);
+        PortVr::VrNoteHeadLockedPlane(vrHudCamera->GetDrawTanHalfWidth(),
+                                      vrHudCamera->GetDrawTanHalfHeight());
       }
     }
 #endif

@@ -4,6 +4,7 @@
 #include "../webgpu/gpu.hpp"
 #include "../webgpu/gpu_prof.hpp"
 
+#include <fmt/format.h>
 #include <magic_enum.hpp>
 
 #include <algorithm>
@@ -11,6 +12,7 @@
 #include <atomic>
 #include <cmath>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace aurora::gfx::scan_peek {
@@ -43,6 +45,9 @@ struct Slot {
   uint32_t mapsRemaining = 0;
   bool colorMapped = false;
   bool depthMapped = false;
+  // PrimedGun: false when the request had no depth texture to read (encode): the snapshot's
+  // depth is then zero rather than whatever the buffer holds.
+  bool depthRead = true;
   SlotState state = SlotState::Available;
 };
 
@@ -54,6 +59,7 @@ std::atomic<uint64_t> g_writtenGeneration{0};
 uint64_t g_peekCount = 0;
 uint32_t g_skippedWarned = 0;
 bool g_loggedFirstRequest = false;
+bool g_loggedEyeRequest = false;
 
 uint32_t align_up(uint32_t value, uint32_t alignment) noexcept {
   return (value + alignment - 1) & ~(alignment - 1);
@@ -63,8 +69,8 @@ uint32_t align_up(uint32_t value, uint32_t alignment) noexcept {
 // the region to the textures it will be read from: it can run past the framebuffer when the
 // game's viewport does, and a copy that overruns fails validation.
 bool ensure_slot(Slot& slot, const wgpu::Texture& color, const wgpu::Texture& depth, Request& req) noexcept {
-  const uint32_t textureWidth = std::min(color.GetWidth(), depth.GetWidth());
-  const uint32_t textureHeight = std::min(color.GetHeight(), depth.GetHeight());
+  const uint32_t textureWidth = depth ? std::min(color.GetWidth(), depth.GetWidth()) : color.GetWidth();
+  const uint32_t textureHeight = depth ? std::min(color.GetHeight(), depth.GetHeight()) : color.GetHeight();
   if (textureWidth == 0 || textureHeight == 0) {
     return false;
   }
@@ -118,6 +124,7 @@ void write_snapshot(Slot& slot, const uint8_t* colorData, const float* depthData
   auto* depthHighOut = static_cast<uint16_t*>(req.depthHighOut);
   auto* depthLowOut = static_cast<uint8_t*>(req.depthLowOut);
   const bool writeDepth = depthHighOut != nullptr && depthLowOut != nullptr;
+  const bool depthRead = slot.depthRead;
 
   // Seqlock publish: the sequence is odd while the buffers are being written and even once a
   // whole snapshot is there, so a reader that samples it twice around its copy can tell.
@@ -150,7 +157,7 @@ void write_snapshot(Slot& slot, const uint8_t* colorData, const float* depthData
         // byte-swaps that half, so the high byte goes first here. Z8L is the bottom 8 bits.
         const float sampled = depthRow[sx];
         const float normalized = std::clamp(gx::UseReversedZ ? 1.f - sampled : sampled, 0.f, 1.f);
-        const uint32_t z24 = static_cast<uint32_t>(normalized * 16777215.f + 0.5f);
+        const uint32_t z24 = depthRead ? static_cast<uint32_t>(normalized * 16777215.f + 0.5f) : 0u;
         const uint32_t high = z24 >> 8;
         depthHighOut[index] = static_cast<uint16_t>(((high >> 8) & 0xff) | ((high & 0xff) << 8));
         depthLowOut[index] = static_cast<uint8_t>(z24 & 0xff);
@@ -233,7 +240,7 @@ void complete_map(size_t slotIdx, bool isColor, wgpu::MapAsyncStatus status, wgp
 } // namespace
 
 void encode(const wgpu::CommandEncoder& cmd, const wgpu::Texture& color, const wgpu::Texture& depth,
-            uint32_t msaaSamples, const Request& request) noexcept {
+            uint32_t msaaSamples, const Request& request, uint32_t layer) noexcept {
   if (request.sequenceOut == nullptr || request.idOut == nullptr || request.width == 0 ||
       request.height == 0) {
     return;
@@ -244,7 +251,8 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::Texture& color, const w
     }
     return;
   }
-  if (!color || !depth) {
+  // PrimedGun: an eye's peek may come without depth (encoding.cpp: a multisampled eye).
+  if (!color || (!depth && request.eye < 0)) {
     if (g_skippedWarned++ == 0) {
       Log.warn("Scan peek skipped: no framebuffer color/depth texture to read");
     }
@@ -252,6 +260,13 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::Texture& color, const w
   }
 
   Request req = request;
+  if (req.eye >= 0) {
+    // The eye's own region, in place of the EFB's.
+    req.srcX = req.eyeX;
+    req.srcY = req.eyeY;
+    req.srcWidth = req.eyeWidth;
+    req.srcHeight = req.eyeHeight;
+  }
   size_t slotIdx = 0;
   {
     std::lock_guard lock{g_mutex};
@@ -277,13 +292,16 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::Texture& color, const w
     slot->mapsRemaining = 0;
     slot->colorMapped = false;
     slot->depthMapped = false;
+    slot->depthRead = static_cast<bool>(depth);
 
-    if (!g_loggedFirstRequest) {
+    if (!g_loggedFirstRequest || (req.eye >= 0) != g_loggedEyeRequest) {
       g_loggedFirstRequest = true;
-      Log.info("Scan peek: {}x{} out of ({},{}) {}x{} of a {}x{} framebuffer (color {}, depth {})",
-               req.width, req.height, req.srcX, req.srcY, req.srcWidth, req.srcHeight, color.GetWidth(),
-               color.GetHeight(), magic_enum::enum_name(color.GetFormat()),
-               magic_enum::enum_name(depth.GetFormat()));
+      g_loggedEyeRequest = req.eye >= 0;
+      Log.info("Scan peek: {}x{} out of ({},{}) {}x{} of a {}x{} {} (color {}, depth {})", req.width, req.height,
+               req.srcX, req.srcY, req.srcWidth, req.srcHeight, color.GetWidth(), color.GetHeight(),
+               req.eye >= 0 ? fmt::format("eye {} image", req.eye) : std::string("framebuffer"),
+               magic_enum::enum_name(color.GetFormat()),
+               depth ? magic_enum::enum_name(depth.GetFormat()) : std::string_view("none"));
     }
   }
 
@@ -296,7 +314,7 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::Texture& color, const w
   const wgpu::Origin3D origin{
       .x = static_cast<uint32_t>(req.srcX),
       .y = static_cast<uint32_t>(req.srcY),
-      .z = 0,
+      .z = layer,
   };
   {
     const wgpu::TexelCopyTextureInfo source{
@@ -317,7 +335,7 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::Texture& color, const w
     const webgpu::gpu_prof::Zone zone{cmd, "Scan peek color"};
     cmd.CopyTextureToBuffer(&source, &destination, &copySize);
   }
-  {
+  if (depth) {
     const wgpu::TexelCopyTextureInfo source{
         .texture = depth,
         .mipLevel = 0,
