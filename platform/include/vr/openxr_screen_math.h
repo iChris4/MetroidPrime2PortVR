@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Pose and virtual-screen geometry shared by the OpenXR input layer and the
 // pacing thread: where an aim ray meets a screen, how a pointer survives a

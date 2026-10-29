@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // PrimedGun's Layout tab: the controller bindings picture. The port's
 // PrimedGun control scheme (platform/vr/vr_pad.cpp) uses the same bindings.

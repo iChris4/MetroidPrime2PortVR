@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The launcher's building blocks, after PrimedGun's ConnectStack helpers
 // (DolphinQt/MainWindow.cpp): the label / slider / spin box / -+ row, the

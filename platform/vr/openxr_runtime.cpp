@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 
 // The runtime source tree is globbed even in explicitly non-VR builds. Keep
 // this translation unit dependency-free in that configuration; callers that

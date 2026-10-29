@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: MIT -->
 <!-- From PrimedGun's Quest launcher (res/values/primedgun_styles.xml, Copyright 2026 PrimedGun
-     Project, GPL-2.0-or-later), on Material 3's dark theme instead of Dolphin's. -->
+     Project), on Material 3's dark theme instead of Dolphin's. -->
 <!-- The PrimedGun launcher keeps the Qt window's fixed dark look. Colours come from colors.xml. -->
 <resources>
     <style name="Theme.PrimedGun.Main" parent="Theme.Material3.Dark.NoActionBar">

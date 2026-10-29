@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 #pragma once
 #include "Kyoto/Math/CPlane.hpp"
 #include "Kyoto/Math/CTransform4f.hpp"

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 <#
 .SYNOPSIS
 Builds the Dawn that the Quest APK links: aurora's pinned Dawn with PrimedGun's patches.

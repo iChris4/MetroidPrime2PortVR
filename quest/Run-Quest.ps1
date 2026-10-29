@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 <#
 .SYNOPSIS
 Installs PrimedGun Echoes on the connected Quest, starts the game and collects its logs.

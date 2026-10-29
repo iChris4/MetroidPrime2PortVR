@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Logging for the VR host layer, on the port's own PortLog so it lands on
 // stderr on the desktop and in logcat on Android. PORTVR_LOG() is a drop-in

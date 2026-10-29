@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // PrimedGun's Cannon Textures tab (DolphinQt/MainWindow.cpp ConnectStack): pick
 // one of PrimedGun's arm-cannon texture slots, or import a custom one, and

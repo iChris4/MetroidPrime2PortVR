@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: MIT -->
 <!-- PrimedGun's launcher palette (res/values/primedgun_colors.xml in PrimedGun's Quest launcher,
-     Copyright 2026 PrimedGun Project, GPL-2.0-or-later), which mirrors the stylesheet of the Qt
+     Copyright 2026 PrimedGun Project), which mirrors the stylesheet of the Qt
      window, so the Quest panel reads as the same application. -->
 <resources>
     <color name="primedgun_background">#101215</color>

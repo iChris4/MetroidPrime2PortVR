@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Directional movement: PrimedGun's UpdateDirectionalMovement (Source/Core/
 // Core/PrimedGun/NativeRuntime.cpp), its "left stick strafe". Outside an orbit

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Controller bindings are configured in Customize controller layout.
 // This tab retains handedness, feedback, gesture tuning and movement behaviour.

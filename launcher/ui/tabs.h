@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The launcher's tabs after Setup (which lives in the window, beside the
 // process it starts), in PrimedGun's order.

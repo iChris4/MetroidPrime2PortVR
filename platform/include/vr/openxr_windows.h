@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 #pragma once
 #include "vr/openxr_d3d12.h"
 #include "vr/openxr_vulkan_win32.h"

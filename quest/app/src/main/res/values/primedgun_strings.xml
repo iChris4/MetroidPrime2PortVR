@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: MIT -->
 <!-- From PrimedGun's Quest launcher (res/values/primedgun_strings.xml, Copyright 2026 PrimedGun
-     Project, GPL-2.0-or-later), for the native port: the PC launcher's (launcher/ui) wording
+     Project), for the native port: the PC launcher's (launcher/ui) wording
      where the two v2 launchers do the same thing, PrimedGun's where v2 does what it did. -->
 <resources>
     <string name="primedgun_title">PrimedGun Echoes</string>
@@ -340,7 +340,7 @@
     <string name="primedgun_about_build">Build: %1$s, revision %2$s</string>
     <string name="primedgun_about_game">Supported game: Metroid Prime 2: Echoes USA (G2ME01); PAL (G2MP01) and Metroid Prime Trilogy (R3ME01, R3MP01) experimental</string>
     <string name="primedgun_about_user_folder">User folder: %1$s</string>
-    <string name="primedgun_about_license">The PrimedGun launcher is free software, licensed under the GNU GPL version 3 or later.</string>
+    <string name="primedgun_about_license">The PrimedGun launcher is free software, licensed under the MIT License.</string>
     <string name="primedgun_section_useful_info">Useful Information</string>
     <string name="primedgun_about_useful_info_text">• Leave the game with Quit in the Quest menu, or with Stop on the Setup tab. The game saves its settings as it exits.\n\n• The first start after an update compiles shaders in the background; later starts are faster.\n\n• Your memory card is in USA/Card A (EUR/Card A for a PAL disc) and your settings in port_settings.ini, in the user folder shown above.</string>
     <string name="primedgun_section_links">Links</string>

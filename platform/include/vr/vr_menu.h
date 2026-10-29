@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // PrimedGun's in-headset settings menu, header-only so the tests can check it
 // without a headset or the game. platform/vr/vr_menu.cpp drives it on the game

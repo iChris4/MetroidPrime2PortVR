@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // PrimedGun's Dawn patch (quest/dawn/apply.py), compiled at the end of VulkanBackend.cpp against the
 // pinned Dawn: Wiicompiled VR's fragment density maps, with layered maps (one layer per view of a
 // multiview eye pass; aurora/dawn_fdm_abi.h version 2).

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The port's settings.cfg as text, edited line by line. The game reads it with
 // its own rules (platform/debug_ui/settings.cpp ApplySettingsText: a line

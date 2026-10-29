@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The About tab of PrimedGun's Quest launcher (PrimedGunAboutFragment.kt,
 // primedgun_strings.xml), for the native build: version, folders, links and
@@ -61,8 +61,7 @@ void BuildAboutTab(TabContext& ctx, QTabWidget* tabs) {
       QObject::tr("User folder: %1").arg(QDir::toNativeSeparators(ctx.paths.userFolder).toHtmlEscaped()),
       true));
   layout->addWidget(Paragraph(
-      QObject::tr("The PrimedGun launcher is free software, licensed under the GNU GPL version 3 or "
-                  "later."),
+      QObject::tr("The PrimedGun launcher is free software, licensed under the MIT License."),
       true));
 
   layout->addSpacing(8);

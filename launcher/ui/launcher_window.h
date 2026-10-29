@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // PrimedGun's launcher window (DolphinQt/MainWindow.cpp ConnectStack) for the
 // native port: the tabs, the footer, and the game as a child process. The

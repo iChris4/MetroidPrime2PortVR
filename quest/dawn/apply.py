@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Apply PrimedGun's Quest patches to the Dawn source tree the port pins (encounter/dawn).
 
 Vulkan multiview, so one render pass draws both eyes:

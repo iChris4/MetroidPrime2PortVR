@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 #pragma once
 #include <stdint.h>
 // Versioned C ABI for the fragment density maps PrimedGun's patched Dawn (quest/dawn/aurora_fdm.inc)

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // What the VR layer needs from the port it runs in, so platform/vr does not
 // depend on one port's debug UI. PrimedGun Echoes implements it in

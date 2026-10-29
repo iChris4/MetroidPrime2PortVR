@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Every settings.cfg key the launcher edits, with the value the game uses
 // when the key is absent (the PortVrSettings defaults in

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // A DXT1 (BC1) .dds decoded to RGBA8 for the Cannon Textures previews; Qt has
 // no DDS reader of its own. From PrimedGun's PrimedGunDecodeDxt1Preview

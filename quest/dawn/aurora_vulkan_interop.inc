@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // PrimedGun's Dawn patch (apply.py), compiled at the end of VulkanBackend.cpp against the pinned
 // Dawn: Aurora's direct presentation entry points (aurora/dawn_vulkan_abi.h), after
 // Wiicompiled_VR's Windows Vulkan binding.

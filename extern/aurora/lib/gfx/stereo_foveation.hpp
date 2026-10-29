@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 #pragma once
 
 // Fixed foveated rendering of the immersive eyes: the fragment density map an

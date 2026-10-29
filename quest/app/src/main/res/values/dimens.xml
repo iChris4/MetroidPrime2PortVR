@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: MIT -->
 <resources>
     <!-- A controller pointer's comfortable target, as PrimedGun's Quest launcher used. -->
     <dimen name="primedgun_touch_target">48dp</dimen>

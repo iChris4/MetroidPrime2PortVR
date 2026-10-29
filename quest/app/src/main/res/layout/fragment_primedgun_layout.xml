@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-<!-- From PrimedGun's Quest launcher (res/layout/fragment_primedgun_layout.xml, Copyright 2026 PrimedGun Project,
-     GPL-2.0-or-later). -->
+<!-- SPDX-License-Identifier: MIT -->
+<!-- From PrimedGun's Quest launcher (res/layout/fragment_primedgun_layout.xml, Copyright 2026 PrimedGun Project). -->
 <!-- The Layout tab: the controller binding diagram, scaled to fit the visible panel like the Qt
      window's PrimedGunScaledImageLabel. No scrolling: the diagram ends with an instruction line
      that must stay on screen, so the image shrinks to the space available instead. -->

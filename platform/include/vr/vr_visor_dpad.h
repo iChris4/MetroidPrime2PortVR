@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The visor gesture: PrimedGun's XR D-pad (Source/Core/Core/PrimedGun/
 // NativeRuntime.cpp: LeftControllerNearHead, StickToDpad, UpdateXrDpad). Hold

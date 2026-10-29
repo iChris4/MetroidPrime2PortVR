@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Derived from PrimedGun's Quest launcher (ui/main/MainActivity.kt, Copyright 2026
-// PrimedGun Project, GPL-2.0-or-later) and Wiicompiled VR's LauncherActivity.
+// PrimedGun Project) and Wiicompiled VR's LauncherActivity.
 package org.primedgun.echoes.launcher
 
 import android.app.ActivityManager

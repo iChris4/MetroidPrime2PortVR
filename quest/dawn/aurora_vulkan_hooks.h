@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // PrimedGun's Dawn patch (apply.py): compiled only inside the patched Dawn source build.
 #pragma once
 #include "dawn/native/DawnNative.h"

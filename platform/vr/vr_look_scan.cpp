@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Look to scan: PrimedGun's HMD scan targeting (NativeRuntime.cpp
 // UpdateScanTargetingFromHmd, SeedScanIndicatorTargetsFromHmd and the

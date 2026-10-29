@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Look to scan: the maths of PrimedGun's HMD scan targeting
 // (Source/Core/Core/PrimedGun/NativeRuntime.cpp: RayMetricsForPoint,

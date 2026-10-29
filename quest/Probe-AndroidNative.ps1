@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 <#
 .SYNOPSIS
 Cross-compiles the port's native library for the Quest (arm64-v8a) with CMake alone.

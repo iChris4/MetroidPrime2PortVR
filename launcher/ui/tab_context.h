@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // What every tab shares: the folders the game uses, the settings model, and
 // helpers that build PrimedGun's rows already bound to a settings.cfg key.

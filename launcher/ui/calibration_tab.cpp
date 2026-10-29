@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // PrimedGun's Calibration tab (DolphinQt/MainWindow.cpp ConnectStack):
 // in-headset display, culling, HUD, targeting and the arm cannon's offsets,

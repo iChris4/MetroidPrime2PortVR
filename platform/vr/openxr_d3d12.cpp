@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 
 #if defined(MP_ENABLE_OPENXR) && defined(_WIN32)
 

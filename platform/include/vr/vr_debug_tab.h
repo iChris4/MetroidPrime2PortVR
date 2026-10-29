@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The "VR" page of the port's F1 overlay: the headset's status and the
 // PortVrSettings a player tunes while testing (replay, world scale, culling,

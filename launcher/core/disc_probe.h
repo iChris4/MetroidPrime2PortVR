@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Whether a disc image is one the game will boot: Metroid Prime 2: Echoes USA
 // (G2ME01) or PAL (G2MP01), or Metroid Prime Trilogy USA (R3ME01) or PAL

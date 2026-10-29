@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // PrimedGun's arm-cannon texture slots on the port. The three textures keep
 // Dolphin's names, which Aurora reads as they are (the base level's XXH64 is

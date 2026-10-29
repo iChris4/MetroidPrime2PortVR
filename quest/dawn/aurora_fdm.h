@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // PrimedGun's Dawn patch (quest/dawn/apply.py), compiled only inside the patched Dawn source build:
 // fragment density maps for Aurora's immersive eye render passes (Wiicompiled VR's aurora_fdm.h).
 // Implemented in aurora_fdm.inc.

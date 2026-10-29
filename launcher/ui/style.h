@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // PrimedGun's launcher look, from DolphinQt/MainWindow.cpp ConnectStack, and
 // the dark palette its Dolphin build ran under (DolphinQt/Settings.cpp). Added

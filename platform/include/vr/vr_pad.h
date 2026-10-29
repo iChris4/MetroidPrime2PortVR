@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // PrimedGun's modern control scheme: the headset controllers' snapshot
 // (openxr_controller_snapshot.h) turned into Metroid Prime's GameCube pad on

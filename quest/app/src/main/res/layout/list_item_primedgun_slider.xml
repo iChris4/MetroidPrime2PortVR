@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: MIT -->
 <!-- From PrimedGun's Quest launcher (res/layout/list_item_primedgun_slider.xml, Copyright 2026
-     PrimedGun Project, GPL-2.0-or-later), with the PC launcher's "not active yet" tag and a
+     PrimedGun Project), with the PC launcher's "not active yet" tag and a
      description line for what the Qt window shows as a tooltip. -->
 <!-- The Qt window puts label, slider, spin box and the -/+ steppers on one row. At panel width
      that row does not fit, so the label and value take the first line and the slider keeps the

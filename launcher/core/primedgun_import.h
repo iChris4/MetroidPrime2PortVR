@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Bringing a PrimedGun (Dolphin) install's save and settings over: finding its
 // memory card the way PrimedGun's own "Transfer Old Memory Card" did

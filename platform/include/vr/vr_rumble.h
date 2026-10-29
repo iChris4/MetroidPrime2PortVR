@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The headset controllers' rumble, by where it comes from. While the VR pad
 // owns port 0, CRumbleManager plays the game's rumble effects on three of its

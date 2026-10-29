@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // PrimedGunEchoes.exe: the PrimedGun launcher for the native Metroid Prime 2: Echoes port.
 

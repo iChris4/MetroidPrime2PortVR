@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Backend-neutral controller sample and screen-hit vocabulary shared by the
 // OpenXR input layer, the headset settings panel and the pad synthesis.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The Quest launcher's native half: the PC launcher's Qt-free core
 // (launcher/core) behind JNI, for org.primedgun.echoes.launcher.LauncherNative

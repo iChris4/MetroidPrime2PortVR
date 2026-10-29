@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 <#
 .SYNOPSIS
 Builds PrimedGun Echoes' Meta Quest APK on a Windows host.

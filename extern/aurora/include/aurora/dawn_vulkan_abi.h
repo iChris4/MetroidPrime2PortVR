@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 #pragma once
 #include <stdint.h>
 // The C entry points PrimedGun's patched Dawn adds for direct presentation (quest/dawn,

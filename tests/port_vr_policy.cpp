@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The presentation policy (platform/vr/prime_vr_policy.cpp): what the headset
 // shows for each game mode, the debounce of a change from the world to the

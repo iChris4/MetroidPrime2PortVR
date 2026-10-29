@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // PrimedGun Echoes: vr/vr_host.h on this port. The VR layer reaches the
 // settings file, the F1 overlay's switches, the save states and the user

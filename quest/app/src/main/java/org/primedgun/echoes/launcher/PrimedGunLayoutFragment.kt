@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Derived from PrimedGun's Quest launcher (features/primedgun/ui/PrimedGunLayoutFragment.kt,
-// Copyright 2026 PrimedGun Project, GPL-2.0-or-later).
+// Copyright 2026 PrimedGun Project).
 package org.primedgun.echoes.launcher
 
 import android.os.Bundle

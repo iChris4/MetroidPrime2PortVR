@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The PrimedGun Echoes launcher's Qt-free core (launcher/core): editing
 // settings.cfg without disturbing the game's other lines, the key table

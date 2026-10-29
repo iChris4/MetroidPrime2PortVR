@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The launcher's working copy of the keys in launcher_keys: what the file had
 // when it was last read, and what the tabs changed since. Saving writes only

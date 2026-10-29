@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The pacing thread's view of the headset and controllers, published once per
 // XR frame for the game thread: PrimedGun's Common::VR::OpenXRInputSnapshot

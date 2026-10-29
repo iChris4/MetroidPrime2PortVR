@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // In place of PrimedGun's Dolphin Config tab: the native port's own headset and
 // display settings, and the folders the game writes to.

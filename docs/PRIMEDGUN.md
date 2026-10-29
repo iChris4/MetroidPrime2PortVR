@@ -9,6 +9,19 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## The VR layer is MIT (2026-10-29)
+
+The user's decision: the VR files are relicensed from GPL-3.0-or-later to MIT, so the VR layer sits
+under the same terms as the port's own code instead of a licence the combined build (with the
+unlicensed game code) could not meet. 156 files' `SPDX-License-Identifier` lines (the VR host layer,
+the aurora stereo/foveation/interop files, the Dawn patches, both launchers, their tests); the
+launchers' provenance notes keep "Copyright 2026 PrimedGun Project" without the old GPL tag; the
+About texts of both launchers say MIT; `NOTICE` has a section for the VR layer. Parts of the
+launchers derive from PrimedGun's launcher (Nobbie's additions to its `DolphinQt/MainWindow.cpp`,
+the PrimedGun Quest launcher), relicensed by its authors. Untouched: upstream's GPL pieces
+(`extern/adrenotools/src/hook/kgsl.h`, the decomp's `src/LZO`). The Metroid Prime fork still has the
+GPL headers.
+
 ## VISOR HELMET in the headset (2026-10-29)
 
 The VR menu's VISOR HELMET and the launchers' "Enable visor helmet" (`vr_visor_helmet_enabled`, off

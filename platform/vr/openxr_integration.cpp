@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 
 #if defined(_WIN32) && !defined(NOMINMAX)
 #define NOMINMAX

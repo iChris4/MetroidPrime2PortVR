@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // PrimedGun's VR menu on the game thread (vr/vr_menu.h): reads the laser the
 // XR pacing thread aimed, runs the menu, applies what it changed and hands

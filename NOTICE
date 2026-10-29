@@ -35,6 +35,19 @@ game data at all; the port reads the user's own disc image at run time, and
 ships are its own icon (`packaging/varia-bolt.svg`) and controller-button
 glyphs built from CC0 sources (`tools/prompt_icons/`).
 
+## PrimedGun Echoes' VR layer
+
+This fork adds a VR layer: `platform/vr/` and `platform/include/vr/`, the
+stereo, foveation and interop files it adds to `extern/aurora/` (and the Dawn
+patches under `quest/dawn/`), the PC and Quest launchers (`launcher/`,
+`quest/`), and their tests. Each of those files says
+`SPDX-License-Identifier: MIT`: they are under the MIT License, on the terms
+`LICENSE` states, Copyright (c) 2026 PrimedGun contributors. Parts of the
+launchers derive from PrimedGun's own launcher (the Dolphin-based PrimedGun
+project), whose authors relicensed that work here. Like the rest of this
+project's own work, the MIT grant does not reach the game code the VR layer is
+built into.
+
 ## Third-party components, which keep their own terms
 
 Nothing in `LICENSE` applies to these; each is under its own licence, which

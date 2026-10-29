@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Game-facing presentation policy: how Metroid Prime's content is shown in
 // the headset this frame. Derived from Wiicompiled VR's mkw_vr_policy, but

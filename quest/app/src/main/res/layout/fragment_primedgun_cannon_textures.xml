@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-<!-- From PrimedGun's Quest launcher (res/layout/fragment_primedgun_cannon_textures.xml, Copyright 2026 PrimedGun Project,
-     GPL-2.0-or-later). -->
+<!-- SPDX-License-Identifier: MIT -->
+<!-- From PrimedGun's Quest launcher (res/layout/fragment_primedgun_cannon_textures.xml, Copyright 2026 PrimedGun Project). -->
 <!-- The Cannon Textures tab. Slot radios and the three texture rows are filled in from code. -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"

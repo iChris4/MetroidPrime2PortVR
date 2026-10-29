@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The headset's view of the game, for the game thread: what the game camera
 // must do differently while the headset shows the world per eye, and the

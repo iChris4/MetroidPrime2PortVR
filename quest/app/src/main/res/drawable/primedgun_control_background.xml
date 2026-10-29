@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-<!-- From PrimedGun's Quest launcher (res/drawable/primedgun_control_background.xml, Copyright 2026 PrimedGun Project,
-     GPL-2.0-or-later). -->
+<!-- SPDX-License-Identifier: MIT -->
+<!-- From PrimedGun's Quest launcher (res/drawable/primedgun_control_background.xml, Copyright 2026 PrimedGun Project). -->
 <!-- The QPushButton look from MainWindow's game_button_style, including its disabled state. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_enabled="false">

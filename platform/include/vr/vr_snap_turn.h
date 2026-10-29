@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The snap turn: PrimedGun's UpdateSnapTurn (Source/Core/Core/PrimedGun/
 // NativeRuntime.cpp). With the setting on, the look stick no longer turns

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: MIT -->
 <!-- From PrimedGun's Quest launcher (res/layout/fragment_primedgun_about.xml, Copyright 2026
-     PrimedGun Project, GPL-2.0-or-later), with the native port's section. -->
+     PrimedGun Project), with the native port's section. -->
 <!-- The About tab: version and build details, tips for playing on Quest, links and credits.
      Links are buttons rather than inline hyperlinks because a controller pointer hits a full-width
      button far more easily than a few words of text. -->

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Every user-facing VR setting, in one struct: the headset renderer's (from
 // Wiicompiled VR's [vr] table) and PrimedGun's RuntimeSettings (NativeRuntime.h),

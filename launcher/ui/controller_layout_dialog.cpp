@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 #include "tabs.h"
 #include "tab_context.h"
 #include "settings_model.h"

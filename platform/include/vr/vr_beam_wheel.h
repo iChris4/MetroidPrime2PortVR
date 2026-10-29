@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // The beam wheel's geometry: PrimedGun's weapon select (Source/Core/Core/HW/
 // GCPadEmu.cpp: UpdatePrimedGunWeaponSelect, PrimedGunRollFreeQuat). Holding

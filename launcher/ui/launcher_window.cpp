@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
-// Derived from PrimedGun's DolphinQt/MainWindow.cpp (GPL-2.0-or-later).
+// Derived from PrimedGun's launcher window (its additions to DolphinQt/MainWindow.cpp).
 
 #include "launcher_window.h"
 
