@@ -26,6 +26,8 @@
 #include "port_entry.h"
 #include "port_mouse.h"
 #include "port_overlay.h"
+#include "vr/vr_view.h"
+#include <aurora/gfx.h>
 #endif
 
 #ifdef TARGET_PC
@@ -498,6 +500,13 @@ static void TriDrawScanLens(float t, float open, float cx, float cy, float px) {
 
 void CPlayerVisor::DrawScanEffect(const CStateManager& mgr,
                                   const CTargetingManager* const tgtMgr) const {
+#ifdef TARGET_PC
+  // PortVr: the scan window is 2D content (a copy of the view's centre stretched over a pane, and
+  // its frame). The headset lays it on the plane in front of the head that CInGameGuiManager::Draw
+  // sets, and takes the copy from each eye through that plane, so the window points where the head
+  // does and magnifies each eye's own view (or, with vr_scan_zoom off, shows it as is).
+  AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED_2D);
+#endif
   const CViewport& viewport = CGraphics::GetViewport();
   const int vpLeft = viewport.mLeft;
   const int vpTop = viewport.mTop;
@@ -527,10 +536,28 @@ void CPlayerVisor::DrawScanEffect(const CStateManager& mgr,
   const float vpW = 139.35576f * windowX;
   const float vpH = 125.36f * windowY;
 #endif
+#ifdef TARGET_PC
+  // PortVr: the copy is the pane's size over the divisor, and the pane stretches it back: the
+  // divisor is the zoom. With the headset's zoom off (vr_scan_zoom) the copy is the pane's size,
+  // rounded to the nearest pixel rather than up to the GameCube's tiles, so each eye's copy
+  // through the head-locked plane is exactly the view behind the pane.
+  const bool vrNoZoom = PortVr::VrScanWindowNoZoom();
+  const int width =
+      vrNoZoom ? CMath::Clamp(skPixelsPerTileDimension16Bit,
+                              static_cast< int >(layoutScale * vpW + 0.5f), vpWidth)
+               : CMath::Clamp(skPixelsPerTileDimension16Bit,
+                              round_up_to_tile(layoutScale * (vpW / divisor)), vpWidth);
+  const int height =
+      vrNoZoom ? CMath::Clamp(skPixelsPerTileDimension16Bit,
+                              static_cast< int >(layoutScale * vpH + 0.5f), vpHeight)
+               : CMath::Clamp(skPixelsPerTileDimension16Bit,
+                              round_up_to_tile(layoutScale * (vpH / divisor)), vpHeight);
+#else
   const int width = CMath::Clamp(skPixelsPerTileDimension16Bit,
                                  round_up_to_tile(layoutScale * (vpW / divisor)), vpWidth);
   const int height = CMath::Clamp(skPixelsPerTileDimension16Bit,
                                   round_up_to_tile(layoutScale * (vpH / divisor)), vpHeight);
+#endif
 #ifdef TARGET_PC
   // Pointer aim: the scan window is the pointer's cursor. It magnifies the screen around the
   // pointer (half-view units, +y down) and the scan zone moves with it (CPlayerOrbit.cpp). Locked,
@@ -573,6 +600,8 @@ void CPlayerVisor::DrawScanEffect(const CStateManager& mgr,
   const float windowOpen = t;
   const float windowFactor = trilogy ? windowOpen : 1.f;
   const float windowAlpha = transFactor * windowFactor;
+  // PortVr: the dim covers each eye's whole view.
+  AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_FULLSCREEN);
   if (trilogy) {
     gpRender->SetViewportOrtho(true, -4096.f, 4096.f);
     TriDrawScanLens(transFactor, windowOpen, portPointer ? portShiftX : 0.f,
@@ -581,10 +610,16 @@ void CPlayerVisor::DrawScanEffect(const CStateManager& mgr,
   if (!trilogy)
 #endif
   mScanDim.Draw();
+#ifdef TARGET_PC
+  AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED_2D);
+#endif
   gpRender->SetViewportOrtho(true, -1.f, 1.f);
 #ifdef TARGET_PC
-  if (trilogy && fabsf(windowOpen) < 0.00001f)
+  if (trilogy && fabsf(windowOpen) < 0.00001f) {
+    // PortVr: back to the route CInGameGuiManager::Draw set for the visor.
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED);
     return;
+  }
   // Moving the view the other way draws the window and its frame around the pointer.
   if (portPointer)
     CGraphics::SetViewPointMatrix(CTransform4f::Translate(-portShiftX, 0.f, portShiftY));
@@ -698,6 +733,8 @@ void CPlayerVisor::DrawScanEffect(const CStateManager& mgr,
 #ifdef TARGET_PC
   if (portPointer)
     CGraphics::SetViewPointMatrix(CTransform4f::Identity());
+  // PortVr: back to the route CInGameGuiManager::Draw set for the visor.
+  AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED);
 #endif
   CGraphics::SetCullMode(kCM_Front);
 }

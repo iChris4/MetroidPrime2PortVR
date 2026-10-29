@@ -1017,6 +1017,18 @@ void CPlayer::UpdateGunTransform(const CVector3f& position, CStateManager& mgr) 
   cameraTransform.SetTranslation(gunPosition);
 #endif
 #ifdef TARGET_PC
+  // PortVr: the arm cannon follows the tracked controller (6DOF) in every holster state, as in the
+  // Metroid Prime VR port; the aim prediction and the assist then work from that pose.
+  if (mgr.GetPlayer(0) == this &&
+      PortVr::VrCannonTransform(mgr, *this, cameraTransform, gunTransform)) {
+    mGun->SetTransform(gunTransform);
+    CTransform4f vrAimTransform = gunTransform;
+    UpdateAimPrediction(vrAimTransform, mgr);
+    UpdateAssistedAiming(vrAimTransform, mgr);
+    return;
+  }
+#endif
+#ifdef TARGET_PC
   // Port: pointer aim (MP1's pointer block in CPlayer::UpdateGunTransform). The gun sits off to
   // the side of the eye, so a shot parallel to the ray through the pointer would miss what the
   // pointer is on. Shots (mAssistAimXf, which CPlayerGun fires along) and the gun model aim from
@@ -2287,8 +2299,10 @@ void CPlayer::Think(float dt, CStateManager& mgr) {
   // The mouse, or the twin stick, owns the body yaw while it is aiming. After ProcessInput,
   // whose stick turn would otherwise win the frame (see MouseAimAllowed).
   UpdateMouseAim(mgr, dt);
-  // PortVr: physical steps up and down join the eye-height smoothing below (player 0's headset).
+  // PortVr: PrimedGun's snap turn (vr_view.h VrApplySnapTurn), then the physical steps up and
+  // down, which join the eye-height smoothing below (player 0's headset).
   if (mgr.GetPlayer(0) == this) {
+    PortVr::VrApplySnapTurn(mgr, *this);
     PortVr::VrRoomScaleUpdate(mgr, *this, dt);
   }
 #endif

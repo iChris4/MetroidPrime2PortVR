@@ -47,6 +47,9 @@
 #include "port_mouse.h"
 #include "port_overlay.h"
 #include "port_tri_reticle.h"
+#include "vr/vr_look_scan.h"
+#include "vr/vr_settings.h"
+#include "vr/vr_view.h"
 #include "MetroidPrime/Enemies/CPatterned.hpp"
 
 #include <algorithm>
@@ -1260,8 +1263,17 @@ void CCompoundTargetReticle::UpdateOrbitZoneGroup(float dt, const CStateManager&
   }
 
   const CPlayer* player = mgr.GetPlayer(mPlayerIndex);
+#ifdef TARGET_PC
+  // PortVr cannon targeting: the crosshair marks where the tracked cannon points, all the time.
+  CVector3f vrCannonPoint;
+  const bool vrCannonCrosshair =
+      mPlayerIndex == 0 && PortVr::VrCannonTargetPoint(mgr, vrCannonPoint);
+  if ((player->GetDrawCrosshairs() || vrCannonCrosshair) &&
+      player->GetPlayerState()->GetCurrentVisor() != CPlayerState::kPV_Scan) {
+#else
   if (player->GetDrawCrosshairs() &&
       player->GetPlayerState()->GetCurrentVisor() != CPlayerState::kPV_Scan) {
+#endif
     mCrosshairsDrawScale = rstl::min_val(
         mCrosshairsDrawScale + dt / gpTweakTargeting->GetCrosshairsFadeInOutTime(), 1.f);
   } else {
@@ -1276,7 +1288,13 @@ void CCompoundTargetReticle::Draw(const CStateManager& mgr, bool hideLockOn) con
     CTransform4f cameraXf =
         mgr.GetCameraManager(mPlayerIndex)->GetCurrentCameraTransform(mgr, true);
     CGraphics::SetViewPointMatrix(cameraXf);
+#ifdef TARGET_PC
+    // PortVr: the reticles face the head, as the scan icons do.
+    CMatrix3f rotation =
+        mPlayerIndex == 0 ? PortVr::VrHeadViewRotation(cameraXf) : cameraXf.BuildMatrix3f();
+#else
     CMatrix3f rotation = cameraXf.BuildMatrix3f();
+#endif
     CGraphics::SetCullMode(kCM_None);
 
 #ifdef TARGET_PC
@@ -2031,6 +2049,19 @@ void CCompoundTargetReticle::DrawCrosshairs(const CMatrix3f& rotation,
   if (PortMouse::Aiming()) {
     scale *= static_cast< float >(PortOverlay::CrosshairSize()) / 100.f;
   }
+  // PortVr cannon targeting: the crosshair sits where the cannon's ray hits, found this frame
+  // against the presented camera, and faces the head.
+  CVector3f vrCannonPoint;
+  const bool vrCannon = mPlayerIndex == 0 && PortVr::VrCannonTargetPoint(mgr, vrCannonPoint);
+  CVector3f vrHead;
+  CMatrix3f vrRotation = rotation;
+  if (vrCannon) {
+    const CTransform4f vrCamXf = mgr.GetCameraManager(mPlayerIndex)->GetCurrentCameraTransform(mgr, true);
+    vrHead = vrCamXf.GetTranslation();
+    CVector3f vrGaze;
+    PortVr::VrHeadGaze(vrCamXf, vrHead, vrGaze);
+    vrRotation = CTransform4f::LookAt(vrHead, vrCannonPoint, rotation.GetColumn(kDZ)).BuildMatrix3f();
+  }
   CColor color = gpTweakTargeting->GetCrosshairsColor();
   {
     float rgb[3];
@@ -2053,6 +2084,18 @@ void CCompoundTargetReticle::DrawCrosshairs(const CMatrix3f& rotation,
     const float fovRad = cam->GetFov() * 3.14159265f / 180.f;
     const float units = tanf(0.5f * fovRad) / tanf(0.5f * kRemasteredFov * 3.14159265f / 180.f) *
                         static_cast< float >(PortOverlay::CrosshairSize()) / 100.f;
+    if (vrCannon) {
+      // The cursor keeps the angular size it has at its plane, at the cannon's hit.
+      const float vrDistance = (vrCannonPoint - vrHead).Magnitude();
+      CColor rc = PortRemasteredCrosshairColor(mPreviousState, mPortXhairTargetT);
+      rc = CColor(rc.GetRed(), rc.GetGreen(), rc.GetBlue(),
+                  mCrosshairsDrawScale * static_cast< float >(PortOverlay::CrosshairOpacity()) / 100.f);
+      CGraphics::SetDepthWriteMode(false, kE_Always, false);
+      PortDrawRemasteredCrosshair(vrRotation, vrCannonPoint, units * vrDistance, mPortXhairArmScale,
+                                  mPortXhairCentreScale, rc);
+      gpRender->SetBlendMode_AlphaBlended();
+      return;
+    }
     CVector3f cursorLocal(0.f, kCursorPlane, 0.f);
     // Pointer aim: the cursor is the pointer, on the same plane where the ray through it meets.
     float pointerX = 0.f;
@@ -2084,7 +2127,14 @@ void CCompoundTargetReticle::DrawCrosshairs(const CMatrix3f& rotation,
   }
 #ifdef TARGET_PC
   CTransform4f xf(rotation, PortPresentedTarget(mgr));
-  if (mPortTri && PortOverlay::CrosshairStyle() == PortOverlay::kCrosshairStyle_GameCube) {
+  if (vrCannon) {
+    // The model keeps the angular size it has at its idle place, at the cannon's hit.
+    const float vrIdleDistance = (PortPresentedTarget(mgr) - vrHead).Magnitude();
+    if (vrIdleDistance > 0.001f) {
+      scale *= (vrCannonPoint - vrHead).Magnitude() / vrIdleDistance;
+    }
+    xf = CTransform4f(vrRotation, vrCannonPoint);
+  } else if (mPortTri && PortOverlay::CrosshairStyle() == PortOverlay::kCrosshairStyle_GameCube) {
     // In place of the aiming cursor: the model (built out along its Y) turned down the pointer
     // ray as drawn, so it marks the aim where the cursor would (MP1 255afaf13).
     const CCameraManager* camMgr = mgr.GetCameraManager(mPlayerIndex);
@@ -2559,6 +2609,28 @@ float CCompoundTargetReticle::CalculateClampedScale(CVector3f position, float sc
   const CGameCamera& camera = *cameraManager->GetCurrentCamera(mgr, true);
   CTransform4f cameraXf = cameraManager->GetCurrentCameraTransform(mgr, true);
   const CTransform4f& camXf = camera.GetTransform();
+#ifdef TARGET_PC
+  {
+    // PortVr: a scan icon or the cannon's crosshair faces the head, so its size clamp uses its
+    // distance from the head, not the body camera's forward depth (zero at the player's side).
+    const bool scanVisor =
+        mgr.GetPlayerState(playerIndex)->GetCurrentVisor() == CPlayerState::kPV_Scan;
+    if (playerIndex == 0 && PortVr::VrImmersive() &&
+        (scanVisor || PortVr::GetVrSettings().CannonTargetingForVisor(scanVisor))) {
+      CVector3f head = cameraXf.GetTranslation();
+      CVector3f gaze;
+      PortVr::VrHeadGaze(cameraXf, head, gaze);
+      const CVector3f offset = position - head;
+      const CMatrix4f& projection = camera.GetPerspectiveMatrix();
+      const float unitWidth =
+          fabsf(projection.MultiplyOneOverW(CVector3f(1.f, 1.f, 0.f)).GetX() -
+                projection.MultiplyOneOverW(CVector3f(0.f, 1.f, 0.f)).GetX()) *
+          640.f * layoutScale;
+      return PortVr::LookScan::ScanIndicatorScale({offset.GetX(), offset.GetY(), offset.GetZ()},
+                                                  unitWidth, minScale, maxScale, scale);
+    }
+  }
+#endif
 #ifdef TARGET_PC
   // MP1's frame interpolation: draws pass points placed for the presented camera
   // (PortPresentGroup), but the scale is measured against the tick's camera, so between ticks the

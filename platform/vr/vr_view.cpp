@@ -31,6 +31,9 @@
 #include "MetroidPrime/Player/CPlayer.hpp"
 #include "MetroidPrime/CControlHintManager.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptControlHint.hpp"
+#include "MetroidPrime/Player/CPlayerState.hpp"
+#include "Kyoto/Math/CRelAngle.hpp"
+#include "port_freecam.h"
 
 #include <algorithm>
 #include <array>
@@ -748,6 +751,38 @@ void VrResetCannonSmoothing() noexcept { s_cannon.smoothValid = false; }
 
 CVector3f VrCannonModelOffsetWorld() noexcept {
     return s_cannon.tracked ? s_cannon.modelOffsetWorld : CVector3f::Zero();
+}
+
+bool VrPlayerSteers(const CStateManager& mgr, const CPlayer& player) noexcept {
+    const CCameraManager* cameras = mgr.GetCameraManager(0);
+    return mgr.GetPlayer(0) == &player && !mgr.IsMultiplayer() && !player.MouseAimAllowed(mgr) &&
+           mgr.GetGameState() == CStateManager::kGS_Running && !PlayerMovementLocked(mgr, player) &&
+           player.GetPlayerState() != nullptr && player.GetPlayerState()->IsPlayerAlive() &&
+           player.GetMorphballTransitionState() == CPlayer::kMS_Unmorphed &&
+           player.GetCameraState() == CPlayer::kCS_FirstPerson &&
+           player.GetOrbitState() == CPlayer::kOS_NoOrbit && !player.IsInTurret() && cameras != nullptr &&
+           cameras->IsInFPCamera() && !cameras->IsInCinematicCamera() && !PortFreeCam::Active();
+}
+
+void VrApplySnapTurn(CStateManager& mgr, CPlayer& player) noexcept {
+    if (mgr.GetPlayer(0) != &player) {
+        return;
+    }
+    const float degrees = VrTakeSnapTurn();
+    if (degrees == 0.f) {
+        return;
+    }
+    if (!VrPlayerSteers(mgr, player) ||
+        (player.GetGrappleState() != CPlayer::kGS_None && player.GetGrappleState() != CPlayer::kGS_Firing)) {
+        return;
+    }
+    // A positive yaw turns left; the snap's positive degrees turn right.
+    const CVector3f forward = player.GetTransform().GetForward();
+    const float yaw = std::atan2(-forward.GetX(), forward.GetY()) - degrees * (3.14159265f / 180.f);
+    player.SetTransform(CQuaternion::ZRotation(CRelAngle::FromRadians(yaw))
+                            .BuildTransform4f(player.GetTransform().GetTranslation()));
+    CCameraManager::PortCutNextUpdate();
+    VrResetCannonSmoothing();
 }
 
 } // namespace PortVr

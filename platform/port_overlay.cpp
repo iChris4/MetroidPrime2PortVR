@@ -7,6 +7,7 @@
 
 #include "port_mobile.h"
 #if defined(MP_ENABLE_OPENXR)
+#include "vr/openxr_integration.h"
 #include "vr/vr_pad.h"
 #endif
 #include "port_overlay.h"
@@ -1392,6 +1393,14 @@ void SetParticleInterpolation(bool enabled) {
 
 bool HudWide() {
   ReadEnv();
+#if defined(MP_ENABLE_OPENXR)
+  // PortVr: off while the headset runs. The HUD is head-locked there, re-projected through each
+  // eye's frustum, so it has no wide corners to reach, and the visor frame's slices are cut in mono
+  // screen columns that no longer match where the frame lands in the eyes: the helmet tore apart.
+  if (PortVr::OpenXRIsRunning()) {
+    return false;
+  }
+#endif
   return EnvBool("MP2_HUD_WIDE", sHudWide);
 }
 

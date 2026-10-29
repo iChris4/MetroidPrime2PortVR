@@ -3,6 +3,7 @@
 
 #include "port_harness.h"
 
+#include "port_console.h"
 #include "port_overlay.h"
 #include "port_timing.h"
 
@@ -10,6 +11,8 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace aurora {
@@ -89,12 +92,44 @@ void ReadShotEnv() {
                sShotAt.size());
 }
 
+// MP2_CONSOLE_AT=<update>:<command>[;<update>:<command>...] queues console commands
+// (PortConsole::Run, as `visor dark` or `give darkvisor`) at those game updates: an unattended desk
+// run on Windows, where the console socket is not available, can switch visors, give items or warp.
+std::vector< std::pair< int, std::string > > sConsoleAt;
+
+void ReadConsoleEnv() {
+  const char* value = std::getenv("MP2_CONSOLE_AT");
+  if (value == nullptr) {
+    return;
+  }
+  const std::string all(value);
+  size_t start = 0;
+  while (start < all.size()) {
+    size_t end = all.find(';', start);
+    if (end == std::string::npos) {
+      end = all.size();
+    }
+    const std::string item = all.substr(start, end - start);
+    const size_t colon = item.find(':');
+    if (colon != std::string::npos) {
+      const int at = std::atoi(item.substr(0, colon).c_str());
+      if (at > 0) {
+        sConsoleAt.emplace_back(at, item.substr(colon + 1));
+      }
+    }
+    start = end + 1;
+  }
+  std::fprintf(stderr, "[harness] MP2_CONSOLE_AT: %zu console command(s) at given game updates\n",
+               sConsoleAt.size());
+}
+
 void ReadEnvOnce() {
   if (sReadEnv) {
     return;
   }
   sReadEnv = true;
   ReadShotEnv();
+  ReadConsoleEnv();
   const char* value = std::getenv("MP2_FRAMES");
   if (value == nullptr) {
     return;
@@ -130,6 +165,13 @@ bool GameUpdate() {
     if (at == sUpdates) {
       std::fprintf(stderr, "[harness] screenshot at game update %d\n", sUpdates);
       aurora::request_screenshot();
+    }
+  }
+  for (const auto& command : sConsoleAt) {
+    if (command.first == sUpdates) {
+      std::fprintf(stderr, "[harness] console at game update %d: %s\n", sUpdates,
+                   command.second.c_str());
+      PortConsole::Run(command.second);
     }
   }
   if (sLimit == 0 || sExitRequested) {

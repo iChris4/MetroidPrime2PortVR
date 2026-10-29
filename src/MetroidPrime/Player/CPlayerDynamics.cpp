@@ -31,6 +31,7 @@
 #ifdef TARGET_PC
 #include "port_mouse.h"
 #include "port_overlay.h"
+#include "vr/vr_pad.h"
 #include "vr/vr_view.h"
 #endif
 
@@ -405,6 +406,18 @@ void CPlayer::ComputeMovement(const CFinalInput& input, CStateManager& mgr, floa
     // No leftover spin: the aim owns the body's heading while it is in charge.
     SetAngularVelocityOR(CAxisAngle::Identity());
   }
+  // PortVr: PrimedGun's directional movement (vr/vr_directional_move.h). The headset's move stick
+  // walks and strafes Samus toward where its controller points, at PrimedGun's speed and
+  // accelerations, in place of the stick's walk; the look stick still turns her and the jump is the
+  // game's. The ramp starts from the speed she carries out of the last tick.
+  PortVr::VrMove vrMove;
+  if (PortVr::VrPlayerSteers(mgr, *this)) {
+    const CVector3f vrVelocity = GetVelocityWR();
+    const float flatSpeed =
+        sqrtf(vrVelocity.GetX() * vrVelocity.GetX() + vrVelocity.GetY() * vrVelocity.GetY());
+    vrMove = PortVr::VrDirectionalMove(flatSpeed, mMovementState == NPlayer::kMS_OnGround, dt,
+                                       static_cast< uint32_t >(mgr.GetUpdateFrameIdx()));
+  }
 #else
   float turnInput = TurnInput(input, mgr);
   const float forwardInput = ForwardInput(input, turnInput);
@@ -418,6 +431,15 @@ void CPlayer::ComputeMovement(const CFinalInput& input, CStateManager& mgr, floa
       turnSpeedMultiplier = GetTweakPlayer()->GetFreeLookTurnSpeedMultiplier();
     }
   }
+#ifdef TARGET_PC
+  // PortVr: the smooth turn's rate beyond the virtual stick's full deflection (vr_look_yaw).
+  if (mgr.GetPlayer(0) == this && mOrbitState == kOS_NoOrbit && !IsMorphBallTransitioning()) {
+    const PortVr::VrPadState vrPad = PortVr::GetVrPadState();
+    if (vrPad.active && vrPad.gameplay) {
+      turnSpeedMultiplier *= vrPad.smooth_turn_speed_scale;
+    }
+  }
+#endif
   if (mOrbitState == kOS_NoOrbit ||
       (mLookButtonHeld && mOrbitState != kOS_OrbitObject && mOrbitState != kOS_Grapple)) {
     if (close_enough(turnInput, 0.f)) {
@@ -539,6 +561,13 @@ void CPlayer::ComputeMovement(const CFinalInput& input, CStateManager& mgr, floa
     strafeForce = 0.f;
   }
   if (mOrbitState == kOS_NoOrbit || mLookButtonHeld) {
+#ifdef TARGET_PC
+    // PortVr: directional movement sets the velocity below instead.
+    if (vrMove.owns) {
+      strafeForce = 0.f;
+      forwardForce = 0.f;
+    }
+#endif
     const CVector3f force = CVector3f(0.f, forwardForce, 0.f) + CVector3f(0.f, 0.f, jumpInput) +
                             CVector3f(strafeForce, 0.f, 0.f);
     ApplyForceOR(force, CAxisAngle::Identity());
@@ -587,6 +616,14 @@ void CPlayer::ComputeMovement(const CFinalInput& input, CStateManager& mgr, floa
       }
     }
   }
+#ifdef TARGET_PC
+  // PortVr: directional movement's horizontal velocity, in her frame; the vertical (gravity, the
+  // jump's force applied above) stays the game's.
+  if (vrMove.moving) {
+    const CVector3f planar = GetTransform().Rotate(CVector3f(vrMove.right, vrMove.forward, 0.f));
+    SetVelocityWR(CVector3f(planar.GetX(), planar.GetY(), GetVelocityWR().GetZ()));
+  }
+#endif
   mHitWallDuringMove = false;
   if (mAccelerationChangeTimer > 0.f) {
     mCurAcceleration = 0;

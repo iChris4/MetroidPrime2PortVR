@@ -210,6 +210,71 @@ void record_screenshot(wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubm
   });
 }
 
+// PrimedGun: AURORA_SCREENSHOT_EYES=1 saves the eyes of an immersive frame next to its screenshot
+// (screenshots/metroid-prime-<stamp>-eye<0|1>.bmp), so a desk run can check what each eye shows
+// without a headset on. Debug only: the eye images are full size.
+bool screenshot_eyes_wanted() noexcept {
+  static const bool wanted = [] {
+    const char* env = std::getenv("AURORA_SCREENSHOT_EYES");
+    return env != nullptr && env[0] != '\0' && env[0] != '0';
+  }();
+  return wanted;
+}
+
+void record_eye_screenshot(wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback>& callbacks,
+                           const gfx::StereoEyeOutput& output, uint32_t eye) {
+  const bool bgra = output.format == wgpu::TextureFormat::BGRA8Unorm ||
+                    output.format == wgpu::TextureFormat::BGRA8UnormSrgb;
+  const bool rgba = output.format == wgpu::TextureFormat::RGBA8Unorm ||
+                    output.format == wgpu::TextureFormat::RGBA8UnormSrgb;
+  if (!output.texture || (!bgra && !rgba)) {
+    Log.warn("Eye screenshot unsupported for texture format {}", magic_enum::enum_name(output.format));
+    return;
+  }
+  const uint32_t width = output.size.width;
+  const uint32_t height = output.size.height;
+  const uint32_t bytesPerRow = (width * 4 + 255) & ~255u;
+  const uint64_t byteSize = static_cast<uint64_t>(bytesPerRow) * height;
+  const wgpu::BufferDescriptor descriptor{
+      .label = "Eye screenshot readback",
+      .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead,
+      .size = byteSize,
+  };
+  auto readback = g_device.CreateBuffer(&descriptor);
+  const wgpu::TexelCopyTextureInfo src{.texture = output.texture, .origin = {0, 0, output.layer}};
+  const wgpu::TexelCopyBufferInfo dst{
+      .layout = wgpu::TexelCopyBufferLayout{.bytesPerRow = bytesPerRow, .rowsPerImage = height},
+      .buffer = readback,
+  };
+  const wgpu::Extent3D extent{width, height, 1};
+  encoder.CopyTextureToBuffer(&src, &dst, &extent);
+  callbacks.emplace_back([readback, width, height, bytesPerRow, byteSize, bgra, eye]() {
+    readback.MapAsync(
+        wgpu::MapMode::Read, 0, byteSize, wgpu::CallbackMode::AllowSpontaneous,
+        [readback, width, height, bytesPerRow, byteSize, bgra, eye](wgpu::MapAsyncStatus status, wgpu::StringView) {
+          if (status != wgpu::MapAsyncStatus::Success) {
+            return;
+          }
+          const void* pixels = readback.GetConstMappedRange(0, byteSize);
+          SDL_Surface* surface = SDL_CreateSurfaceFrom(static_cast<int>(width), static_cast<int>(height),
+                                                       bgra ? SDL_PIXELFORMAT_BGRX32 : SDL_PIXELFORMAT_RGBX32,
+                                                       const_cast<void*>(pixels), static_cast<int>(bytesPerRow));
+          if (surface != nullptr) {
+            std::error_code ec;
+            std::filesystem::create_directories("screenshots", ec);
+            const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
+            const std::string path =
+                "screenshots/metroid-prime-" + std::to_string(stamp) + "-eye" + std::to_string(eye) + ".bmp";
+            if (SDL_SaveBMP(surface, path.c_str())) {
+              Log.info("Eye screenshot saved to {}", path);
+            }
+            SDL_DestroySurface(surface);
+          }
+          readback.Unmap();
+        });
+  });
+}
+
 uint32_t clamp_scissor_coord(double value, uint32_t maximum) noexcept {
   if (!std::isfinite(value)) {
     return 0;
@@ -632,6 +697,11 @@ void end_frame(uint64_t contentTag) noexcept {
     }
     if (g_screenshotRequested.exchange(false, std::memory_order_acq_rel)) {
       record_screenshot(encoder, afterSubmitCallbacks);
+      if (screenshot_eyes_wanted() && stereoState.replayed) {
+        for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
+          record_eye_screenshot(encoder, afterSubmitCallbacks, stereoState.outputs[eye], eye);
+        }
+      }
     }
     if (skipPresent) {
       gfx::after_present();

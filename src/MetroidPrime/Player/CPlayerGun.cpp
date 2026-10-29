@@ -73,6 +73,7 @@
 #include "port_overlay.h"
 #include "port_power_charge_release.h"
 #include "port_presentation_rules.h"
+#include "vr/vr_view.h"
 #endif
 
 static const TStateMachineState< CPlayerGun >::STriggerFunction skGunTriggerFunctions[] = {
@@ -858,7 +859,12 @@ void CPlayerGun::Fidgeting(CStateManager& mgr, int message, float dt) {
     break;
   case kSM_Update:
     if (state == CFidget::kS_Loading) {
+#ifdef TARGET_PC
+      // PortVr: no idle fidget on a tracked cannon.
+      if (IsFidgetLoaded() && !PortVr::VrNoArmCannonFidget()) {
+#else
       if (IsFidgetLoaded()) {
+#endif
         EnterFidget(mgr);
       }
     } else if (state == CFidget::kS_MinorFidget || state == CFidget::kS_MajorFidget) {
@@ -1425,7 +1431,9 @@ namespace {
 // The gun's pose relative to the simulation camera (camera shake included, as Render places it).
 CTransform4f PortGunRelativePose(const CStateManager& mgr, const CCameraManager& cameraManager,
                                  const CTransform4f& gunWorldXf) {
-  return cameraManager.GetSimulationCameraTransform(mgr, true).GetQuickInverse() *
+  // PortVr: the headset's room-scale offset moves the view the gun is drawn against too.
+  return PortVr::VrRoomScaleCameraTransform(cameraManager.GetSimulationCameraTransform(mgr, true))
+             .GetQuickInverse() *
          CTransform4f::Translate(cameraManager.GetGlobalCameraTranslation(mgr, true)) * gunWorldXf;
 }
 } // namespace
@@ -1457,7 +1465,8 @@ CTransform4f CPlayerGun::PortGunView(const CStateManager& mgr,
   // world camera it would shift on screen by the camera's blend every frame. Draw it against the
   // simulation camera instead, and blend its camera-relative pose (bob, sway, recoil) from the
   // last tick's by moving the view, so the arm and muzzle effects follow.
-  const CTransform4f simView = cameraManager->GetSimulationCameraTransform(mgr, true);
+  const CTransform4f simView =
+      PortVr::VrRoomScaleCameraTransform(cameraManager->GetSimulationCameraTransform(mgr, true));
   if (t < 1.f && PortSnapshotFresh(mPortPrevGunGeneration, CActor::PortTickGeneration())) {
     CTransform4f blend = CTransform4f::Identity();
     CTransform4f cur = CTransform4f::Identity();
@@ -1479,7 +1488,13 @@ void CPlayerGun::Render(const CStateManager& mgr, const CVector3f& cameraTransla
 #endif
   const CGraphics::CProjectionState backupProjection(CGraphics::GetProjectionState());
   CGraphics::SetDepthRange(1.f / 32.f, 1.f / 8.f);
+#ifdef TARGET_PC
+  // PortVr: the model sits at PrimedGun's model offset from the tracked pose.
+  const CTransform4f gunTransform =
+      CTransform4f::Translate(cameraTranslation + PortVr::VrCannonModelOffsetWorld()) * mGunWorldXf;
+#else
   const CTransform4f gunTransform = CTransform4f::Translate(cameraTranslation) * mGunWorldXf;
+#endif
   const CTransform4f elbowTransform = gunTransform * mElbowLocalXf;
   const CGunMorph::EGunState gunState = mGunMorph.mGunState;
   const CTransform4f backupView(CGraphics::GetViewMatrix());

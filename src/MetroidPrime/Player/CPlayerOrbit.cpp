@@ -38,6 +38,10 @@
 #include "MetroidPrime/Tweaks/CTweakPlayerControls.hpp"
 #include "dolphin/os/OSCache.h"
 #include <math.h>
+#ifdef TARGET_PC
+#include "vr/vr_action_view.h"
+#include "vr/vr_view.h"
+#endif
 
 namespace {
 enum EOrbitValidationResult {
@@ -101,7 +105,12 @@ int CPlayer::ValidateCurrentOrbitTargetId(CStateManager& mgr) {
   const CVector3f orbitPosition = act->GetOrbitPosition(mgr);
   CVector3f eyeToOrbitFlat = orbitPosition - GetEyePosition();
   eyeToOrbitFlat.SetZ(0.f);
+#ifdef TARGET_PC
+  // PortVr: scan locks hold the body, so its facing does not constrain scan targets.
+  if (eyeToOrbitFlat.CanBeNormalized() && !PortVr::VrLookHoldsFacing(mgr, *this)) {
+#else
   if (eyeToOrbitFlat.CanBeNormalized()) {
+#endif
     const float angle = acosf(CMath::Limit(
         CVector3f::Dot(eyeToOrbitFlat.AsNormalized(), GetTransform().GetForward()), 1.f));
     if (mOrbitLockEstablished) {
@@ -316,6 +325,16 @@ void CPlayer::UpdateOrbitOrientation(CStateManager& mgr) {
   if (mMorphBallState != kMS_Unmorphed) {
     return;
   }
+#ifdef TARGET_PC
+  // PortVr: scan locks hold the body. Combat and grapple keep target-facing physics; their view
+  // offset is handled by CFirstPersonCamera's action view.
+  if (PortVr::VrLookHoldsFacing(mgr, *this)) {
+    if (mOrbitState == kOS_OrbitObject) {
+      SetAngularVelocityOR(CAxisAngle::Identity());
+    }
+    return;
+  }
+#endif
   switch (mOrbitState) {
   case kOS_NoOrbit:
     return;
@@ -327,7 +346,13 @@ void CPlayer::UpdateOrbitOrientation(CStateManager& mgr) {
   case kOS_OrbitCarcass:
   case kOS_ForcedOrbitObject: {
     CVector3f playerToPoint = mOrbitPoint - GetTranslation();
+#ifdef TARGET_PC
+    // PortVr: the headset's view has its own acquisition offset; the body points at the target at
+    // once instead of chasing that view's heading.
+    if (!mOrbitLockEstablished && !PortVr::VrImmersive()) {
+#else
     if (!mOrbitLockEstablished) {
+#endif
       playerToPoint = mCameraManager->GetFirstPersonCamera()->GetTransform().GetForward();
     }
     playerToPoint.SetZ(0.f);
@@ -389,6 +414,13 @@ void CPlayer::UpdateOrbitInput(const CFinalInput& input, float dt, CStateManager
   if (mInFreeLook) {
     mOrbitRequest = kOR_InvalidateTarget;
   }
+#ifdef TARGET_PC
+  // PortVr: look to scan / lock-on / grapple: measure the objects around the head's gaze for the
+  // target picks below and the scan icons (vr_view.h).
+  if (mgr.GetPlayer(0) == this) {
+    PortVr::VrLookTargetUpdate(mgr, *this);
+  }
+#endif
   UpdateOrbitableObjects(mgr);
   if (mControlMapper.GetDigitalInput(CControlMapper::kC_OrbitClose, input) ||
       mControlMapper.GetDigitalInput(CControlMapper::kC_OrbitFar, input) ||
@@ -909,7 +941,18 @@ TUniqueId CPlayer::FindBestOrbitableObject(const rstl::reserved_vector< TUniqueI
 void CPlayer::UpdateOrbitableObjects(CStateManager& mgr) {
   if (mPlayerState->GetCurrentVisor() == CPlayerState::kPV_Scan && !mgr.IsMultiplayer()) {
     if (mPlayerState->GetVisorTransitionFactor() > 0.5f) {
+#ifdef TARGET_PC
+      // PortVr: look to scan (PrimedGun's gun ray / scan target hook): the head picks the scan
+      // target, not the body camera's scan peek.
+      TUniqueId vrLookTarget = kInvalidUniqueId;
+      if (mgr.GetPlayer(0) == this && PortVr::VrLookToScanTarget(mgr, vrLookTarget)) {
+        mOrbitNextTargetId = vrLookTarget;
+      } else {
+        mOrbitNextTargetId = FindScanTargetId(mgr);
+      }
+#else
       mOrbitNextTargetId = FindScanTargetId(mgr);
+#endif
     }
     return;
   }
@@ -1000,10 +1043,23 @@ TUniqueId CPlayer::FindOrbitTargetId(CStateManager& mgr) {
     mOrbitTargetDistance = 10000.f;
     mOrbitTargetScreenDistance = 10000.f;
   }
+#ifdef TARGET_PC
+  // PortVr: look to lock-on / look to grapple: the head picks the enemies and the grapple points,
+  // each kind as its setting says; the screen box still offers the kinds the head does not pick.
+  const TUniqueId bestId = mOnScreenOrbitObjects.empty()
+                               ? kInvalidUniqueId
+                               : FindBestOrbitableObject(mOnScreenOrbitObjects, mOrbitZoneMode, mgr);
+  TUniqueId vrLookTarget = kInvalidUniqueId;
+  if (mgr.GetPlayer(0) == this && PortVr::VrLookToLockTarget(mgr, bestId, vrLookTarget)) {
+    return vrLookTarget;
+  }
+  return bestId;
+#else
   if (mOnScreenOrbitObjects.empty()) {
     return kInvalidUniqueId;
   }
   return FindBestOrbitableObject(mOnScreenOrbitObjects, mOrbitZoneMode, mgr);
+#endif
 }
 
 // Guessed name
@@ -1382,6 +1438,17 @@ void CPlayer::SetOrbitTargetId(TUniqueId target, const CStateManager& mgr) {
 }
 
 void CPlayer::SetOrbitState(EPlayerOrbitState state, const CStateManager& mgr) {
+#ifdef TARGET_PC
+  // PortVr: a lost combat target releases its orbit too, so the action view's release restores
+  // the body's movement basis even while the lock button stays held.
+  if (mgr.GetPlayer(0) == this &&
+      PortVr::ActionView::ReleaseLostTarget(
+          PortVr::VrImmersive(), mPlayerState->GetCurrentVisor() == CPlayerState::kPV_Scan,
+          mOrbitState == kOS_OrbitObject || mOrbitState == kOS_ForcedOrbitObject,
+          state == kOS_OrbitCarcass || state == kOS_OrbitPoint)) {
+    state = kOS_NoOrbit;
+  }
+#endif
   mOrbitState = state;
   mOrbitOcclusionTimer = 0.f;
   CFirstPersonCamera* camera = mCameraManager->FirstPersonCamera();

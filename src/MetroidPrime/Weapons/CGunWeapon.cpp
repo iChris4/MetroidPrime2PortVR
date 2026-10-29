@@ -28,6 +28,9 @@
 #include "MetroidPrime/Tweaks/CTweakPlayerGun.hpp"
 #include "MetroidPrime/Weapons/CEnergyProjectile.hpp"
 #include "MetroidPrime/Weapons/GunController/CGunController.hpp"
+#ifdef TARGET_PC
+#include "MetroidPrime/CRumbleManager.hpp"
+#endif
 #include "MetroidPrime/Weapons/WeaponSound.hpp"
 #include "Weapons/CWeaponDescription.hpp"
 
@@ -436,6 +439,10 @@ void CGunWeapon::Fire(const TCachedToken< CWeaponDescription >& projectile, bool
   if (chargeState != CPlayerState::kCS_Normal && (projectileAttributes & 0x800000) == 0) {
     mEnableCharge = true;
     const CCameraShakerData shaker = gpTweakPlayerGunSingle->GetRecoilCameraShakerData();
+#ifdef TARGET_PC
+    // PortVr: in the headset the recoil is a pulse on the gun hand, not a view shake.
+    if (!CRumbleManager::PortVrRecoil(mgr, GetPlayerFromAll(mgr)))
+#endif
     GetPlayerFromAll(mgr)->CameraManager()->CameraShakerManager()->AddCameraShaker(shaker, mgr,
                                                                                    false, false);
   }

@@ -232,6 +232,17 @@ bool VrLookToLockTarget(const CStateManager& mgr, TUniqueId gamePick, TUniqueId&
 // target-facing physics; CFirstPersonCamera separately preserves the view's
 // acquisition angle, without feeding tracked head turns back into the body.
 bool VrLookHoldsFacing(const CStateManager& mgr, const CPlayer& player) noexcept;
+// PrimedGun Echoes (CPlayer::PortVrPlayerSteers and PortVrSnapTurn in the Metroid Prime port):
+// player 0 steers Samus on foot in first person, with no orbit lock and nothing holding the
+// controls. The headset's own movement (the snap turn, directional movement) reads the controllers
+// directly rather than the pad, which the game blanks for a disabled input, so it checks the same
+// things itself; direct aim, when it owns the facing, and the debug free camera take precedence.
+bool VrPlayerSteers(const CStateManager& mgr, const CPlayer& player) noexcept;
+// The snap turn, from CPlayer::Think: a flick of the look stick (vr_pad.cpp) turns her by the snap
+// turn angle at once; the camera's frame blend and the cannon's smoothing are cut so the view
+// jumps rather than sweeps. Only when she could turn by hand: in a lock or a grapple the game sets
+// her facing.
+void VrApplySnapTurn(CStateManager& mgr, CPlayer& player) noexcept;
 // The rendered model's offset from the tracked pose (PrimedGun's model offset
 // and its base forward offset), in world units; zero when not tracked.
 CVector3f VrCannonModelOffsetWorld() noexcept;

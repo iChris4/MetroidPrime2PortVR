@@ -28,6 +28,9 @@
 #include "Collision/CRayCastResult.hpp"
 #include "Kyoto/Particles/CVectorElement.hpp"
 #include "Weapons/CWeaponDescription.hpp"
+#ifdef TARGET_PC
+#include "MetroidPrime/CRumbleManager.hpp"
+#endif
 
 static const ushort skComboSoundIds[2][4] = {
     {SFXsam_a_co1fire_00_oneshot, SFXsam_a_drkcofire_00_oneshot, SFXsam_a_litcofire_00_oneshot,
@@ -188,6 +191,10 @@ void CAuxWeapon::FireProjectile(float dt, EWeaponType type, bool underwater, boo
   }
 
   if (!(attributes & skSuppressFireEffectsAttribute)) {
+#ifdef TARGET_PC
+    // PortVr: in the headset the recoil is a pulse on the gun hand, not a view shake.
+    if (!CRumbleManager::PortVrRecoil(mgr, player))
+#endif
     player->CameraManager()->CameraShakerManager()->AddCameraShaker(
         gpTweakPlayerGunSingle->GetProjectileRecoilCameraShakerData(), mgr, false, false);
     if (isCombo) {
@@ -219,6 +226,10 @@ void CAuxWeapon::FireLightCombo(float dt, bool underwater, int comboId, uint att
     projectile->Think(dt, mgr);
   }
 
+#ifdef TARGET_PC
+  // PortVr: in the headset the recoil is a pulse on the gun hand, not a view shake.
+  if (!CRumbleManager::PortVrRecoil(mgr, player))
+#endif
   player->CameraManager()->CameraShakerManager()->AddCameraShaker(
       gpTweakPlayerGun->GetProjectileRecoilCameraShakerData(), mgr, false, false);
   projectile->SetCameraShakerData(gpTweakPlayerGun->GetProjectileImpactCameraShakerData());

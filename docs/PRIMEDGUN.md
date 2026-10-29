@@ -9,6 +9,48 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Game hooks, part 2: cannon, controls, look targeting, visors (2026-10-29)
+
+Same rules as part 1 (TARGET_PC, strip-diff CLEAN, `MP2_VR=0` pixel-identical, player 0 only).
+
+- Cannon: `CPlayer::UpdateGunTransform` places the gun at `VrCannonTransform` in every holster
+  state (`mGun->SetTransform`, Echoes' holster lift lives in `CPlayerGunBase::UpdateTransform` and
+  is skipped), then the aim prediction and the assist. `CPlayerGun::Render` adds
+  `VrCannonModelOffsetWorld`; its gun view (`PortGunView`) and relative pose use the room-scale
+  view; no idle fidget (`VrNoArmCannonFidget`). Left-hand mirroring is not done yet.
+- Recoil and rumble: `CRumbleManager` (TARGET_PC) has two more generators, ports 1 and 2, for the
+  cannon's and the grapple's effects while the VR controllers own port 0 (handle bits 4-5 name
+  the generator); `PortVrRecoil` replaces the recoil camera shakers of `CGunWeapon::Fire`,
+  `CAnnihilatorBeam`, `CAuxWeapon::FireProjectile` and `FireLightCombo` with a gun-hand pulse.
+- Controls: `VrPlayerSteers` and `VrApplySnapTurn` live in `vr_view.cpp` (Echoes delta; the
+  Metroid Prime port has them as CPlayer members). `CPlayer::Think` runs the snap turn;
+  `ComputeMovement` takes directional movement (`VrDirectionalMove`, default on: the pad then
+  leaves the sideways stick to it) and the smooth turn's rate.
+- Look targeting: `CPlayer::UpdateOrbitInput` runs `VrLookTargetUpdate` before Echoes'
+  `UpdateOrbitableObjects`, which takes `VrLookToScanTarget` in the scan visor instead of the scan
+  peek (`FindScanTargetId`) and `VrLookToLockTarget` in `FindOrbitTargetId`; a head-picked scan
+  lock holds the body (`ValidateCurrentOrbitTargetId`, `UpdateOrbitOrientation`); the body points
+  at a lock at once in the headset; `SetOrbitState` releases a lost target (`ReleaseLostTarget`).
+- Reticles: they face the head (`VrHeadViewRotation`); the crosshair shows all the time in the
+  headset and sits on the cannon ray's hit (`VrCannonTargetPoint`), with Echoes' Remastered
+  cursor or the GameCube model; `CalculateClampedScale` measures from the head.
+- Scan window (`CPlayerVisor::DrawScanEffect`): copy and pane `HEAD_LOCKED_2D`, dim `FULLSCREEN`,
+  back to `HEAD_LOCKED`; `vr_scan_zoom` off copies the pane's own size.
+- The wide HUD is off while the headset runs (`PortOverlay::HudWide`): its slices tore the helmet.
+
+Checked on the desk (SteamVR, PSVR2 lying on the desk, so the eyes look elsewhere than the body
+camera): Dark Visor, Echo Visor, the scan visor's palette highlight and window, and the dark world
+filter (Dark Agon, `MP2_WORLD="42b935e4,01_sand_entrance_dark"`) render in each eye from that eye's
+view. Not checked: anything worn (scale, cannon offsets for Echoes' model, the helmet's look: its
+top and bottom bands end short of the eye's field, comfort).
+
+Tools for desk checks:
+
+- `AURORA_SCREENSHOT_EYES=1` (aurora.cpp): a screenshot of a replayed immersive frame also saves
+  both eye images (`screenshots/metroid-prime-<stamp>-eye<0|1>.bmp`, full size).
+- `MP2_CONSOLE_AT=<update>:<command>[;...]` (port_harness.cpp): console commands at given game
+  updates (`give darkVisor`, `visor dark`, `warp ...`), since the console socket is off on Windows.
+
 ## Game hooks, part 1: cameras, culling, HUD routes, sky, fog (2026-10-29)
 
 Every hook sits in `#ifdef TARGET_PC` with the retail text under `#else`; `strip_diff.py master`
