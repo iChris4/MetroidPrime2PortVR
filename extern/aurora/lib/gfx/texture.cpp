@@ -185,6 +185,9 @@ TextureHandle new_static_texture_2d(uint32_t width, uint32_t height, uint32_t mi
     }
     offset += dataSize;
   }
+  if (!webgpu::g_hasCoreFeatures && format_info(ref.format).compressed) {
+    ref.cpuBytes = std::make_shared<const std::vector<uint8_t>>(data.data(), data.data() + offset);
+  }
   if (data.size() != UINT32_MAX && offset < data.size()) {
     Log.warn("new_static_texture_2d[{}]: texture used {} bytes, but given {} bytes", label, offset, data.size());
   }
@@ -324,6 +327,24 @@ TextureHandle new_conv_texture(uint32_t width, uint32_t height, u32 gxFormat, co
                                       intern_label(label));
 }
 
+const wgpu::TextureView& array_texture_view(TextureRef& ref) noexcept {
+  if (!ref.arrayTextureView && ref.texture) {
+    wgpu::TextureViewDescriptor descriptor{
+        .label = "Multiview array view",
+        .format = ref.format,
+        .dimension = wgpu::TextureViewDimension::e2DArray,
+        .mipLevelCount = std::max(ref.mipCount, 1u),
+        .arrayLayerCount = 1,
+    };
+    wgpu::TextureComponentSwizzleDescriptor swizzle;
+    if (setup_swizzle(swizzle, ref.gxFormat)) {
+      descriptor.nextInChain = &swizzle;
+    }
+    ref.arrayTextureView = ref.texture.CreateView(&descriptor);
+  }
+  return ref.arrayTextureView;
+}
+
 void write_texture(TextureRef& ref, ArrayRef<uint8_t> data) noexcept {
   ZoneScoped;
 
@@ -365,6 +386,9 @@ void write_texture(TextureRef& ref, ArrayRef<uint8_t> data) noexcept {
       g_queue.WriteTexture(&dstView, data.data() + offset, dataSize, &dataLayout, &physicalSize);
     }
     offset += dataSize;
+  }
+  if (!webgpu::g_hasCoreFeatures && format_info(ref.format).compressed) {
+    ref.cpuBytes = std::make_shared<const std::vector<uint8_t>>(data.data(), data.data() + offset);
   }
   if (data.size() != UINT32_MAX && offset < data.size()) {
     Log.warn("write_texture: texture used {} bytes, but given {} bytes", offset, data.size());

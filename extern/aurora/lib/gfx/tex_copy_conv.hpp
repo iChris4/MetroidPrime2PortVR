@@ -5,6 +5,7 @@
 #include <dolphin/gx/GXEnum.h>
 
 #include <array>
+#include <string_view>
 
 namespace aurora::gfx::tex_copy_conv {
 
@@ -56,7 +57,11 @@ void shutdown();
 void run(const wgpu::CommandEncoder& cmd, const ConvRequest& req);
 void blit(const wgpu::CommandEncoder& cmd, const ConvRequest& req);
 
-bool snapshot_depth_supported() noexcept;
+// Compatibility: WGSL defining mp_depth_load(texture_depth_2d, sampler_comparison, vec2i) -> f32, the exact
+// equivalent of textureLoad(t, px, 0) for a depth texture (the sampler must be Nearest with compare LessEqual).
+std::string_view compat_depth_load_wgsl() noexcept;
+
+bool snapshot_depth_supported(uint32_t msaaSamples = 1) noexcept;
 void snapshot_depth(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& srcDepth, uint32_t msaaSamples,
                     const wgpu::TextureView& dst);
 

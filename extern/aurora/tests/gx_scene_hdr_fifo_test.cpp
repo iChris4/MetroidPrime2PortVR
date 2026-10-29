@@ -115,12 +115,12 @@ TEST_F(GXSceneHdrFifoTest, RepeatedRequestIsDeduplicated) {
 
 TEST_F(GXSceneHdrFifoTest, InvalidValueIsIgnored) {
   g_gxState.dirty = 0;
-  decode_fifo(command(2));
+  decode_fifo(command(3));
   EXPECT_FALSE(aurora::gfx::g_testSceneHdr);
   EXPECT_EQ(aurora::gfx::g_testSceneHdrSwitches, 0u);
   EXPECT_EQ(g_gxState.dirty & aurora::gx::DirtyPipeline, 0u);
   // The stream stays in sync: the next command still decodes.
-  auto bytes = command(2);
+  auto bytes = command(3);
   const auto next = command(1);
   bytes.insert(bytes.end(), next.begin(), next.end());
   decode_fifo(bytes);
@@ -134,6 +134,16 @@ TEST_F(GXSceneHdrFifoTest, UnsupportedDeviceWritesNothing) {
   // Turning it off is always encoded.
   EXPECT_TRUE(GXPortSceneHdr(GX_FALSE));
   EXPECT_EQ(capture_fifo(), command(0));
+}
+
+TEST_F(GXSceneHdrFifoTest, PauseRequestEncodesAndIsNeverDeduplicated) {
+  EXPECT_TRUE(GXPortPauseSceneHdr());
+  EXPECT_EQ(capture_fifo(), command(2));
+  decode_fifo(command(2));
+  EXPECT_TRUE(aurora::gfx::g_testSceneHdr);
+  const auto switches = aurora::gfx::g_testSceneHdrSwitches;
+  decode_fifo(command(2));
+  EXPECT_EQ(aurora::gfx::g_testSceneHdrSwitches, switches + 1);
 }
 
 TEST_F(GXSceneHdrFifoTest, DrawIdModeRefusesIt) {
@@ -542,7 +552,7 @@ TEST_F(GXCopySceneFifoTest, DisplayCopiesKeepTheirOldMips) {
 }
 
 // GXPortPostProcessScene is the end of the HDR scene: it always reaches the command processor, even
-// with nothing to do (the scene still has to be converted), where plain GXPortPostProcess writes nothing.
+// with nothing to do (the scene still has to be converted).
 class GXPostProcessSceneFifoTest : public GXSceneHdrFifoTest {
 protected:
   void SetUp() override {
@@ -564,9 +574,6 @@ protected:
 TEST_F(GXPostProcessSceneFifoTest, NothingToDoStillRecordsTheSceneOne) {
   using namespace aurora::gfx::bloom;
   namespace stub = aurora::gfx::bloom::testing;
-  EXPECT_TRUE(GXPortPostProcess(GX_FALSE, 1.f, Tints, Tone, 0, 0, 0.f, 0.f));
-  EXPECT_TRUE(capture_fifo().empty());
-
   const u32 serial = GXPortCopySerial();
   EXPECT_TRUE(GXPortPostProcessScene(GX_FALSE, 1.f, Tints, Tone, 0, 0, 0.f, 0.f));
   EXPECT_NE(GXPortCopySerial(), serial);
@@ -574,7 +581,7 @@ TEST_F(GXPostProcessSceneFifoTest, NothingToDoStillRecordsTheSceneOne) {
   ASSERT_FALSE(bytes.empty());
   decode_fifo(bytes);
   ASSERT_EQ(stub::records, 1u);
-  EXPECT_EQ(stub::lastRecord.bloom, ForceScene);
+  EXPECT_EQ(stub::lastRecord.bloom, 0u);
   EXPECT_EQ(stub::lastRecord.gradeA, 0u);
   EXPECT_FLOAT_EQ(stub::lastRecord.tone[0][3], 0.f);
   // The tone curve still travels: the HDR composite converts with it.
@@ -582,30 +589,26 @@ TEST_F(GXPostProcessSceneFifoTest, NothingToDoStillRecordsTheSceneOne) {
   EXPECT_FLOAT_EQ(stub::lastRecord.tone[2][3], Tone[2][3]);
 }
 
-TEST_F(GXPostProcessSceneFifoTest, CarriesTheEffectsOfThePlainPost) {
+TEST_F(GXPostProcessSceneFifoTest, CarriesTheEffects) {
   using namespace aurora::gfx::bloom;
   namespace stub = aurora::gfx::bloom::testing;
-  EXPECT_TRUE(GXPortPostProcess(GX_TRUE, 0.6f, Tints, Tone, 3, 4, 0.25f, 0.5f));
-  decode_fifo(capture_fifo());
-  ASSERT_EQ(stub::records, 1u);
-  const Params plain = stub::lastRecord;
-  EXPECT_EQ(plain.bloom & ForceScene, 0u);
-
   EXPECT_TRUE(GXPortPostProcessScene(GX_TRUE, 0.6f, Tints, Tone, 3, 4, 0.25f, 0.5f));
   decode_fifo(capture_fifo());
-  ASSERT_EQ(stub::records, 2u);
-  Params scene = stub::lastRecord;
-  EXPECT_EQ(scene.bloom, plain.bloom | ForceScene);
-  scene.bloom = plain.bloom;
-  EXPECT_EQ(std::memcmp(&scene, &plain, sizeof(Params)), 0);
+  ASSERT_EQ(stub::records, 1u);
+  const Params& scene = stub::lastRecord;
+  EXPECT_NE(scene.bloom & 1u, 0u);
+  EXPECT_FLOAT_EQ(scene.threshold, 0.6f);
+  EXPECT_EQ(scene.gradeA, 3u);
+  EXPECT_EQ(scene.gradeB, 4u);
+  EXPECT_FLOAT_EQ(scene.gradeWeight, 0.25f);
+  EXPECT_FLOAT_EQ(scene.tone[1][0], Tone[1][0]);
+  EXPECT_FLOAT_EQ(scene.tone[2][3], Tone[2][3]);
 }
 
 TEST_F(GXPostProcessSceneFifoTest, NoPostCostTestKeepsTheConversion) {
   using namespace aurora::gfx::bloom;
   namespace stub = aurora::gfx::bloom::testing;
   GXSetPBRCostTest(10);
-  EXPECT_TRUE(GXPortPostProcess(GX_TRUE, 0.6f, Tints, Tone, 3, 4, 0.25f, 0.5f));
-  EXPECT_TRUE(capture_fifo().empty());
   EXPECT_TRUE(GXPortPostProcessScene(GX_TRUE, 0.6f, Tints, Tone, 3, 4, 0.25f, 0.5f));
   decode_fifo(capture_fifo());
   ASSERT_EQ(stub::records, 1u);
@@ -613,7 +616,6 @@ TEST_F(GXPostProcessSceneFifoTest, NoPostCostTestKeepsTheConversion) {
   EXPECT_EQ(stub::lastRecord.gradeA, 0u);
   EXPECT_EQ(stub::lastRecord.gradeB, 0u);
   EXPECT_FLOAT_EQ(stub::lastRecord.tone[0][3], 0.f);
-  EXPECT_NE(stub::lastRecord.bloom & ForceScene, 0u);
 }
 
 TEST_F(GXPostProcessSceneFifoTest, LeavingTheHdrSceneDirtiesThePipeline) {

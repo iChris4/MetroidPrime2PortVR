@@ -70,7 +70,29 @@ if (AURORA_ENABLE_GX)
             lib/webgpu/gpu_prof.cpp
             lib/dawn/BackendBinding.cpp
             lib/dawn/TracyPlatform.cpp
+            lib/gfx/stereo_eyes.cpp
+            lib/gfx/stereo_foveation.cpp
+            lib/gfx/stereo_multiview.cpp
+            lib/gfx/stereo_shadow.cpp
+            lib/stereo_host.cpp
+            lib/stereo_overlay.cpp
     )
+    if (CMAKE_SYSTEM_NAME STREQUAL Windows)
+        # The OpenXR D3D12 stereo bridge (zero-readback eye copies on Dawn's queue).
+        target_sources(aurora_core PRIVATE lib/webgpu/d3d12_interop.cpp)
+        target_link_libraries(aurora_core PRIVATE d3d12 dxgi)
+    endif ()
+    # The OpenXR Vulkan stereo bridge for the Quest (eyes shared through
+    # AHardwareBuffers, ordered by sync fds). It compiles to stubs elsewhere.
+    target_sources(aurora_core PRIVATE lib/webgpu/vulkan_interop.cpp)
+    # Direct presentation for the Quest with PrimedGun's patched Dawn (the eyes copied straight
+    # into the runtime's swapchain images on Dawn's queue). Stubs elsewhere.
+    target_sources(aurora_core PRIVATE lib/webgpu/vulkan_direct_interop.cpp)
+    # Fragment density maps for foveated eye rendering, through the same patched Dawn. Stubs elsewhere.
+    target_sources(aurora_core PRIVATE lib/webgpu/fdm.cpp)
+    if (ANDROID)
+        target_link_libraries(aurora_core PRIVATE android)
+    endif ()
     if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
         set_source_files_properties(lib/dawn/TracyPlatform.cpp PROPERTIES COMPILE_FLAGS -fno-rtti)
     endif ()

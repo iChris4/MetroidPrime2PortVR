@@ -1,6 +1,7 @@
 #include "shader_info.hpp"
 
 #include "../gfx/recording.hpp"
+#include "../gfx/stereo_uniform.hpp"
 
 #include <cmath>
 
@@ -371,6 +372,10 @@ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
     // linear light colours, then 3 HDR rows per light, then shield 8, the lightmap 4, the room lights and the model
     // modulation (diffuse, incandescence, coverage)
     info.uniformSize += sizeof(Mat3x4<float>) + sizeof(Vec4<float>) * (27 + GX::MaxLights * 4 + 8 + 4 + 1 + 3);
+    if (config.pbrThermal) {
+      info.usesPbrThermal = true;
+      info.uniformSize += sizeof(Vec4<float>);
+    }
   } else if (config.sceneHdr) {
     // The TEV inverse tone curve and actual-blend compatibility flag (PBR reads pbr_tone).
     info.usesHdrTone = true;
@@ -379,6 +384,22 @@ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
   if (config.hudSample >= 2) {
     info.usesHudDyin = true;
     info.uniformSize += sizeof(Vec4<float>);
+  }
+  if (config.clipPlane) {
+    info.usesClipPlane = true;
+    info.uniformSize += sizeof(Vec4<float>);
+  }
+  if (config.shell != 0) {
+    // CCH0..CCH4, (time, depth shift, TCH0 sRGB, 0), (1 / target size), then the tone curve
+    // (pbrTone); the colour pass samples TCH0
+    // and TCH1 on maps 0 and 1 and the scene copy on map 2 (bound by build_bind_groups).
+    info.usesShell = true;
+    info.uniformSize += sizeof(g_gxState.shellUniform) + sizeof(g_gxState.pbrTone);
+    if (config.shell == 2) {
+      info.shellScene = true;
+      info.sampledTextures.set(GX_TEXMAP0);
+      info.sampledTextures.set(GX_TEXMAP1);
+    }
   }
   if (info.usesPTTexMtx.any()) {
     info.uniformSize += sizeof(Mat3x4<float>) * MaxPTTexMtx;
@@ -549,6 +570,9 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
     buf.append(g_gxState.pbrModelDiffuse);
     buf.append(g_gxState.pbrModelIncan);
     buf.append(g_gxState.pbrModelCoverage);
+    if (info.usesPbrThermal) {
+      buf.append(g_gxState.pbrThermal);
+    }
   }
   if (info.usesHdrTone) {
     for (const auto& v : g_gxState.pbrTone) {
@@ -575,6 +599,18 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
   }
   if (info.usesHudDyin) {
     buf.append(g_gxState.hudDyin);
+  }
+  if (info.usesClipPlane) {
+    buf.append(g_gxState.clipPlaneEq);
+  }
+  if (info.usesShell) {
+    for (const auto& v : g_gxState.shellUniform) {
+      buf.append(v);
+    }
+    // shell_tone: the curve the LDR colour pass decodes the scene copy with (shader.cpp).
+    for (const auto& v : g_gxState.pbrTone) {
+      buf.append(v);
+    }
   }
   if (info.usesPTTexMtx.any()) {
     for (int i = 0; i < info.usesPTTexMtx.size(); ++i) {
@@ -633,7 +669,8 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
 gfx::Range build_uniform(const ShaderInfo& info) noexcept {
   ZoneScoped;
   // Filled in place in the frame's uniform buffer, inside a MaxUniformSize window (build_shader_info
-  // refuses anything larger), then trimmed to what was written.
+  // refuses anything larger), then trimmed to what was written. This overload stages no eye copies and
+  // keeps no snapshot: both need the uniform's CPU-side bytes (the overload below).
   uint8_t* out = nullptr;
   auto range = gfx::map_uniform(out);
   if (out == nullptr) {
@@ -642,6 +679,43 @@ gfx::Range build_uniform(const ShaderInfo& info) noexcept {
   ByteBuffer buf{out, MaxUniformSize};
   fill_uniform(buf, info);
   gfx::unmap_uniform(range, buf.size());
+  return range;
+}
+
+bool uniform_matches(const ShaderInfo& info, const ByteBuffer& snapshot) noexcept {
+  if (snapshot.size() == 0) {
+    return false;
+  }
+  static ByteBuffer candidate;
+  candidate.clear();
+  fill_uniform(candidate, info);
+  return candidate.size() == snapshot.size() && std::memcmp(candidate.data(), snapshot.data(), snapshot.size()) == 0;
+}
+
+// PrimedGun: if this overload ever fills the frame's buffer in place like the one above, gfx::unmap_uniform
+// must trim the range before gfx::stage_stereo_uniforms runs: the MultiviewClip eye clips have to land at
+// the mono uniform's aligned end, which stage_stereo_uniforms checks, and the stereo layout takes the
+// range's size. The eye copies and the snapshot must still be read from CPU-side bytes.
+gfx::Range build_uniform(const ShaderInfo& info, std::array<uint32_t, 2>& stereoUniformOffsets,
+                         ByteBuffer* snapshot) noexcept {
+  ZoneScoped;
+  // The eye copies and the snapshot uniform_matches compares are read from CPU-side bytes: the frame's
+  // uniform buffer is write-mapped memory, which is slow to read back, so this overload doesn't fill it
+  // in place. The uniform is filled straight into the snapshot when there is one (no copy for it) and
+  // copied into the frame's buffer once.
+  static ByteBuffer scratch;
+  ByteBuffer& buf = snapshot != nullptr ? *snapshot : scratch;
+  buf.clear();
+  fill_uniform(buf, info);
+  const auto range = gfx::push_uniform(buf.data(), buf.size());
+  auto layout = gfx::StereoUniformLayout::for_gx(info.lineMode, info.lightingEnabled,
+                                                 static_cast<uint32_t>(info.loadsTevReg.count()), range.size);
+  // Vertices without a matrix index all take the current position matrix
+  // (shader.cpp), so only that one needs its eye copies.
+  if (!info.indexAttr.test(GX_VA_PNMTXIDX)) {
+    layout.fixedPositionSlot = static_cast<int32_t>(g_gxState.currentPnMtx);
+  }
+  stereoUniformOffsets = gfx::stage_stereo_uniforms(buf.data(), range, layout);
   return range;
 }
 } // namespace aurora::gx

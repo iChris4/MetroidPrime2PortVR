@@ -77,7 +77,7 @@ struct Uniform {
   float soft[4];    // DepthSoften: the viewport's depth range (min, max) and whether the scene depth is bound
   float scene[4];   // SceneWarp: 1 / the copied target's size (x, y), the camera's near plane, whether the colour is bound
   // IceCharge*: CCH0..6 (IceChargeBeam: 0..2) and, at [7], the modular simulation time; VisorRunOff:
-  // CCH0..4. Rows past the recipe's stay zero.
+  // CCH0..4; VisorSteam: CCH0..4; BarrierShield and BarrierGlow: CCH0. Rows past the recipe's stay zero.
   float ice[8][4];
   // IceChargeCollisionLit: AMBS (ambient), the probe's mean, its lobe, then (view-space direction,
   // 1 + 2 * sharpness) per colour channel, and BLCM. These are the 7 vec4f of padding the uniform
@@ -156,6 +156,8 @@ struct State_ {
     bool hdr = false;
     wgpu::TextureView depth; // the pass snapshot pool's (null: the device can't snapshot depth)
     TextureHandle color;
+    wgpu::TextureView level0; // color's top level alone, what a copy without mips samples
+    bool mips = true;         // the latest copy is the primary one (flags 3), not a second (flags 1)
   };
   std::array<SceneCopy, detail::FrameSlotCount> scene;
 };
@@ -251,6 +253,8 @@ struct VIn {
   @location(8) nrm: vec3f,
   @location(9) uv2: vec3f,
   @location(10) tan: vec4f,
+  // BarrierShield: the mesh's own vertex colour (Vertex::mesh), next to the instance colour at 3.
+  @location(11) mesh: vec4f,
 }
 struct VOut {
   @builtin(position) pos: vec4f,
@@ -267,6 +271,7 @@ struct VOut {
   @location(10) sw: f32,
   @location(11) tan: vec4f,
   @location(12) vp: vec3f,
+  @location(13) mesh: vec4f,
 }
 
 @vertex
@@ -285,10 +290,19 @@ fn vs_main(in: VIn) -> VOut {
   out.nrm = in.nrm;
   out.vz = mv.z;
   out.tan = in.tan;
+  out.mesh = in.mesh;
   out.vp = mv;
   if ((FEAT & 32768u) != 0u) {
-    // SceneWarp: the warp's perspective scale, near / view distance (the VS's o3.x = vp_c4[0].w / -viewZ).
+    // SceneWarp: the warp's perspective scale, near / view distance (the VS's o3.x =
+    // vp_c4[0].w / -viewZ).
     out.sw = u.scene.z / -mv.z;
+  }
+  if ((FEAT & (268435456u | 262144u)) != 0u) {
+    // VisorRain (and FrameBufferColorErosion's o3.x): o6.x = game near / HUD view depth. Remastered draws HUD billboards in the HUD
+    // camera at basewidget_visorFX (FRME_BaseHud z -2.2311, eye at the origin: the scale
+    // 0xcb0ef8 fills the frustum there); the port scales that scene by (near + 0.01) / 2.2311
+    // onto GetNearClipDistance, so map its depth back (kb topic/hud-billboard-visor-draw).
+    out.sw = u.scene.z * (u.scene.z + 0.01) / (2.2311 * -mv.z);
   }
   if ((FEAT & 2097152u) != 0u || (FEAT & 33554432u) != 0u) {
     // IceChargeCollision: the refraction's perspective scale, min(|INDP.w / -viewZ|, 0.2) (VS o5.x / o6.x).
@@ -606,6 +620,197 @@ R"(    let nm = sample_raw(S_NORMAL, uv2, 0).xy;
     } else {
       rgb = ((tint + c1.x * (vec3f(1.0) - tint)) * fb + glow) * fade * vc.rgb * M;
     }
+  } else if ((FEAT & 268435456u) != 0u) {
+    // VFX_VisorRain (0ec41df0, FS perm 000; vfx/0ec41df0.md section 3): the visor's rain splash.
+    // TCH0 is a two-channel noise map, read twice: at a per-particle patch (PMTR row 0's xy offset,
+    // scaled by CCH0.y) and at the texel the roundEven sample lands on over the whole quad (p and q
+    // are in [-0.125, 0.625], so round(p - 0.25) is always 0). The patch's channels warp a sum of two
+    // sines, and the constant sample shrinks it as PMTR row 0's z (the lifetime fade, times
+    // 0.355/0.365) grows into H. 0.5 < H < 1 is inside the drop: its height Z gives the normal n
+    // (each axis' cosine, Z kept as the unnormalised height) that offsets the scene copy at the
+    // fragment by (1 - fade) x CCH0.w x near / view depth (v down: the y offset negates), and f =
+    // Z^4 x 10 + 0.75 + 0.25 x fade is the edge darkening. Elsewhere alpha is 0 and the fragment is
+    // discarded. The bigger drops ("runners": row 1's y < CCH0.z, size row 1's w > row 2's y) slide
+    // the pattern down by min(2 x row 1's x, 0.5) x 0.33, narrow the mask and take their own fade
+    // (row 1's z; row 0's z otherwise). M is PCMD.x. x stays the instance alpha.
+    let c = u.ice0;
+    let R0 = in.e0;
+    let R1 = in.e1;
+    let uvs = uv_of(in, u.uvSets[max(S_COLOR, 0)]);
+    let qu = sat(uvs.x);
+    var qv = sat(uvs.y);
+    let runner = R1.y < c.z && R1.w > in.e2.y;
+    if (runner) { qv = qv + min(2.0 * R1.x, 0.5) * 0.33; }
+    let p = qu * 0.75 - 0.125;
+    let q = qv * 0.75 - 0.125;
+    let lay = layer(uvs.z, u.layers[max(S_COLOR, 0)]);
+    let n1 = sample_raw(S_COLOR, vec2f(p * c.y + R0.x, q * c.y + R0.y), lay).xy;
+    let n2 = sample_raw(S_COLOR, vec2f(round(p - 0.25), round(q - 0.25)), lay).xy;
+    let sa = p * 6.28318530718 + (n1.x - 0.5) * 2.0 * c.x * R0.w;
+    let sb = q * 6.28318530718 + (n1.y - 0.5) * 2.0 * c.x * R0.w;
+    let ca = cos(sa);
+    let cb = cos(sb);
+    var sn = sin(sa) + sin(sb);
+    if (runner) {
+      // The runner's closing window: the sides and the top and bottom come in with row 1's x.
+      sn = sn * select(0.0, 1.0, qu > 0.25 * R1.x && qu < 1.0 - 0.25 * R1.x) *
+          select(0.0, 1.0, abs(qv) > 0.1 * R1.x && abs(qv) < 1.0 - 0.1 * R1.x);
+    }
+    let k = select(0.365, 0.355, runner);
+    let H = sat(max(0.0, 1.0 - sat(max(n2.x, 0.02) * (R0.z * k) + n2.y - 0.175)) * sn);
+    var Z = 0.0;
+    var nn = vec2f(0.0);
+    if (H > 0.5 && H < 1.0) {
+      Z = (H - 0.5) * 1.8 + 0.1;
+      let e = vec3f(-sign(ca) * ca * ca, -sign(cb) * cb * cb, Z);
+      nn = -(normalize(e).xy);
+    }
+    let g = select(R0.z, R1.z, runner);
+    let T = (1.0 - g) * c.w * in.sw;
+    var fb = vec3f(0.0);
+    if (u.scene.w > 0.5) {
+      // v down: the copy's y offset negates. The copy is exposed, so x the inverse exposure.
+      let fbuv = vec2f(in.pos.x * u.scene.x + T * nn.x, in.pos.y * u.scene.y - T * nn.y);
+      var ie = 1.0;
+      if (u.tone1.x > 0.0 && u.tone0.w > 0.0) { ie = 1.0 / u.tone0.w; }
+      fb = scene_light(textureSampleLevel(sceneColor, sceneSampler, fbuv, 0.0).rgb) * ie;
+    }
+    let f = sat(Z * Z * Z * Z * 10.0 + (0.75 + 0.25 * g) * select(0.0, 1.0, Z > 0.0));
+    rgb = f * fb * vc.rgb * M;
+    x = select(0.0, 1.0, Z > 0.0);
+)"
+R"(  } else if ((FEAT & 536870912u) != 0u) {
+    // VFX_BarrierShield (f197ec38, FS perm 002; SHADER-IMPLEMENTATION.md). TCH0 at (-2u, 2v) is the
+    // pattern a: its .b scrolls the four fract() noise reads of TCH1 (s, r, q, p) that make the breakup
+    // mask from their .g, and its .a widens it. The fragment breaks up where fade < .33 (CCH0.x); the
+    // alpha keeps the mesh colour's green (CCH0.y) on top of the instance alpha. The scene copy at the
+    // fragment, offset by the .45-period sawtooth of 2 x (a.rg - .5) + time, x .008 and with no
+    // near/depth scale, is the base colour, read at three offsets (+0, -.002, +.002: the first's .rg,
+    // the second's .rb, the third's .r); the rim, fresnel and mesh-colour glow add over it, then x
+    // vc.rgb x PCMD. The copy already holds exposed light, so scene_light (the identity) need not be
+    // applied; the tail re-exposes. No copy bound leaves the scene term 0 (the glow alone), as the other
+    // scene-reading features do. x carries the fade and the mesh gain, the tail x vc.w.
+    let c = u.ice0;
+    let tm = u.ice7.x;
+    let uvs = uv_of(in, u.uvSets[max(S_COLOR, 0)]);
+    let lay = layer(uvs.z, u.layers[max(S_COLOR, 0)]);
+    let a = sample_raw(S_COLOR, vec2f(-2.0 * uvs.x, 2.0 * uvs.y), lay);
+    let p = fract(tm * 0.375 - a.z);
+    let q = fract(tm * -0.0225 - a.z);
+    let r = fract(tm * 0.3 - a.z);
+    let s = fract(tm * 0.03 - a.z);
+    let n0 = sample_raw(S_INDIRECT, vec2f(a.y - uvs.x + s, a.y + uvs.y + r), 0).y;
+    let n1 = sample_raw(S_INDIRECT, vec2f(a.y + uvs.x + q, a.y - uvs.y + p), 0).y;
+    let mask = a.w * sat(n1 - 0.1) * sat(n0 - 0.1);
+    let edge = sat(mask * 10.0);
+    let fade = sat(edge + 1.0 - 2.0 * c.x);
+    if (fade < 0.33) { discard; }
+    let mx = 2.0 * (a.x - 0.5) + tm;
+    let my = 2.0 * (a.y - 0.5) + tm;
+    let wx = (mx - floor(mx * 2.22222233) * 0.45) * 0.008;
+    let wy = (my - floor(my * 2.22222233) * 0.45) * 0.008;
+    var sc = vec3f(0.0);
+    if (u.scene.w > 0.5) {
+      let suv = vec2f(in.pos.x * u.scene.x, in.pos.y * u.scene.y);
+      // v down: the y offsets negate.
+      let first = textureSampleLevel(sceneColor, sceneSampler, vec2f(suv.x + wx, suv.y - wy), 0.0);
+      let second =
+          textureSampleLevel(sceneColor, sceneSampler, vec2f(suv.x + wx - 0.002, suv.y - (wy - 0.002)), 0.0);
+      let third = textureSampleLevel(sceneColor, sceneSampler, vec2f(suv.x + wx + 0.002, suv.y - (wy + 0.002)), 0.0);
+      var ie = 1.0;
+      if (u.tone1.x > 0.0 && u.tone0.w > 0.0) { ie = 1.0 / u.tone0.w; }
+      sc = vec3f(third.x * 1.165, first.x + 0.33 * (1.5 * first.y - first.x),
+                 second.x + 0.33 * (1.5 * second.z - second.x)) *
+           ie;
+    }
+    // Remastered's view space is (x, y, -z) of the port's camera-local vectors (as the other mesh
+    // recipes take them); the epsilons only keep normalize() defined for a degenerate feed.
+    let N = normalize(vec3f(in.nrm.x, in.nrm.y, -in.nrm.z) + vec3f(0.0, 0.0, 1e-6));
+    let V = normalize(in.vp + vec3f(0.0, 0.0, 1e-6));
+    let fr = 1.0 - dot(V, -N);
+    let rim = edge * clamp(fr * fr, 0.05, 0.66);
+    let high = pow(abs(fr), 8.0);
+    let rg = in.mesh.x + in.mesh.y;
+    let gain = 10.0 - 9.0 * fade;
+    rgb = vec3f(
+              gain * sc.r,
+              gain * (sc.g + 40.0 * rim * (edge * (2.0 * mask - 0.1) + 0.1) + 10.5 * rg + 2.8 * in.mesh.z + 3.0 * high) +
+                  0.5,
+              gain * (sc.b + 40.0 * rim * (edge * (10.0 * mask - 0.5) + 0.5) + 28.0 * rg + 5.95000029 * in.mesh.z +
+                      12.0 * high) +
+                  0.9) *
+          vc.rgb * M;
+    x = fade * (1.0 + in.mesh.y * (c.y - 1.0)) * 0.75;
+  } else if ((FEAT & 1073741824u) != 0u) {
+    // VFX_BarrierGlow (b1eb2b67, FS perm 000: MATI ba0acbd6 carries neither MFC0 nor MFC1;
+    // GLOW-IMPLEMENTATION.md). No scene copy: the glow is additive over the frame. The pattern is read
+    // three times at (-u, v): its .r is the alpha a that scrolls the second read's v, its .b the breakup
+    // of the third read's .a (which drives k and the fade). phase is the modular time's sawtooth; the
+    // mesh colour's r lifts k (through ceil) and pulls G and B down at their own weights. The VS's
+    // displacement already ran on the CPU, in the model coordinates: only the instance colour scales
+    // the result, the mesh colour feeds the maths.
+    let c = u.ice0;
+    let tm = u.ice7.x;
+    let uvs = uv_of(in, u.uvSets[max(S_COLOR, 0)]);
+    let lay = layer(uvs.z, u.layers[max(S_COLOR, 0)]);
+    let a = sample_raw(S_COLOR, vec2f(-uvs.x, uvs.y), lay).r;
+    let phase = tm - floor(tm * 0.555555582) * 1.79999995;
+    let b = sample_raw(S_COLOR, vec2f(-uvs.x - 0.200000003, uvs.y - phase + 0.550000012), lay).b;
+    let d = sample_raw(S_COLOR, vec2f(-uvs.x, uvs.y + a + 0.5 * tm + a), lay).a;
+    let k = d * (ceil(in.mesh.x) * 0.200000018 + 0.100000001);
+    // vec is camera-local (x, z, y); Remastered's view space is (x, y, -z) of it. The epsilons only keep
+    // normalize() defined for a degenerate feed.
+    let N = normalize(vec3f(in.nrm.x, in.nrm.y, -in.nrm.z) + vec3f(0.0, 0.0, 1e-6));
+    let V = normalize(in.vp + vec3f(0.0, 0.0, 1e-6));
+    let f = 1.0 - dot(V, -N);
+    let p = sat(b * (1.0 - 0.5 * phase));
+    let fade = sat(d + 1.0 - 2.0 * c.x);
+    let rim = sat(f * f) * fade;
+    let gain = 10.0 - 9.0 * fade;
+    rgb = rim * gain *
+              vec3f(k * 1.125, k * 7.5 - 0.5 * in.mesh.x + 1.4 * p + 0.5,
+                    k * 30.0 - 0.899999976 * in.mesh.x + 3.0 * p + 0.9) *
+          vc.rgb * M;
+    // The alpha is the instance alpha alone: the tail multiplies vc.w in and discards it at 0.
+    x = 1.0;
+)"
+R"(  } else if ((FEAT & 524288u) != 0u) {
+    // VFX_VisorSteam (53eceaa4, FS perm 000_0, VS 000_1; vfx/53eceaa4.md). No scene copy and no fog: the
+    // steam is a tinted cloud alpha-blended over the visor. TCH1 (the macro map Mt) at the uv offsets the
+    // TCH0 repeat read R, scaled by CCH0.x and scrolled by the VS's o2.yz; o2 depends on the CCH rows
+    // only, so it is computed here. The cloud's radial mask t70 grows with CCH0.z (the amount) and o2.x
+    // (the CCH0.w triangle wave x CCH3.w); CCH0.z past 1 (t42) brings in the Mt.w breakup. R.zw, blended
+    // by the triangle wave of R.x + Mt.z + CCH0.w, shade the colour CCH2.rgb. x leaves vc.w to the tail.
+    let c0 = u.ice0;
+    let c1 = u.ice1;
+    let c2 = u.ice2;
+    let c3 = u.ice3;
+    let c4 = u.ice4;
+    let ox = c3.w * (1.0 - abs(1.0 - 2.0 * fract(c0.w * 0.25)));
+    let t60 = c2.w * (1.0 - (clamp(c0.z, -1.0, 1.0) * 0.5 + 0.5)) - abs(c0.w) * abs(c2.w);
+    let oy = t60 * c4.x;
+    let oz = -t60 * c4.y;
+    let uvs = uv_of(in, u.uvSets[max(S_COLOR, 0)]);
+    let mt = sample_raw(S_INDIRECT, uvs.xy, 0);
+    let d9 = mt.x - 0.5;
+    let d10 = mt.y - 0.5;
+    let R = sample_raw(S_COLOR, vec2f(uvs.x * c0.x - oy + d9 * c3.z, uvs.y * c0.x - oz + d10 * c3.z), 0);
+    let r29 = R.x - 0.5;
+    let r30 = R.y - 0.5;
+    let t28 = ox + 0.1;
+    let t38 = -0.5 * c1.x + r29 * t28 + d9 * 0.25 + uvs.x - 0.5;
+    let t39 = 0.5 * c1.y + r30 * t28 + d10 * 0.25 + uvs.y - 0.5;
+    let t42 = sat(c0.z - 1.0);
+    let t47 = sat(t42 * 10.0);
+    let t56 = sqrt(t38 * t38 + t39 * t39);
+    let t70 = 1.0 - sat(-min(max(c0.z, -1.0), 0.1) + ox * t56 + t56);
+    x = t70 * sat(1.0 - t42 + ((d9 + d10) * ((r29 + r30) * 0.5 + 0.5) * 0.25 + mt.w) * t47 - t47) *
+        max(1.0 - mt.w - c1.w, c3.x * 0.25) * c3.x;
+    let t78 = R.x + mt.z + c0.w;
+    let t86 = (R.z - 0.5) * 2.0 * c3.y;
+    let t92 = (R.w - 0.5) * c3.y * 2.0 - t86;
+    let t101 = max(min((t86 + t92 * (1.0 - abs(1.0 - 2.0 * fract(t78)))) * (mt.z * t70), 1.0), -0.25);
+    rgb = (vec3f(t101) + c2.rgb) * vc.rgb * M;
   } else if ((FEAT & 16384u) != 0u) {
     // VFX_Disintegration (d749057f, perm 000_0): the mask's x squared, PMTR rows 0..2 as the colours at
     // s = 0 and 1 and the edge colour, row 3 as (threshold, edge width, alpha lo, alpha hi). ceil(e)
@@ -658,6 +863,24 @@ R"(    let nm = sample_raw(S_NORMAL, uv2, 0).xy;
     let g = sample_raw(S_PALETTE, pc, 0);
     rgb = g.rgb * vc.rgb * M;
     x = i.y * g.w;
+  } else if ((FEAT & 262144u) != 0u) {
+    // VFX_FrameBuffer_Color_Erosion_Unlit (d8ece62c, FS perm 000_0): BCLR at the sprite's uv and layer;
+    // its x and y offset the scene copy at the fragment by near / view depth x CCH0.xy (v down: -y),
+    // read at lod max(0, CCH0.z - 1), and the copy is added to the colour, x vc.rgb x PCMD (c5.x, M).
+    // The copy is exposed, so x the inverse exposure: the tail exposes it again. Alpha t.w: Erosion
+    // follows.
+    let c = u.ice0;
+    let uvs = uv_of(in, u.uvSets[max(S_COLOR, 0)]);
+    let t = sample_raw(S_COLOR, uvs.xy, layer(uvs.z, u.layers[max(S_COLOR, 0)]));
+    var fb = vec3f(0.0);
+    if (u.scene.w > 0.5) {
+      let fbuv = vec2f(in.pos.x * u.scene.x + t.x * in.sw * c.x, in.pos.y * u.scene.y - t.y * in.sw * c.y);
+      var ie = 1.0;
+      if (u.tone1.x > 0.0 && u.tone0.w > 0.0) { ie = 1.0 / u.tone0.w; }
+      fb = scene_light(textureSampleLevel(sceneColor, sceneSampler, fbuv, max(0.0, c.z - 1.0)).rgb) * ie;
+    }
+    rgb = (t.rgb + fb) * vc.rgb * M;
+    x = t.w;
   } else if ((FEAT & 1u) != 0u) {
     let c = sample_slot(in, S_COLOR, w);
     rgb = c.rgb * vc.rgb * M;
@@ -746,8 +969,13 @@ R"(  // The tone map runs before this blend, so an alpha blend brighter than 1 t
   // BLEND 5 (AdditiveOne) takes no alpha compensation above and no fog below, as Additive; its tone is unchanged.
   // Remastered sets a no-fog bit for every particle blend but alpha and opaque
   // (SetupFogFromBlendMode), so additive and premultiplied draws are not fogged at all.
+  // Fogged (1 << 27) keeps the fog of an alpha/opaque row whose MATI EBlendMode draws with other factors.
   // IceChargeBeam: DFOG 1 (perm 000), so unfogged in either blend; IceChargeCollision too where Unfogged.
-  if ((BLEND == 0u || BLEND == 3u) && (FEAT & 1048576u) == 0u && (FEAT & 4194304u) == 0u) {
+  // BarrierShield: DFOG 1 on its refraction perm (002), which has no fog code, and its fogged sibling
+  // (003) is not ported (the recipe rejects a draw without DFOG 1). BarrierGlow: likewise DFOG 1 on its
+  // non-refraction perm (000), whose VS/FS carry no fog.
+  if ((BLEND == 0u || BLEND == 3u || (FEAT & 134217728u) != 0u) && (FEAT & 1048576u) == 0u &&
+      (FEAT & 4194304u) == 0u && (FEAT & 536870912u) == 0u && (FEAT & 1073741824u) == 0u) {
     col = mix(col, u.fogColor.rgb, fog_factor(in.pos.z));
   }
   return vec4f(col, alpha);
@@ -816,7 +1044,8 @@ uint32_t block_size(wgpu::TextureFormat format) {
 
 // The PBDM factors (RESOLVED-state.md Q1): alpha (SrcAlpha, 1-SrcAlpha | One, 1-SrcAlpha), premultiplied
 // (One, 1-SrcAlpha | Zero, One), additive (SrcAlpha, One | Zero, One), opaque (One, Zero for both).
-// AdditiveOne (port-only, the wave orb's model blend) is (One, One | Zero, One). Not in the anonymous namespace:
+// AdditiveOne (port-only, the wave orb's model blend) is (One, One | Zero, One). PremultipliedAlpha and AdditiveAlpha
+// are the MATI EBlendModes 5 (One, 1-SrcAlpha) and 6 (SrcAlpha, One), colour and alpha alike. Not in the anonymous namespace:
 // the unit tests call it.
 wgpu::BlendState blend_state(Blend blend) {
   wgpu::BlendComponent c{.operation = wgpu::BlendOperation::Add};
@@ -849,6 +1078,14 @@ wgpu::BlendState blend_state(Blend blend) {
   case Blend::Opaque:
     c.srcFactor = a.srcFactor = wgpu::BlendFactor::One;
     c.dstFactor = a.dstFactor = wgpu::BlendFactor::Zero;
+    break;
+  case Blend::PremultipliedAlpha:
+    c.srcFactor = a.srcFactor = wgpu::BlendFactor::One;
+    c.dstFactor = a.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+    break;
+  case Blend::AdditiveAlpha:
+    c.srcFactor = a.srcFactor = wgpu::BlendFactor::SrcAlpha;
+    c.dstFactor = a.dstFactor = wgpu::BlendFactor::One;
     break;
   case Blend::Multiply:
     c.srcFactor = wgpu::BlendFactor::Dst;
@@ -949,7 +1186,7 @@ wgpu::RenderPipeline make_pipeline(const PipelineConfig& p) {
   const wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &wgsl, .label = "VFX Module"};
   const wgpu::ShaderModule module = device.CreateShaderModule(&moduleDescriptor);
 
-  static constexpr std::array<wgpu::VertexAttribute, 11> attributes{{
+  static constexpr std::array<wgpu::VertexAttribute, 12> attributes{{
       {.format = wgpu::VertexFormat::Float32x3, .offset = offsetof(Vertex, pos), .shaderLocation = 0},
       {.format = wgpu::VertexFormat::Float32x3, .offset = offsetof(Vertex, uv[0]), .shaderLocation = 1},
       {.format = wgpu::VertexFormat::Float32x3, .offset = offsetof(Vertex, uv[1]), .shaderLocation = 2},
@@ -961,6 +1198,8 @@ wgpu::RenderPipeline make_pipeline(const PipelineConfig& p) {
       {.format = wgpu::VertexFormat::Float32x3, .offset = offsetof(Vertex, vec), .shaderLocation = 8},
       {.format = wgpu::VertexFormat::Float32x3, .offset = offsetof(Vertex, uv[2]), .shaderLocation = 9},
       {.format = wgpu::VertexFormat::Float32x4, .offset = offsetof(Vertex, tan), .shaderLocation = 10},
+      // BarrierShield's mesh colour: a full row of its own, so the instance colour at 3 stays separate.
+      {.format = wgpu::VertexFormat::Float32x4, .offset = offsetof(Vertex, mesh), .shaderLocation = 11},
   }};
   const wgpu::VertexBufferLayout vertexLayout{
       .stepMode = wgpu::VertexStepMode::Vertex,
@@ -994,7 +1233,7 @@ wgpu::RenderPipeline make_pipeline(const PipelineConfig& p) {
       .label = "VFX Pipeline",
       .layout = g_state.pipelineLayout,
       .vertex = {.module = module, .entryPoint = "vs_main", .bufferCount = 1, .buffers = &vertexLayout},
-      .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+      .primitive = pipeline_primitive(p),
       .depthStencil = p.depthStencilFormat != wgpu::TextureFormat::Undefined ? &depth : nullptr,
       .multisample = {.count = p.msaaSamples, .mask = UINT32_MAX},
       .fragment = &fragment,
@@ -1111,9 +1350,11 @@ void build_array(const EncoderTaskContext& ctx, const wgpu::CommandEncoder& cmd,
   if (cw == 0 || ch == 0 || cw % block != 0 || ch % block != 0) {
     return fail("cell size");
   }
-  if (!webgpu::g_hasCoreFeatures && block != 1) {
-    // Compatibility devices can't copy compressed textures: the draw is skipped.
-    return fail("compressed source on a Compatibility device");
+  // Compatibility devices can't copy compressed textures on the GPU; the layers are written from the bytes the
+  // source was uploaded from instead (kept by the texture upload on those devices).
+  const bool writeFromBytes = !webgpu::g_hasCoreFeatures && block != 1;
+  if (writeFromBytes && !src.cpuBytes) {
+    return fail("compressed source without its uploaded bytes on a Compatibility device");
   }
   // Mip m of a cell is its own copy only if the cell halves evenly that far (and stays block aligned).
   uint32_t mips = 1;
@@ -1133,12 +1374,51 @@ void build_array(const EncoderTaskContext& ctx, const wgpu::CommandEncoder& cmd,
   };
   AURORA_NOTE_TEXTURE(&descriptor);
   entry->texture = ctx.device.CreateTexture(&descriptor);
+  // Byte offset of each source mip in cpuBytes, and its row pitch in blocks.
+  std::array<size_t, 16> mipOffset{};
+  std::array<uint32_t, 16> mipBlocksWide{};
+  if (writeFromBytes) {
+    const auto info = format_info(src.format);
+    size_t offset = 0;
+    for (uint32_t mip = 0; mip < mips && mip < mipOffset.size(); ++mip) {
+      const uint32_t w = std::max(src.size.width >> mip, 1u);
+      const uint32_t h = std::max(src.size.height >> mip, 1u);
+      const uint32_t wideBlocks = (w + info.blockWidth - 1) / info.blockWidth;
+      const uint32_t highBlocks = (h + info.blockHeight - 1) / info.blockHeight;
+      mipOffset[mip] = offset;
+      mipBlocksWide[mip] = wideBlocks;
+      offset += size_t(wideBlocks) * highBlocks * info.blockSize;
+    }
+    if (mips > mipOffset.size() || offset > src.cpuBytes->size()) {
+      return fail("kept source bytes don't cover the mip chain");
+    }
+  }
+  std::vector<uint8_t> cell;
   for (uint32_t layer = 0; layer < entry->layers; ++layer) {
     const uint32_t col = layer % entry->cols;
     const uint32_t row = layer / entry->cols;
     for (uint32_t mip = 0; mip < mips; ++mip) {
       const uint32_t w = cw >> mip;
       const uint32_t h = ch >> mip;
+      if (writeFromBytes) {
+        const auto info = format_info(src.format);
+        const uint32_t cellBlocksWide = w / info.blockWidth;
+        const uint32_t cellBlocksHigh = h / info.blockHeight;
+        const size_t rowBytes = size_t(cellBlocksWide) * info.blockSize;
+        cell.resize(rowBytes * cellBlocksHigh);
+        const size_t firstBlockX = size_t(col) * cellBlocksWide;
+        const size_t firstBlockY = size_t(row) * cellBlocksHigh;
+        for (uint32_t by = 0; by < cellBlocksHigh; ++by) {
+          const size_t from =
+              mipOffset[mip] + ((firstBlockY + by) * mipBlocksWide[mip] + firstBlockX) * info.blockSize;
+          std::memcpy(cell.data() + by * rowBytes, src.cpuBytes->data() + from, rowBytes);
+        }
+        const wgpu::TexelCopyTextureInfo to{.texture = entry->texture, .mipLevel = mip, .origin = {0, 0, layer}};
+        const wgpu::TexelCopyBufferLayout layout{.bytesPerRow = uint32_t(rowBytes), .rowsPerImage = cellBlocksHigh};
+        const wgpu::Extent3D extent{w, h, 1};
+        ctx.queue.WriteTexture(&to, cell.data(), cell.size(), &layout, &extent);
+        continue;
+      }
       const wgpu::TexelCopyTextureInfo from{.texture = src.texture, .mipLevel = mip, .origin = {col * w, row * h, 0}};
       const wgpu::TexelCopyTextureInfo to{.texture = entry->texture, .mipLevel = mip, .origin = {0, 0, layer}};
       const wgpu::Extent3D extent{w, h, 1};
@@ -1427,20 +1707,12 @@ std::string pipeline_source(const PipelineConfig& p) {
     const uint32_t v = (p.slotKey >> (3 * i)) & 7;
     source += std::string("const ") + SlotNames[i] + ": i32 = " + (v == 7 ? "-1" : std::to_string(v)) + ";\n";
   }
-  // The scene copy's light as the exposed linear the HDR tail writes: the HDR copy is that already;
-  // the display copy (RGBA8) goes back through the room's curve, exact below the white it clipped at.
+  // The scene copy's light: the HDR copy holds the exposed linear the HDR tail writes already. LDR
+  // draws never read a scene copy (draw_prims drops them), so theirs is never called.
   static constexpr std::string_view SceneLight = "fn scene_light(c: vec3f) -> vec3f { return c; }\n";
-  static constexpr std::string_view SceneLightDisplay =
-      "fn scene_light(c: vec3f) -> vec3f { return hdr_exposed(c, u.tone0, u.tone1, u.tone2); }\n";
   if (!hdr) {
-    // LDR: the source as it always was, and the curve's inverse only where SceneWarp reads it.
     source += ShaderSource;
-    if ((p.features & (SceneWarp | IceChargeCollision | IceChargeCollisionLit | VisorRunOff | VisorRunOffLit)) != 0) {
-      source += SceneLightDisplay;
-      source += hdr::ToneWgsl;
-    } else {
-      source += SceneLight;
-    }
+    source += SceneLight;
     return source;
   }
   source += "const HDR: bool = true;\n";
@@ -1454,7 +1726,8 @@ std::string pipeline_source(const PipelineConfig& p) {
   static constexpr std::string_view HdrTail = R"(  if (HDR) {
     var lin = max(rgb, vec3f(0.0));
     if (u.tone1.x > 0.0 && u.tone0.w > 0.0) { lin = lin * u.tone0.w; }
-    if ((BLEND == 0u || BLEND == 3u) && (FEAT & 1048576u) == 0u && (FEAT & 4194304u) == 0u) {
+    if ((BLEND == 0u || BLEND == 3u || (FEAT & 134217728u) != 0u) && (FEAT & 1048576u) == 0u &&
+        (FEAT & 4194304u) == 0u && (FEAT & 536870912u) == 0u && (FEAT & 1073741824u) == 0u) {
       lin = mix(lin, hdr_exposed(u.fogColor.rgb, u.tone0, u.tone1, u.tone2), fog_factor(in.pos.z));
     }
     return vec4f(lin, alpha);
@@ -1481,13 +1754,14 @@ static void draw_prims(const DrawDesc& desc, const Vertex* verts, uint32_t verte
   // The slots each enabled feature reads; a slot nothing reads is left unbound (the dummy).
   const std::pair<uint32_t, int8_t> reads[] = {
       {ColorTex | ColorIndexing | Pyro | Disintegration | VisorSplat | IceChargeBeam | IceChargeCollision |
-           IceChargeCollisionLit | VisorRunOff | VisorRunOffLit,
+           IceChargeCollisionLit | VisorRunOff | VisorRunOffLit | VisorRain | BarrierShield | BarrierGlow |
+           FrameBufferColorErosion | VisorSteam,
        desc.colorSlot},
       {OpacityTex, desc.opacitySlot},
       {Ramp | Pyro, desc.rampSlot},
       {Ramp | DualMod, desc.ramp2Slot},
       {Thresholding, desc.thresholdSlot},
-      {Indirect | SceneWarp | VisorSplat, desc.indirectSlot},
+      {Indirect | SceneWarp | VisorSplat | BarrierShield | VisorSteam, desc.indirectSlot},
       {ColorIndexing, desc.paletteSlot},
       {IceChargeBeam | IceChargeCollision | IceChargeCollisionLit, desc.normalSlot},
       {IceChargeCollision | IceChargeCollisionLit, desc.envSlot},
@@ -1535,7 +1809,13 @@ static void draw_prims(const DrawDesc& desc, const Vertex* verts, uint32_t verte
   std::memcpy(u.tone, &gx.pbrTone, sizeof(u.tone));
   // Per draw: the GX state keeps the room's exposure for every later draw.
   const bool hdr = scene_hdr_pass_active();
-  u.tone[0][3] = draw_exposure(u.tone[0][3], hdr, desc.alreadyExposed);
+  if (!hdr &&
+      (features & (SceneWarp | IceChargeCollision | IceChargeCollisionLit | VisorRunOff | VisorRunOffLit | VisorRain |
+                   BarrierShield | FrameBufferColorErosion)) != 0) {
+    // The scene-reading effects read the HDR scene's light; outside it there is none to read.
+    return;
+  }
+  u.tone[0][3] = draw_exposure(u.tone[0][3], hdr, desc.alreadyExposed, desc.exposureOverride);
   std::memcpy(u.fogColor, &gx.fog.color, sizeof(u.fogColor));
   u.fog[0] = float(gx.fog.type);
   u.fog[1] = gx.fog.a;
@@ -1569,10 +1849,18 @@ static void draw_prims(const DrawDesc& desc, const Vertex* verts, uint32_t verte
     u.scene[2] = gx.proj.m2[3] / (gx.proj.m2[2] - 1.f);
     u.scene[3] = 1.f;
   }
-  if ((features & (IceChargeBeam | IceChargeCollision | IceChargeCollisionLit | VisorRunOff | VisorRunOffLit)) != 0) {
-    const uint32_t rows = (features & (IceChargeCollision | IceChargeCollisionLit)) != 0 ? 7
-                          : (features & (VisorRunOff | VisorRunOffLit)) != 0 ? 5
-                                                                             : 3;
+  if ((features & (IceChargeBeam | IceChargeCollision | IceChargeCollisionLit | VisorRunOff | VisorRunOffLit |
+                   VisorRain | BarrierShield | BarrierGlow | FrameBufferColorErosion | VisorSteam)) != 0) {
+    // The recipe's CCH rows: IceChargeCollision 0..6, VisorRunOff and VisorSteam 0..4, IceChargeBeam 0..2,
+    // VisorRain, BarrierShield, BarrierGlow and FrameBufferColorErosion 0 only.
+    uint32_t rows = 3;
+    if ((features & (IceChargeCollision | IceChargeCollisionLit)) != 0) {
+      rows = 7;
+    } else if ((features & (VisorRunOff | VisorRunOffLit | VisorSteam)) != 0) {
+      rows = 5;
+    } else if ((features & (VisorRain | BarrierShield | BarrierGlow | FrameBufferColorErosion)) != 0) {
+      rows = 1;
+    }
     for (uint32_t i = 0; i < rows; ++i) {
       std::memcpy(u.ice[i], desc.params[i], sizeof(u.ice[i]));
     }
@@ -1674,7 +1962,7 @@ void draw_triangles(const DrawDesc& desc, const Vertex* verts, uint32_t triCount
   }
 }
 
-void capture_scene() {
+void capture_scene(bool again) {
   gx::fifo::drain();
   if (is_offscreen()) {
     return;
@@ -1684,11 +1972,15 @@ void capture_scene() {
     return;
   }
   auto& scene = g_state.scene[current_frame_slot()];
-  if (scene.frame == current_frame()) {
-    return; // one copy per frame
-  }
   const bool hdr = scene_hdr_pass_active();
-  // CopyOpaqueColorBuffer (0xb32f08, flag 3): half size (at least 1), a full mip chain.
+  if (scene.frame == current_frame() &&
+      (!again || scene.hdr != hdr || scene.width != target.x || scene.height != target.y)) {
+    return; // one copy per frame; a second only into the same texture, which earlier draws bound
+  }
+  // copy_opaque_color_buffer_for_context (0xf4a30): flag 1 halves the size (at least 1), flag 2 adds a
+  // mip chain. The primary copy takes both (3); the pause screen's second copy only half size (1), so
+  // a read at lod 1 clamps to the top level. That copy goes into the same texture, sampled through a
+  // view of its top level.
   const uint32_t width = std::max(target.x >> 1, 1u);
   const uint32_t height = std::max(target.y >> 1, 1u);
   if (!scene.color || scene.color->size.width != width || scene.color->size.height != height || scene.hdr != hdr) {
@@ -1701,6 +1993,12 @@ void capture_scene() {
     scene.color = hdr ? new_render_texture(width, height, GX_TF_RGBA8, "VFX Scene Copy", mips,
                                            wgpu::TextureFormat::RGBA16Float)
                       : new_render_texture(width, height, GX_TF_RGBA8, "VFX Scene Copy", mips);
+    const wgpu::TextureViewDescriptor level0{
+        .label = "VFX Scene Copy Level 0",
+        .baseMipLevel = 0,
+        .mipLevelCount = 1,
+    };
+    scene.level0 = scene.color->texture.CreateView(&level0);
     scene.hdr = hdr;
     g_state.groupsStale.store(true, std::memory_order_release);
   }
@@ -1715,6 +2013,29 @@ void capture_scene() {
   scene.width = target.x;
   scene.height = target.y;
   scene.depth = std::move(depth);
+  scene.mips = !again;
+}
+
+wgpu::TextureView scene_copy_view(bool hdr) noexcept {
+  const auto& scene = g_state.scene[current_frame_slot()];
+  const auto target = get_render_target_size();
+  if (scene.frame != current_frame() || is_offscreen() || scene.width != target.x || scene.height != target.y ||
+      !scene.color || scene.hdr != hdr) {
+    return {};
+  }
+  return scene.mips ? scene.color->sampleTextureView : scene.level0;
+}
+
+bool scene_copy_available() {
+  gx::fifo::drain();
+  return static_cast<bool>(scene_copy_view(scene_hdr_pass_active()));
+}
+
+void render_target_size(uint32_t& width, uint32_t& height) {
+  gx::fifo::drain();
+  const auto target = get_render_target_size();
+  width = target.x;
+  height = target.y;
 }
 
 void shutdown() {

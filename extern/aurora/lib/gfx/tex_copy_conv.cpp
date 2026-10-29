@@ -305,6 +305,59 @@ var<private> positions: array<vec2f, 3> = array(
 }
 )"sv;
 
+// Compatibility devices forbid textureLoad on depth textures and non-comparison samplers on them.
+// mp_depth_load (CompatDepthLoad) reads the exact stored depth through a comparison sampler.
+static constexpr std::string_view CompatDepthLoad = R"(
+// Compatibility: textureLoad on a depth texture is rejected, and a depth texture takes only comparison samplers.
+// The stored depth is recovered exactly instead: the largest float ref in [0,1] with ref <= depth, by a binary
+// search over the float bit pattern (non-negative floats order like their bits) with a LessEqual comparison.
+fn mp_depth_load(t: texture_depth_2d, s: sampler_comparison, px: vec2i) -> f32 {
+  let uv = (vec2f(px) + 0.5) / vec2f(textureDimensions(t));
+  var lo = 0u;
+  var hi = 0x3F800001u;
+  loop {
+    if (hi - lo <= 1u) { break; }
+    let mid = lo + (hi - lo) / 2u;
+    if (textureSampleCompareLevel(t, s, uv, bitcast<f32>(mid)) > 0.5) { lo = mid; } else { hi = mid; }
+  }
+  return bitcast<f32>(lo);
+}
+)"sv;
+
+static constexpr std::string_view DepthSnapshotShaderCompatHead = R"(
+@group(0) @binding(0) var src: texture_depth_2d;
+@group(0) @binding(1) var depth_samp: sampler_comparison;
+
+var<private> positions: array<vec2f, 3> = array(
+    vec2f(-1.0, 1.0),
+    vec2f(-1.0, -3.0),
+    vec2f(3.0, 1.0),
+);
+
+@vertex fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
+    return vec4f(positions[vi], 0.0, 1.0);
+}
+
+@fragment fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+    let depth = mp_depth_load(src, depth_samp, vec2i(floor(pos.xy)));
+    return vec4f(depth, 0.0, 0.0, 1.0);
+}
+)"sv;
+
+std::string_view compat_depth_load_wgsl() noexcept { return CompatDepthLoad; }
+
+static std::string make_compat_depth_preamble() {
+  std::string out = DepthShaderPreamble;
+  const std::string load = "textureLoad(src, coord, 0)";
+  const std::string sample = "mp_depth_load(src, depth_samp, coord)";
+  for (size_t at = out.find(load); at != std::string::npos; at = out.find(load, at + sample.size())) {
+    out.replace(at, load.size(), sample);
+  }
+  out += "\n@group(0) @binding(2) var depth_samp: sampler_comparison;\n";
+  out += CompatDepthLoad;
+  return out;
+}
+
 struct ConvPipeline {
   GXTexFmt fmt;
   std::string_view fragShader;
@@ -339,6 +392,7 @@ static wgpu::BindGroupLayout g_depthBindGroupLayout;
 static wgpu::BindGroupLayout g_depthBindGroupLayoutMS;
 static absl::flat_hash_map<GXTexFmt, wgpu::RenderPipeline> g_depthPipelinesMS; // Core devices only
 static wgpu::Sampler g_nearestSampler;
+static wgpu::Sampler g_depthCompareSampler; // Compatibility: LessEqual, for mp_depth_load
 static wgpu::Sampler g_linearSampler;
 static absl::flat_hash_map<GXTexFmt, wgpu::RenderPipeline> g_pipelines;
 static wgpu::RenderPipeline g_blitPipeline;
@@ -365,10 +419,16 @@ static wgpu::BindGroupLayout create_depth_snapshot_layout(bool multisampled, con
                   .multisampled = multisampled,
               },
       },
+      // Compatibility only: depth is read through a comparison sampler (see CompatDepthLoad)
+      wgpu::BindGroupLayoutEntry{
+          .binding = 1,
+          .visibility = wgpu::ShaderStage::Fragment,
+          .sampler = wgpu::SamplerBindingLayout{.type = wgpu::SamplerBindingType::Comparison},
+      },
   };
   const wgpu::BindGroupLayoutDescriptor descriptor{
       .label = label,
-      .entryCount = entries.size(),
+      .entryCount = webgpu::g_hasCoreFeatures ? 1u : 2u,
       .entries = entries.data(),
   };
   return g_device.CreateBindGroupLayout(&descriptor);
@@ -609,7 +669,7 @@ void initialize() {
   };
   g_bindGroupLayout = g_device.CreateBindGroupLayout(&bindGroupLayoutDescriptor);
 
-  static constexpr std::array depthBindGroupLayoutEntries{
+  const std::array depthBindGroupLayoutEntries{
       wgpu::BindGroupLayoutEntry{
           .binding = 0,
           .visibility = wgpu::ShaderStage::Fragment,
@@ -627,10 +687,16 @@ void initialize() {
                   .type = wgpu::BufferBindingType::Uniform,
               },
       },
+      // Compatibility only: depth is read through a comparison sampler (see CompatDepthLoad)
+      wgpu::BindGroupLayoutEntry{
+          .binding = 2,
+          .visibility = wgpu::ShaderStage::Fragment,
+          .sampler = wgpu::SamplerBindingLayout{.type = wgpu::SamplerBindingType::Comparison},
+      },
   };
-  static constexpr wgpu::BindGroupLayoutDescriptor depthBindGroupLayoutDescriptor{
+  const wgpu::BindGroupLayoutDescriptor depthBindGroupLayoutDescriptor{
       .label = "TexCopyConv Depth Bind Group Layout",
-      .entryCount = depthBindGroupLayoutEntries.size(),
+      .entryCount = webgpu::g_hasCoreFeatures ? 2u : 3u,
       .entries = depthBindGroupLayoutEntries.data(),
   };
   g_depthBindGroupLayout = g_device.CreateBindGroupLayout(&depthBindGroupLayoutDescriptor);
@@ -654,27 +720,36 @@ void initialize() {
       Log.fatal("Output format mismatch for {}", conv.fmt);
     }
   }
-  // Skip depth copies in compatibility mode
-  if (webgpu::g_hasCoreFeatures) {
+  {
+    const std::string compatPreamble = webgpu::g_hasCoreFeatures ? std::string{} : make_compat_depth_preamble();
+    const std::string_view depthPreamble = webgpu::g_hasCoreFeatures ? std::string_view{DepthShaderPreamble}
+                                                                      : std::string_view{compatPreamble};
     for (const auto& conv : DepthConvPipelines) {
-      g_pipelines[conv.fmt] = create_pipeline(conv, DepthShaderPreamble, g_depthBindGroupLayout);
+      g_pipelines[conv.fmt] = create_pipeline(conv, depthPreamble, g_depthBindGroupLayout);
       if (conv.outputFormat != to_wgpu(conv.fmt)) {
         Log.fatal("Output format mismatch for {}", conv.fmt);
       }
     }
-    // The same shaders on a multisampled source: textureLoad's last argument becomes the sample index.
-    std::string msPreamble = DepthShaderPreamble;
-    const std::string_view single = "texture_depth_2d";
-    msPreamble.replace(msPreamble.find(single), single.size(), "texture_depth_multisampled_2d");
-    for (const auto& conv : DepthConvPipelines) {
-      g_depthPipelinesMS[conv.fmt] = create_pipeline(conv, msPreamble, g_depthBindGroupLayoutMS);
+    if (webgpu::g_hasCoreFeatures) {
+      // The same shaders on a multisampled source: textureLoad's last argument becomes the sample index.
+      std::string msPreamble = DepthShaderPreamble;
+      const std::string_view single = "texture_depth_2d";
+      msPreamble.replace(msPreamble.find(single), single.size(), "texture_depth_multisampled_2d");
+      for (const auto& conv : DepthConvPipelines) {
+        g_depthPipelinesMS[conv.fmt] = create_pipeline(conv, msPreamble, g_depthBindGroupLayoutMS);
+      }
     }
+    const std::string compatSnapshot = std::string(DepthSnapshotShaderCompatHead) + std::string(CompatDepthLoad);
     g_depthSnapshotBindGroupLayout = create_depth_snapshot_layout(false, "Depth Snapshot Bind Group Layout");
-    g_depthSnapshotBindGroupLayoutMS = create_depth_snapshot_layout(true, "Depth Snapshot MS Bind Group Layout");
     g_depthSnapshotPipeline =
-        create_depth_snapshot_pipeline(DepthSnapshotShader, g_depthSnapshotBindGroupLayout, "Depth Snapshot");
-    g_depthSnapshotPipelineMS =
-        create_depth_snapshot_pipeline(DepthSnapshotShaderMS, g_depthSnapshotBindGroupLayoutMS, "Depth Snapshot MS");
+        create_depth_snapshot_pipeline(webgpu::g_hasCoreFeatures ? std::string_view{DepthSnapshotShader} : std::string_view{compatSnapshot},
+                                       g_depthSnapshotBindGroupLayout, "Depth Snapshot");
+    // Compatibility devices cannot bind multisampled depth textures; callers check snapshot_depth_supported(samples)
+    if (webgpu::g_hasCoreFeatures) {
+      g_depthSnapshotBindGroupLayoutMS = create_depth_snapshot_layout(true, "Depth Snapshot MS Bind Group Layout");
+      g_depthSnapshotPipelineMS =
+          create_depth_snapshot_pipeline(DepthSnapshotShaderMS, g_depthSnapshotBindGroupLayoutMS, "Depth Snapshot MS");
+    }
   }
 
   static constexpr wgpu::SamplerDescriptor nearestSamplerDescriptor{
@@ -683,6 +758,15 @@ void initialize() {
       .minFilter = wgpu::FilterMode::Nearest,
   };
   g_nearestSampler = g_device.CreateSampler(&nearestSamplerDescriptor);
+  static constexpr wgpu::SamplerDescriptor depthCompareDescriptor{
+      .label = "TexCopyConv Depth Compare Sampler",
+      .magFilter = wgpu::FilterMode::Nearest,
+      .minFilter = wgpu::FilterMode::Nearest,
+      .compare = wgpu::CompareFunction::LessEqual,
+  };
+  if (!webgpu::g_hasCoreFeatures) {
+    g_depthCompareSampler = g_device.CreateSampler(&depthCompareDescriptor);
+  }
 
   static constexpr wgpu::SamplerDescriptor linearSamplerDescriptor{
       .label = "TexCopyConv Linear Sampler",
@@ -705,6 +789,7 @@ void shutdown() {
   g_depthBindGroupLayoutMS = {};
   g_depthPipelinesMS.clear();
   g_nearestSampler = {};
+  g_depthCompareSampler = {};
   g_linearSampler = {};
   g_depthSnapshotBindGroupLayout = {};
   g_depthSnapshotBindGroupLayoutMS = {};
@@ -718,10 +803,6 @@ static void execute(const wgpu::CommandEncoder& cmd, const ConvRequest& req, con
   }
   wgpu::BindGroup bindGroup;
   if (gx::is_depth_format(req.fmt)) {
-    // Skip depth copies in compatibility mode
-    if (!webgpu::g_hasCoreFeatures) {
-      return;
-    }
     const std::array bindGroupEntries{
         wgpu::BindGroupEntry{
             .binding = 0,
@@ -733,10 +814,14 @@ static void execute(const wgpu::CommandEncoder& cmd, const ConvRequest& req, con
             .offset = req.uniformRange.offset,
             .size = req.uniformRange.size,
         },
+        wgpu::BindGroupEntry{
+            .binding = 2,
+            .sampler = g_depthCompareSampler,
+        },
     };
     const wgpu::BindGroupDescriptor bindGroupDescriptor{
         .layout = req.srcSamples > 1 ? g_depthBindGroupLayoutMS : g_depthBindGroupLayout,
-        .entryCount = bindGroupEntries.size(),
+        .entryCount = webgpu::g_hasCoreFeatures ? 2u : 3u,
         .entries = bindGroupEntries.data(),
     };
     bindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
@@ -846,7 +931,9 @@ void blit(const wgpu::CommandEncoder& cmd, const ConvRequest& req) {
   execute(cmd, req, g_blitPipeline);
 }
 
-bool snapshot_depth_supported() noexcept { return static_cast<bool>(g_depthSnapshotPipeline); }
+bool snapshot_depth_supported(uint32_t msaaSamples) noexcept {
+  return static_cast<bool>(msaaSamples > 1 ? g_depthSnapshotPipelineMS : g_depthSnapshotPipeline);
+}
 
 void snapshot_depth(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& srcDepth, uint32_t msaaSamples,
                     const wgpu::TextureView& dst) {
@@ -860,10 +947,14 @@ void snapshot_depth(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& sr
           .binding = 0,
           .textureView = srcDepth,
       },
+      wgpu::BindGroupEntry{
+          .binding = 1,
+          .sampler = g_depthCompareSampler,
+      },
   };
   const wgpu::BindGroupDescriptor bindGroupDescriptor{
       .layout = multisampled ? g_depthSnapshotBindGroupLayoutMS : g_depthSnapshotBindGroupLayout,
-      .entryCount = bindGroupEntries.size(),
+      .entryCount = webgpu::g_hasCoreFeatures ? 1u : 2u,
       .entries = bindGroupEntries.data(),
   };
   const auto bindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);

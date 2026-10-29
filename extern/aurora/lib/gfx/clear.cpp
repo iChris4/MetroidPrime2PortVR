@@ -1,6 +1,7 @@
 #include "clear.hpp"
 
 #include "encoding.hpp"
+#include "stereo_multiview.hpp"
 #include "../webgpu/gpu.hpp"
 #include "tracy/Tracy.hpp"
 
@@ -77,6 +78,10 @@ PipelineConfig make_pipeline_config(const RenderTargetLayout& layout, bool clear
 
 wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
   ZoneScoped;
+  if (config.multiview && !webgpu::g_multiviewSupported) {
+    // A cached multiview config on a device without the feature: never bound.
+    return {};
+  }
   const bool writesSceneColor = config.clearColor || config.clearAlpha;
   const auto source = shader_source(writesSceneColor);
   wgpu::ShaderSourceWGSL sourceDescriptor{};
@@ -125,9 +130,9 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
       .depthWriteEnabled = config.clearDepth,
       .depthCompare = wgpu::CompareFunction::Always,
   };
-  const auto label = fmt::format("EFB Clear Pipeline (color {}, alpha {}, depth {})", config.clearColor,
-                                 config.clearAlpha, config.clearDepth);
-  const wgpu::RenderPipelineDescriptor pipelineDescriptor{
+  const auto label = fmt::format("EFB Clear Pipeline (color {}, alpha {}, depth {}{})", config.clearColor,
+                                 config.clearAlpha, config.clearDepth, config.multiview ? ", multiview" : "");
+  wgpu::RenderPipelineDescriptor pipelineDescriptor{
       .label = label.c_str(),
       .layout = pipelineLayout,
       .vertex =
@@ -146,6 +151,13 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
           },
       .fragment = &fragmentState,
   };
+#if defined(WGPU_DAWN_RENDER_PIPELINE_MULTIVIEW_INIT)
+  wgpu::DawnRenderPipelineMultiview multiviewState{};
+  multiviewState.viewMask = stereo_multiview::kViewMask;
+  if (config.multiview) {
+    pipelineDescriptor.nextInChain = &multiviewState;
+  }
+#endif
   return g_device.CreateRenderPipeline(&pipelineDescriptor);
 }
 
@@ -157,11 +169,17 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass, const wgp
   pass.SetBlendConstant(&data.color);
   pass.SetViewport(0.f, 0.f, static_cast<float>(targetSize.width), static_cast<float>(targetSize.height), data.depth,
                    data.depth);
-  if (data.rect.width > 0 && data.rect.height > 0) {
-    pass.SetScissorRect(data.rect.x, data.rect.y, data.rect.width, data.rect.height);
-  } else {
-    pass.SetScissorRect(0, 0, targetSize.width, targetSize.height);
-  }
+  const auto rect = target_rect(data, targetSize);
+  pass.SetScissorRect(rect.x, rect.y, rect.width, rect.height);
   pass.Draw(3);
+}
+
+void render_multiview(const DrawData& data, const wgpu::RenderPassEncoder& pass, const wgpu::Extent3D& targetSize) {
+  if (data.multiviewPipeline == PipelineRef{}) {
+    return;
+  }
+  DrawData multiview = data;
+  multiview.pipeline = data.multiviewPipeline;
+  render(multiview, pass, targetSize);
 }
 } // namespace aurora::gfx::clear

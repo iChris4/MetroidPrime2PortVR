@@ -6,12 +6,12 @@
 // as before: the sRGB decode, then the curve's inverse. Without tone data (row 1 x <= 0) the curve is
 // Remastered's static straight line at exposure 1: the decode alone.
 //
-// The inverse is bloom.cpp's untone where that one is exact (shoulder offset t2.z = -t2.y * t1.w and
+// The inverse is the one bloom.cpp had where that one is exact (shoulder offset t2.z = -t2.y * t1.w and
 // shoulder base t2.w = the line's end, as port_room_env.cpp writes them), in its general form
 // otherwise (the shoulder from where the line ends, through its own offset t2.z), and kept finite for
 // an RGBA16F target:
 // slopes below MinSlope count as MinSlope, the shoulder's asymptote is approached but never divided
-// by zero, and the reconstructed level is clamped to [0, HdrMax] (bloom caps it at 4.0 instead).
+// by zero, and the reconstructed level is clamped to [0, HdrMax].
 // Display white sits at the shoulder's asymptote, so it comes back as a large bounded level: that is
 // what an opaque white write needs to post-tone as white, not a claim that blends of it match LDR's.
 // Only this reconstruction is capped; genuine HDR writers (VFX's exposed tail) keep their values.
@@ -126,11 +126,13 @@ fn hdr_srgb_enc(l: vec3f) -> vec3f {
 }
 
 // Exposed scene light as linear display light in [0, 1]: the curve, or without tone data its static
-// line at exposure 1 (the identity, clamped to 1). The input is held to the finite RGBA16F range first.
+// line at exposure 1 (the identity, clamped to 1). The input is held to the finite RGBA16F range first,
+// signed: Remastered's tonemap (matglsl/00718a4) does not clamp its input, so a negative level (X-ray
+// pass A's sky) takes the toe cubic and only the output is clamped (kb topic/xray-post-shader-00089f0.md).
 fn hdr_display_linear(x: vec3f, t0: vec4f, t1: vec4f, t2: vec4f) -> vec3f {
-  let v = clamp(x, vec3f(0.0), vec3f(hdr_f16_max));
+  let v = clamp(x, vec3f(-hdr_f16_max), vec3f(hdr_f16_max));
   if (t1.x <= 0.0) {
-    return min(v, vec3f(1.0));
+    return clamp(v, vec3f(0.0), vec3f(1.0));
   }
   let y = vec3f(hdr_tone_fwd(v.r, t0, t1, t2), hdr_tone_fwd(v.g, t0, t1, t2), hdr_tone_fwd(v.b, t0, t1, t2));
   return clamp(y, vec3f(0.0), vec3f(1.0));
@@ -210,8 +212,8 @@ inline float tev_dst_factor(float c, int mode) noexcept {
 // (tone, clamp, sRGB) applied once, there.
 // Exposed light as linear display light (hdr_display_linear): the curve, or the identity line, in [0, 1].
 inline float display_linear(float x, const Tone& t) noexcept {
-  const float v = std::clamp(x, 0.f, HdrMax);
-  return t[1][0] > 0.f ? std::clamp(tone_fwd(v, t), 0.f, 1.f) : std::min(v, 1.f);
+  const float v = std::clamp(x, -HdrMax, HdrMax);
+  return std::clamp(t[1][0] > 0.f ? tone_fwd(v, t) : v, 0.f, 1.f);
 }
 
 inline float post_tone(float x, const Tone& t) noexcept { return srgb_enc(display_linear(x, t)); }

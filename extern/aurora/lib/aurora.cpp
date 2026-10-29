@@ -4,6 +4,8 @@
 
 #ifdef AURORA_ENABLE_GX
 #include "gfx/resources.hpp"
+#include "gfx/depth_peek.hpp"
+#include "gfx/overdraw.hpp"
 #include "gfx/frame.hpp"
 #include "gfx/pipeline_cache.hpp"
 #include "gfx/recording.hpp"
@@ -15,8 +17,10 @@
 #include "gx/texture.hpp"
 #include "imgui.hpp"
 #include "io.hpp"
+#include "stereo_host.hpp"
 #include "webgpu/gpu.hpp"
 #include "webgpu/gpu_prof.hpp"
+#include "gfx/perf_counters.hpp"
 #include <webgpu/webgpu_cpp.h>
 #endif
 
@@ -488,7 +492,7 @@ bool render_this_frame() {
 }
 #endif
 
-bool begin_frame() noexcept {
+bool begin_frame(uint64_t contentTag) noexcept {
   ZoneScoped;
 #ifdef AURORA_ENABLE_GX
   // Port: AURORA_HEADLESS has no surface to check or rebuild.
@@ -519,12 +523,16 @@ bool begin_frame() noexcept {
   if (!gfx::begin_frame()) {
     return false;
   }
+  // The stereo packet for this frame, before the first uniform is staged.
+  const gfx::StereoFrameState frameStereo = stereo_host::begin_frame(contentTag);
+  gfx::set_frame_stereo(frameStereo);
   // A failed staging-buffer acquisition must not leave an ImGui frame open.
   imgui::new_frame(window::get_window_size());
   gx::fifo::begin_frame();
   // Port: AURORA_RENDER_EVERY: the frame is recorded as usual, but a frame that is not rendered
   // records no draw (gx::fifo::set_frame_rendered tells the FIFO processor and the recorder).
-  gx::fifo::set_frame_rendered(render_this_frame());
+  // A stereo frame is always rendered: the headset's frame loop waits for every frame it hands out.
+  gx::fifo::set_frame_rendered(frameStereo.active || render_this_frame());
   // Port: AURORA_RENDERSKIP_COPYDEST: the render interval is the default limit on how stale a
   // copy's texture may be before its frame is rendered in full.
   gx::fifo::set_render_interval(render_every());
@@ -532,7 +540,7 @@ bool begin_frame() noexcept {
   return true;
 }
 
-void end_frame() noexcept {
+void end_frame(uint64_t contentTag) noexcept {
   ZoneScoped;
   // The frames just after an EFB resize, timed for its log line (webgpu::resize_swapchain).
   struct ResizeFrameTimer {
@@ -552,8 +560,26 @@ void end_frame() noexcept {
   gx::fifo::drain();
   gx::fifo::end_frame();
   gx::texture::end_frame();
+  // On a standalone headset nothing shows the mono image of an immersive frame's
+  // final pass (no EFB copy follows it, the window is not presented), so only its
+  // eyes are rendered. Anything that would read it keeps it: a screenshot, a depth
+  // snapshot, or a frame the sink would show as mono (stereo_host::encode).
+  const bool headsetOwnsDisplay = stereo_host::headset_owns_display();
+  // The desktop window showing an eye instead of the flat image needs that image as little
+  // (stereo_host::mirror_skips_mono): the window is then drawn from the eye targets below.
+  const int mirrorView = stereo_host::mirror_view();
+  const bool mirrorSkipsMono = stereo_host::mirror_skips_mono();
+  bool monoUnneeded = false;
+  {
+    const auto stereo = gfx::recorded_stereo_state();
+    monoUnneeded = (headsetOwnsDisplay || mirrorSkipsMono) && stereo.active && stereo.immersive &&
+                   stereo.contentTag == contentTag && !g_screenshotRequested.load(std::memory_order_acquire) &&
+                   !gfx::depth_peek::snapshot_wanted();
+    gfx::set_final_pass_mono_unneeded(monoUnneeded);
+  }
   gfx::finish();
   auto imguiDrawData = imgui::freeze();
+  const uint32_t logicalFrame = gfx::current_frame();
 
   const auto& presentSource = webgpu::present_source();
   const auto viewport = webgpu::calculate_present_viewport(webgpu::g_graphicsConfig.surfaceConfiguration.width,
@@ -574,7 +600,10 @@ void end_frame() noexcept {
   // present. Its bookkeeping (the frame slot, the staging buffer) is done by gfx::end_frame, so
   // the game never waits for it.
   const bool renderFrame = gx::fifo::frame_rendered();
-  gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, viewport, renderFrame,
+  const auto stereoState = gfx::recorded_stereo_state();
+  gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, viewport, renderFrame, contentTag, logicalFrame,
+                  stereoState,
+                  headsetOwnsDisplay, mirrorView, mirrorSkipsMono, monoUnneeded,
                   imguiDrawData = std::move(imguiDrawData)](
                      wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback> afterSubmitCallbacks) {
     wgpu::Texture currentTexture;
@@ -609,7 +638,7 @@ void end_frame() noexcept {
     }
     {
       window::SurfaceLock surfaceLock;
-      if (!skipPresent && window::is_presentable() && g_surface) {
+      if (!skipPresent && !headsetOwnsDisplay && window::is_presentable() && g_surface) {
         ZoneScopedN("Acquire texture");
         phase::set(phase::Render, "surface GetCurrentTexture");
         wgpu::SurfaceTexture surfaceTexture;
@@ -626,8 +655,52 @@ void end_frame() noexcept {
 
     const bool canPresent = currentTexture && currentView;
     if (canPresent) {
+      const uint32_t surfaceWidth = webgpu::g_graphicsConfig.surfaceConfiguration.width;
+      const uint32_t surfaceHeight = webgpu::g_graphicsConfig.surfaceConfiguration.height;
+      // The window drawn from the eyes: their mono image was not rendered (monoUnneeded). A
+      // frame whose eyes were not replayed after all keeps the flat image.
+      const bool eyesForWindow = mirrorSkipsMono && monoUnneeded && stereoState.replayed;
+      struct WindowEye {
+        wgpu::BindGroup bindGroup;
+        gfx::Viewport viewport;
+      };
+      std::array<WindowEye, AURORA_STEREO_EYE_COUNT> windowEyes{};
+      uint32_t windowEyeCount = 0;
       wgpu::BindGroup presentBindGroup;
-      if (rmlBindGroup && !rmlOverlay) {
+      if (eyesForWindow) {
+        const auto eyeSource = [&](uint32_t eye) {
+          const auto& output = stereoState.outputs[eye];
+          return webgpu::TextureWithSampler{
+              .texture = output.texture,
+              .view = output.view,
+              .size = output.size,
+              .format = output.format,
+              .sampler = webgpu::present_source().sampler,
+          };
+        };
+        if (mirrorView == AURORA_STEREO_MIRROR_BOTH) {
+          // Side by side, each eye letterboxed into its half.
+          for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
+            const auto source = eyeSource(eye);
+            if (!source.view) {
+              continue;
+            }
+            auto half = webgpu::calculate_present_viewport(surfaceWidth / 2, surfaceHeight, source.size.width,
+                                                           source.size.height);
+            half.left += static_cast<float>(eye * (surfaceWidth / 2));
+            windowEyes[windowEyeCount++] = {webgpu::create_copy_bind_group(source), half};
+          }
+        } else if (mirrorView == AURORA_STEREO_MIRROR_LEFT || mirrorView == AURORA_STEREO_MIRROR_RIGHT) {
+          const auto source = eyeSource(mirrorView == AURORA_STEREO_MIRROR_RIGHT ? 1 : 0);
+          if (source.view) {
+            const auto eyeViewport =
+                webgpu::calculate_present_viewport(surfaceWidth, surfaceHeight, source.size.width, source.size.height);
+            windowEyes[windowEyeCount++] = {
+                webgpu::create_copy_bind_group(webgpu::resample_source(encoder, eyeViewport, source)), eyeViewport};
+          }
+        }
+        // AURORA_STEREO_MIRROR_NONE: the window stays clear under the overlay.
+      } else if (rmlBindGroup && !rmlOverlay) {
         presentBindGroup = rmlBindGroup;
       } else {
         const auto& resampledSource = webgpu::resample_present_source(encoder, viewport);
@@ -648,13 +721,19 @@ void end_frame() noexcept {
             .timestampWrites = webgpu::gpu_prof::pass_writes("Present blit"),
         };
         const auto pass = encoder.BeginRenderPass(&renderPassDescriptor);
-        // Copy EFB -> XFB (swapchain)
         pass.SetPipeline(webgpu::g_CopyPipeline);
-        pass.SetBindGroup(0, presentBindGroup, 0, nullptr);
-        set_present_viewport(pass, viewport, webgpu::g_graphicsConfig.surfaceConfiguration.width,
-                             webgpu::g_graphicsConfig.surfaceConfiguration.height);
-
-        pass.Draw(3);
+        if (eyesForWindow) {
+          for (uint32_t i = 0; i < windowEyeCount; ++i) {
+            pass.SetBindGroup(0, windowEyes[i].bindGroup, 0, nullptr);
+            set_present_viewport(pass, windowEyes[i].viewport, surfaceWidth, surfaceHeight);
+            pass.Draw(3);
+          }
+        } else {
+          // Copy EFB -> XFB (swapchain)
+          pass.SetBindGroup(0, presentBindGroup, 0, nullptr);
+          set_present_viewport(pass, viewport, surfaceWidth, surfaceHeight);
+          pass.Draw(3);
+        }
         if (rmlBindGroup && rmlOverlay) {
           pass.SetPipeline(webgpu::g_CopyPremultipliedAlphaPipeline);
           pass.SetBindGroup(0, rmlBindGroup, 0, nullptr);
@@ -667,20 +746,27 @@ void end_frame() noexcept {
         imgui::render(pass, imguiDrawData);
         pass.End();
       }
-    } else if (!skipPresent) {
+    } else if (!skipPresent && !headsetOwnsDisplay) {
       Log.info("Skipping present; window not presentable");
     }
+    // The headset's eyes, whether or not the window could be presented.
+    const auto stereoSink = stereo_host::encode(encoder, stereoState, logicalFrame, contentTag);
     webgpu::gpu_prof::frame_end(encoder);
+    gfx::overdraw::frame_end(encoder);
     const wgpu::CommandBufferDescriptor cmdBufDescriptor{.label = "Redraw command buffer"};
     const auto buffer = encoder.Finish(&cmdBufDescriptor);
     {
       ZoneScopedN("Queue Submit");
       phase::set(phase::Render, "queue submit");
+      const gfx::perf::Timer timer{gfx::perf::g_submitNs};
       g_queue.Submit(1, &buffer);
     }
     gfx::sample_dawn_memory();
     phase::set(phase::Render, "after submit");
     webgpu::gpu_prof::after_submit();
+    // The bridge's native follow-up on the same queue, then its completion callback.
+    stereo_host::submitted(stereoSink);
+    gfx::overdraw::after_submit();
     if (canPresent && g_surface) {
       ZoneScopedN("Present");
       wgpu::ConvertibleStatus status = wgpu::Status::Error;
@@ -823,15 +909,26 @@ uint32_t max_texture_dimension() noexcept {
 AuroraInfo aurora_initialize(int argc, char* argv[], const AuroraConfig* config) {
   return aurora::initialize(argc, argv, *config);
 }
-void aurora_shutdown() { aurora::shutdown(); }
+void aurora_shutdown() {
+#ifdef AURORA_ENABLE_GX
+  aurora::stereo_host::shutdown();
+#endif
+  aurora::shutdown();
+}
 const AuroraEvent* aurora_update() { return aurora::update(); }
-bool aurora_begin_frame() { return aurora::begin_frame(); }
+bool aurora_begin_frame() { return aurora::begin_frame(AURORA_STEREO_CONTENT_TAG_UNKNOWN); }
+bool aurora_begin_frame_tagged(uint64_t contentTag) { return aurora::begin_frame(contentTag); }
 void aurora_release_lost_surface() { aurora::release_lost_surface(); }
 bool aurora_is_suspended() {
   return aurora::window::is_backgrounded() || !aurora::window::is_surface_ready() ||
          aurora::window::is_surface_changing();
 }
-void aurora_end_frame() { aurora::end_frame(); }
+void aurora_end_frame() { aurora::end_frame(AURORA_STEREO_CONTENT_TAG_UNKNOWN); }
+void aurora_end_frame_tagged(uint64_t contentTag) { aurora::end_frame(contentTag); }
+void aurora_end_frame_ex(uint64_t contentTag, void* imguiFrame) {
+  (void)imguiFrame;
+  aurora::end_frame(contentTag);
+}
 void aurora_set_background_pipelines_paused(bool paused) { aurora::gfx::set_background_pipelines_paused(paused); }
 void aurora_disable_config_persistence() { aurora::io::disable_config_persistence(); }
 AuroraBackend aurora_get_backend() { return aurora::g_config.desiredBackend; }

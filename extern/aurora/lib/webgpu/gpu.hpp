@@ -69,6 +69,8 @@ extern bool g_bcTexturesSupported;
 extern bool g_lightmapBinding;
 extern bool g_astcTexturesSupported;
 extern bool g_textureComponentSwizzleSupported;
+// The device has PrimedGun's Vulkan multiview (quest/dawn patches, gfx/stereo_multiview.hpp).
+extern bool g_multiviewSupported;
 extern bool g_dualSourceBlendingSupported;
 
 bool initialize(AuroraBackend backend, bool allowCpu);
@@ -84,9 +86,9 @@ void set_quality(uint32_t msaaSamples, uint16_t anisotropy);
 // format Undefined means the surface format.
 TextureWithSampler create_render_texture(uint32_t width, uint32_t height, bool multisampled,
                                          wgpu::TextureFormat format = wgpu::TextureFormat::Undefined);
-// Conservative policy, not a format probe: RGBA16Float as a blendable, multisampled, resolvable
-// attachment is core WebGPU, but only devices with CoreFeaturesAndLimits get the HDR scene. Compatibility
-// devices (many Android GLES / older Vulkan ones) stay LDR even where the format would work.
+// True with a live device. RGBA16Float as a blendable, multisampled, resolvable attachment is core WebGPU,
+// so Compatibility devices (no CoreFeaturesAndLimits) try the HDR scene too; ensure_scene_hdr_target()
+// falls back to LDR when the allocation raises an error.
 bool scene_hdr_supported() noexcept;
 // Allocates g_sceneHdr/g_sceneHdrResolved for the current g_frameBuffer size and sample count if
 // needed, under Validation/OutOfMemory/Internal error scopes. True only with both textures and views
@@ -97,6 +99,8 @@ bool ensure_scene_hdr_target();
 // g_sceneHdr's sample count, 0 while it is not allocated.
 uint32_t scene_hdr_sample_count() noexcept;
 void release_scene_hdr_target() noexcept;
+// A depth attachment in the configured depth format and MSAA sample count.
+TextureWithSampler create_depth_texture(uint32_t width, uint32_t height);
 // The EFB's targets as the calling thread sees them. The main thread records each frame against
 // the newest (g_frameBuffer, g_frameBufferResolved, g_depthBuffer); the render worker encodes
 // frames handed to it earlier, so on the worker these are the ones the frame it is encoding was
@@ -118,6 +122,9 @@ AuroraSampler get_resampler() noexcept;
 Viewport calculate_present_viewport(uint32_t surface_width, uint32_t surface_height, uint32_t content_width,
                                     uint32_t content_height) noexcept;
 const TextureWithSampler& resample_present_source(const wgpu::CommandEncoder& encoder, const Viewport& viewport);
+// The same for any texture (a stereo eye target shown in the window).
+const TextureWithSampler& resample_source(const wgpu::CommandEncoder& encoder, const Viewport& viewport,
+                                          const TextureWithSampler& source);
 void draw_clear(const wgpu::RenderPassEncoder& pass, bool clearColor, bool clearAlpha, bool clearDepth,
                 const Vec4<float>& clearColorValue, float clearDepthValue);
 

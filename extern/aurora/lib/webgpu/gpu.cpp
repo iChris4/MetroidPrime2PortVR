@@ -29,6 +29,7 @@
 #include "../gfx/render_worker.hpp"
 #include "../internal.hpp"
 #include "../window.hpp"
+#include "fdm.hpp"
 #include "gpu_prof.hpp"
 
 #ifdef WEBGPU_DAWN
@@ -43,6 +44,22 @@ void trim_copy_texture_cache() noexcept;
 
 namespace aurora::webgpu {
 static Module Log("aurora::gpu");
+
+#if defined(WEBGPU_DAWN) && defined(_WIN32)
+// RequestAdapterOptionsLUID is a Dawn-native extension (dawn/native/D3DBackend.h)
+// whose wire representation is a WebGPU chained header plus the Win32 LUID.
+// Spell that C ABI directly so RequestAdapter consumes it through the ordinary
+// WebGPU entry point; this is how the OpenXR runtime's adapter is pinned.
+struct RequestAdapterOptionsLuidWire {
+  wgpu::ChainedStruct chain{};
+  // Win32's LUID {DWORD LowPart; LONG HighPart;}, spelled out so this file
+  // needs no windows.h.
+  struct {
+    uint32_t LowPart = 0;
+    int32_t HighPart = 0;
+  } adapterLuid{};
+};
+#endif
 
 wgpu::Device g_device;
 wgpu::Queue g_queue;
@@ -82,6 +99,7 @@ bool g_bcTexturesSupported = false;
 bool g_lightmapBinding = false;
 bool g_astcTexturesSupported = false;
 bool g_textureComponentSwizzleSupported = false;
+bool g_multiviewSupported = false;
 static std::atomic_bool g_initialized = false;
 static std::atomic_bool g_vsyncEnabled = true;
 
@@ -105,6 +123,26 @@ AuroraLogLevel wgpu_log_level(wgpu::LoggingType type) {
 void wgpu_log(wgpu::LoggingType type, wgpu::StringView message) {
   Log.report(wgpu_log_level(type), "WebGPU message: {}", message);
 }
+
+#if defined(WEBGPU_DAWN) && defined(__ANDROID__) && defined(WGPU_DAWN_RENDER_PASS_MULTIVIEW_INIT)
+// Multiview is left off on an Adreno 6xx (Quest 2 and Quest Pro, Adreno 650): there the
+// impact particles of a charged shot came out as green and red blocks under multiview and
+// were right in a pass per eye (a Quest 2 player, 2026-10-09; the Quest 3's Adreno 740
+// draws them right either way). MP2_MULTIVIEW_ADRENO6=1 takes it anyway, to test a fix.
+bool multiview_unsafe_on_adapter() noexcept {
+  if (const char* force = std::getenv("MP2_MULTIVIEW_ADRENO6"); force != nullptr && *force == '1') {
+    return false;
+  }
+  // Device names look like "Adreno (TM) 650": the model is the first number after "Adreno".
+  const std::string_view device{g_adapterInfo.device};
+  const size_t adreno = device.find("Adreno");
+  if (adreno == std::string_view::npos) {
+    return false;
+  }
+  const size_t model = device.find_first_of("0123456789", adreno);
+  return model != std::string_view::npos && device[model] == '6';
+}
+#endif
 
 struct ResampleUniformBlock {
   uint32_t samplerMode = 0;
@@ -247,6 +285,17 @@ wgpu::TextureFormat best_surface_format() {
   if (g_surfaceCapabilities.formatCount == 0) {
     return wgpu::TextureFormat::Undefined;
   }
+#if defined(__ANDROID__)
+  // The eyes take the surface format, and the Quest's OpenXR bridge shares them
+  // through AHardwareBuffers, which have no BGRA format (vulkan_interop.cpp).
+  if (g_config.xrInterop) {
+    for (size_t i = 0; i < g_surfaceCapabilities.formatCount; ++i) {
+      if (to_linear(g_surfaceCapabilities.formats[i]) == wgpu::TextureFormat::RGBA8Unorm) {
+        return wgpu::TextureFormat::RGBA8Unorm;
+      }
+    }
+  }
+#endif
   for (size_t i = 0; i < g_surfaceCapabilities.formatCount; ++i) {
     const auto format = to_linear(g_surfaceCapabilities.formats[i]);
     if (format == wgpu::TextureFormat::RGBA8Unorm || format == wgpu::TextureFormat::BGRA8Unorm) {
@@ -372,7 +421,6 @@ uint32_t g_sceneHdrSamples = 0;
 // changes or release_scene_hdr_target() runs.
 wgpu::Extent3D g_sceneHdrFailedSize{};
 uint32_t g_sceneHdrFailedSamples = 0;
-bool g_sceneHdrNoCoreLogged = false;
 
 bool scene_hdr_handles_valid(const TextureWithSampler& target) noexcept {
   return target.texture && target.view && target.format == SceneHdrFormat;
@@ -440,7 +488,7 @@ bool create_scene_hdr_textures(uint32_t width, uint32_t height, std::string& err
 }
 } // namespace
 
-bool scene_hdr_supported() noexcept { return g_device && g_hasCoreFeatures; }
+bool scene_hdr_supported() noexcept { return static_cast<bool>(g_device); }
 
 bool ensure_scene_hdr_target() {
   const auto size = g_frameBuffer.size;
@@ -453,13 +501,6 @@ bool ensure_scene_hdr_target() {
   // Stale (other size or sample count) or partial: never reused.
   release_scene_hdr_textures();
   if (!g_device || size.width == 0 || size.height == 0) {
-    return false;
-  }
-  if (!g_hasCoreFeatures) {
-    if (!g_sceneHdrNoCoreLogged) {
-      g_sceneHdrNoCoreLogged = true;
-      Log.info("HDR scene target disabled: the device lacks CoreFeaturesAndLimits");
-    }
     return false;
   }
   if (g_sceneHdrFailedSamples == samples && g_sceneHdrFailedSize.width == size.width &&
@@ -475,6 +516,7 @@ bool ensure_scene_hdr_target() {
     return false;
   }
   g_sceneHdrSamples = samples;
+  Log.info("HDR scene target {}x{} ({} samples) allocated", size.width, size.height, samples);
   g_sceneHdrFailedSize = {};
   g_sceneHdrFailedSamples = 0;
   return true;
@@ -559,7 +601,7 @@ Viewport calculate_present_viewport(uint32_t surface_width, uint32_t surface_hei
   };
 }
 
-static TextureWithSampler create_depth_texture(uint32_t width, uint32_t height) {
+TextureWithSampler create_depth_texture(uint32_t width, uint32_t height) {
   const wgpu::Extent3D size{
       .width = width,
       .height = height,
@@ -845,7 +887,11 @@ wgpu::BindGroup create_copy_bind_group(const TextureWithSampler& source) {
 }
 
 const TextureWithSampler& resample_present_source(const wgpu::CommandEncoder& encoder, const Viewport& viewport) {
-  const auto& source = present_source();
+  return resample_source(encoder, viewport, present_source());
+}
+
+const TextureWithSampler& resample_source(const wgpu::CommandEncoder& encoder, const Viewport& viewport,
+                                          const TextureWithSampler& source) {
   const uint32_t width = viewport_extent(viewport.width);
   const uint32_t height = viewport_extent(viewport.height);
   // At 1:1 both resamplers preserve texels, and sharpening only applies to upscales.
@@ -1092,7 +1138,7 @@ static bool initialize_once(AuroraBackend auroraBackend, bool allowCpu) {
       Log.info("MP2_GL_VERSION=3.3: forcing an OpenGL 3.3 core context");
     }
 #endif
-    const wgpu::RequestAdapterOptions options{
+    wgpu::RequestAdapterOptions options{
 #ifdef WEBGPU_DAWN
         .nextInChain = forceGL33 ? &adapterTogglesDescriptor : nullptr,
 #endif
@@ -1101,6 +1147,17 @@ static bool initialize_once(AuroraBackend auroraBackend, bool allowCpu) {
         .backendType = backend,
         .compatibleSurface = g_surface,
     };
+#if defined(WEBGPU_DAWN) && defined(_WIN32)
+    RequestAdapterOptionsLuidWire luidOptions{};
+    if (backend == wgpu::BackendType::D3D12 && g_config.xrInterop && g_config.hasD3D12AdapterLuid) {
+      luidOptions.chain.sType = wgpu::SType::RequestAdapterOptionsLUID;
+      luidOptions.adapterLuid.LowPart = g_config.d3d12AdapterLuidLow;
+      luidOptions.adapterLuid.HighPart = g_config.d3d12AdapterLuidHigh;
+      options.nextInChain = &luidOptions.chain;
+      Log.info("Pinning D3D12 adapter to OpenXR LUID {:08x}:{:08x}",
+               static_cast<uint32_t>(luidOptions.adapterLuid.HighPart), luidOptions.adapterLuid.LowPart);
+    }
+#endif
     Log.info("Requesting adapter\n  Feature level: {}\n  Power preference: {}\n  Backend: {}\n  Compatible surface: {}",
              magic_enum::enum_name(options.featureLevel), magic_enum::enum_name(options.powerPreference),
              magic_enum::enum_name(options.backendType), static_cast<bool>(options.compatibleSurface));
@@ -1335,6 +1392,7 @@ static bool initialize_once(AuroraBackend auroraBackend, bool allowCpu) {
     g_bcTexturesSupported = false;
     g_astcTexturesSupported = false;
     g_textureComponentSwizzleSupported = false;
+    g_multiviewSupported = false;
     g_dualSourceBlendingSupported = false;
     // AURORA_DUAL_SOURCE=0 keeps the two-draw fallback (A/B checks of ShaderConfig::dualSrcAlpha).
     const char* dualSourceEnv = std::getenv("AURORA_DUAL_SOURCE");
@@ -1382,6 +1440,41 @@ static bool initialize_once(AuroraBackend auroraBackend, bool allowCpu) {
         }
         requiredFeatures.push_back(feature);
       }
+#if defined(WEBGPU_DAWN) && defined(_WIN32)
+      // The OpenXR stereo bridge (lib/webgpu/d3d12_interop.cpp) imports its eye
+      // intermediates as shared D3D12 resources and orders them with a shared
+      // fence. Dawn only lists these under allow_unsafe_apis (set on the instance).
+      if (g_config.xrInterop && g_backendType == wgpu::BackendType::D3D12 &&
+          (feature == wgpu::FeatureName::SharedTextureMemoryD3D12Resource ||
+           feature == wgpu::FeatureName::SharedFenceDXGISharedHandle)) {
+        requiredFeatures.push_back(feature);
+      }
+#endif
+#if defined(WEBGPU_DAWN) && defined(__ANDROID__)
+      // The Quest's OpenXR bridge (lib/webgpu/vulkan_interop.cpp) shares the eyes with the
+      // runtime's own VkDevice through AHardwareBuffers ordered by sync fds. Its cancel and
+      // forget paths release Dawn objects from the XR pacing thread, hence the implicit
+      // device synchronization.
+      if (g_config.xrInterop && g_backendType == wgpu::BackendType::Vulkan &&
+          (feature == wgpu::FeatureName::SharedTextureMemoryAHardwareBuffer ||
+           feature == wgpu::FeatureName::SharedFenceSyncFD)) {
+        requiredFeatures.push_back(feature);
+      }
+#if defined(WGPU_DAWN_RENDER_PASS_MULTIVIEW_INIT)
+      // PrimedGun's patched Dawn (quest/dawn): both eyes in one Vulkan multiview
+      // render pass (gfx/stereo_multiview.hpp).
+      if (g_config.xrInterop && g_backendType == wgpu::BackendType::Vulkan &&
+          feature == wgpu::FeatureName::DawnMultiview) {
+        if (multiview_unsafe_on_adapter()) {
+          Log.info("Vulkan multiview left off on {}: a pass per eye (MP2_MULTIVIEW_ADRENO6=1 forces it)",
+                   std::string_view{g_adapterInfo.device});
+        } else {
+          requiredFeatures.push_back(feature);
+          g_multiviewSupported = true;
+        }
+      }
+#endif
+#endif
 #ifdef WEBGPU_DAWN
       if (feature == wgpu::FeatureName::ImplicitDeviceSynchronization && !implicitSyncDisabled) {
         requiredFeatures.push_back(feature);
@@ -1404,6 +1497,9 @@ static bool initialize_once(AuroraBackend auroraBackend, bool allowCpu) {
     if (!implicitSyncEnabled) {
       Log.warn("ImplicitDeviceSynchronization {}: multi-threaded device use is unsynchronized",
                implicitSyncDisabled ? "disabled by AURORA_IMPLICIT_SYNC=0" : "not supported");
+    }
+    if (g_multiviewSupported) {
+      Log.info("Vulkan multiview enabled for the stereo eye passes");
     }
 #ifdef WEBGPU_DAWN
     wgpu::DawnCacheDeviceDescriptor cacheDescriptor({.nextInChain = nullptr});
@@ -1522,6 +1618,10 @@ static bool initialize_once(AuroraBackend auroraBackend, bool allowCpu) {
             Log.warn("Device lost: {}", message);
           }
         });
+    // Foveated eye rendering (fdm.hpp): decided with the device, since the extension flags every
+    // render pipeline. Only the Quest's patched Dawn has it; elsewhere the request is a no-op.
+    fdm::request(g_config.xrInterop && g_config.xrFragmentDensityMap &&
+                 g_backendType == wgpu::BackendType::Vulkan);
     const auto future =
         g_adapter.RequestDevice(&deviceDescriptor, wgpu::CallbackMode::WaitAnyOnly,
                                 [](wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message) {
@@ -1542,6 +1642,7 @@ static bool initialize_once(AuroraBackend auroraBackend, bool allowCpu) {
     g_device.SetLoggingCallback(wgpu_log);
   }
   g_queue = g_device.GetQueue();
+  fdm::device_created();
 
   if (headless()) {
     // Port: AURORA_HEADLESS: no surface to ask; the framebuffers are made as usual.

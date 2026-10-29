@@ -232,8 +232,15 @@ void PADRestoreDefaultMapping(u32 port);
 void PADBlockInput(bool block);
 
 void PADSetVirtualStatus(u32 port, const PADStatus* status);
+void PADSetVirtualExclusive(u32 port, BOOL exclusive);
 void PADClearVirtualStatus(u32 port);
 void PADClearAllVirtualStatus();
+
+/* A virtual pad's rumble: while the callback returns TRUE for a channel, PADControlMotor hands it
+ * that channel's commands instead of driving the controller assigned there. NULL removes it. */
+typedef BOOL (*PADMotorCallback)(u32 chan, u32 cmd);
+void PADSetMotorCallback(PADMotorCallback callback);
+
 /* The next PADRead takes this status for the port in place of its own keyboard
  * and controller mapping (blocking, unblock suppression, the virtual status,
  * rumble and LEDs still apply). One read only. An err other than PAD_ERR_NONE

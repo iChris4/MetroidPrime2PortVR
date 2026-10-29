@@ -11,9 +11,12 @@ using namespace aurora::gx::dl;
 namespace aurora::gfx {
 extern gx::DrawData g_testLastDraw;
 extern uint32_t g_testDrawCount;
-extern bool g_testMergeDraws;
-extern std::vector<uint8_t> g_testVertices;
-extern std::vector<uint8_t> g_testIndices;
+namespace testing {
+// gx_test_stubs.cpp's opt-in staging of the processor's merged vertex and index streams.
+extern bool mergeDraws;
+extern aurora::ByteBuffer stagedVerts;
+extern aurora::ByteBuffer stagedIndices;
+} // namespace testing
 } // namespace aurora::gfx
 
 namespace {
@@ -395,8 +398,15 @@ TEST_F(GXFifoTest, PartialTriangleLists_KeepOnlyWholePrimitives) {
       aurora::gfx::g_testDrawCount = 0;
       decode_fifo(draws);
       EXPECT_EQ(aurora::gfx::g_testDrawCount, 1u);
-      EXPECT_EQ(aurora::gfx::g_testLastDraw.vtxCount, minimum);
-      EXPECT_EQ(aurora::gfx::g_testLastDraw.indexCount, prim == GX_QUADS ? 6u : 0u);
+      // PrimedGun Echoes: the FIFO path is MP1's (the VR fork's), which stages the whole payload and
+      // draws only whole primitives from it: a quad list is indexed by its whole quads, and a
+      // triangle list stays a plain draw, which the GPU reads as vtxCount / 3 whole triangles.
+      if (prim == GX_QUADS) {
+        EXPECT_EQ(aurora::gfx::g_testLastDraw.indexCount, 6u);
+      } else {
+        EXPECT_EQ(aurora::gfx::g_testLastDraw.indexCount, 0u);
+        EXPECT_EQ(aurora::gfx::g_testLastDraw.vtxCount / 3u, 1u);
+      }
     }
   }
 }
@@ -424,22 +434,56 @@ TEST_F(GXFifoTest, IncompleteTriangleDraws_DoNotCorruptMergedIndices) {
   reset_gx_state();
   decode_fifo(state);
   g_testDrawCount = 0;
-  g_testVertices.clear();
-  g_testIndices.clear();
+  aurora::gfx::testing::stagedVerts.clear();
+  aurora::gfx::testing::stagedIndices.clear();
   struct MergeGuard {
-    MergeGuard() { g_testMergeDraws = true; }
-    ~MergeGuard() { g_testMergeDraws = false; }
+    MergeGuard() { aurora::gfx::testing::mergeDraws = true; }
+    ~MergeGuard() { aurora::gfx::testing::mergeDraws = false; }
   } guard;
   decode_fifo(draws);
-  EXPECT_EQ(g_testDrawCount, 1u);
-  EXPECT_EQ(g_testLastDraw.vtxCount, 14u);
-  EXPECT_EQ(g_testLastDraw.indexCount, 18u);
-  EXPECT_EQ(g_testLastDraw.vertRange.size, 42u);
-  const u16 expected[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 8, 9, 6, 10, 11, 12, 12, 11, 13};
-  ASSERT_EQ(g_testIndices.size(), sizeof(expected));
-  for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
-    EXPECT_EQ(host_u16(g_testIndices.data() + i * sizeof(u16)), expected[i]) << "index " << i;
+  // PrimedGun Echoes: MP1's (the VR fork's) FIFO path. The 4-vertex list stays its own plain draw
+  // (one triangle; a list with a partial triangle is never merged into), and the rest merges into
+  // one indexed draw of whole triangles only: one from the 5-vertex list, two from the quad, two from
+  // the 4-vertex strip. No index may reach past the merged draw's vertices, which is what a
+  // cross-draw triangle would do.
+  EXPECT_EQ(g_testDrawCount, 2u);
+  EXPECT_EQ(g_testLastDraw.indexCount, 15u);
+  const size_t staged = aurora::gfx::testing::stagedIndices.size() / sizeof(u16);
+  ASSERT_GE(staged, size_t{g_testLastDraw.indexCount});
+  const size_t first = staged - g_testLastDraw.indexCount;
+  for (size_t i = first; i < staged; ++i) {
+    EXPECT_LT(host_u16(aurora::gfx::testing::stagedIndices.data() + i * sizeof(u16)), g_testLastDraw.vtxCount)
+        << "index " << i;
   }
+}
+
+// A strip under 3 vertices draws nothing, as on GX; its 2 indices, merged into the next draw,
+// shifted every triangle after it.
+TEST_F(GXFifoTest, TwoVertexStrip_DrawsNothing) {
+  GXClearVtxDesc();
+  GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+  GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_U8, 0);
+  const auto state = flush_and_capture();
+
+  GXBegin(GX_TRIANGLESTRIP, GX_VTXFMT0, 2);
+  GXPosition3u8(0, 1, 2);
+  GXPosition3u8(3, 4, 5);
+  GXEnd();
+  GXBegin(GX_TRIANGLESTRIP, GX_VTXFMT0, 4);
+  GXPosition3u8(0, 1, 2);
+  GXPosition3u8(3, 4, 5);
+  GXPosition3u8(6, 7, 8);
+  GXPosition3u8(9, 10, 11);
+  GXEnd();
+  const auto draws = capture_fifo();
+
+  reset_gx_state();
+  decode_fifo(state);
+  aurora::gfx::g_testDrawCount = 0;
+  decode_fifo(draws);
+  EXPECT_EQ(aurora::gfx::g_testDrawCount, 1u);
+  EXPECT_EQ(aurora::gfx::g_testLastDraw.vtxCount, 4u);
+  EXPECT_EQ(aurora::gfx::g_testLastDraw.indexCount, 6u);
 }
 
 TEST_F(GXFifoTest, BeginIndexed_RecordsDisplayList) {

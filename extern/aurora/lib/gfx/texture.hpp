@@ -1,7 +1,9 @@
 #pragma once
 #include <dolphin/gx.h>
 
+#include <memory>
 #include <utility>
+#include <vector>
 
 #include "types.hpp"
 
@@ -39,12 +41,19 @@ struct TextureRef {
   wgpu::Texture texture;
   wgpu::TextureView sampleTextureView;
   wgpu::TextureView attachmentTextureView;
+  // The sample view as a 2D array, for the multiview stereo replay
+  // (stereo_multiview.hpp); made on first use (array_texture_view), or set by
+  // whoever made the texture with more than one layer.
+  wgpu::TextureView arrayTextureView;
   wgpu::Extent3D size;
   wgpu::TextureFormat format;
   uint32_t mipCount;
   u32 gxFormat;
   bool hasArbitraryMips = false;
   bool isReplacement = false;
+  // Compatibility devices only, block-compressed formats only: the bytes uploaded (every mip, tightly packed in
+  // block rows), because such a texture can't be copied on the GPU there; the VFX atlas fills its layers from them.
+  std::shared_ptr<const std::vector<uint8_t>> cpuBytes;
   // The creation label (interned, so it outlives the texture), for the live-texture breakdown.
   const char* label = nullptr;
 
@@ -81,6 +90,9 @@ TextureHandle new_render_texture(uint32_t width, uint32_t height, u32 gxFormat, 
                                  wgpu::TextureFormat format = wgpu::TextureFormat::Undefined) noexcept;
 TextureHandle new_conv_texture(uint32_t width, uint32_t height, u32 gxFormat, const char* label) noexcept;
 void write_texture(TextureRef& ref, ArrayRef<uint8_t> data) noexcept;
+// `ref`'s sample view as a 2D array view (all its mips, its first layer, the same
+// format and swizzle), created on first use. Recording thread.
+const wgpu::TextureView& array_texture_view(TextureRef& ref) noexcept;
 }; // namespace aurora::gfx
 
 struct GXTexObj_ {

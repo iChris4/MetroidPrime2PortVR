@@ -37,7 +37,7 @@ LocalTime system_time_to_local_time(SystemTime time) {
 #else
   const auto wholeSeconds = chrono::floor<chrono::seconds>(time);
   const auto fractionalSeconds = chrono::duration_cast<SystemDuration>(time - wholeSeconds);
-  const std::time_t wallClock = chrono::system_clock::to_time_t(time);
+  const std::time_t wallClock = chrono::system_clock::to_time_t(wholeSeconds);
   std::tm localTm{};
 
 #if defined(_WIN32)
@@ -62,8 +62,8 @@ SystemTime local_time_to_system_time(LocalTime time) {
 #if CHRONO_TIME_WORKS
   return chrono::zoned_time(chrono::current_zone(), time).get_sys_time();
 #else
-  // Apple libc++ currently ships <chrono> with the C++20 timezone database API disabled
-  // (_LIBCPP_HAS_TIME_ZONE_DATABASE == 0), so zoned_time/current_zone are unavailable there.
+  // Match the CRT conversion above on Windows/Wine and on libc++ builds without
+  // the C++20 timezone database. Let mktime determine daylight-saving time.
   const auto& localDays = chrono::floor<chrono::days>(time);
   const chrono::year_month_day ymd{localDays};
   const chrono::hh_mm_ss hms{chrono::floor<chrono::microseconds>(time - localDays)};

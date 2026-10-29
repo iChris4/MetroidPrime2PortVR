@@ -64,6 +64,17 @@ target_compile_definitions(os_time_tests PRIVATE AURORA TARGET_PC)
 target_link_libraries(os_time_tests PRIVATE fmt::fmt gtest gtest_main)
 gtest_discover_tests(os_time_tests)
 
+# The fixed foveation density maps (gfx/foveation.hpp, header-only).
+add_executable(foveation_tests
+  foveation_test.cpp
+)
+target_include_directories(foveation_tests PRIVATE
+  ../include
+  ../lib
+)
+target_link_libraries(foveation_tests PRIVATE gtest gtest_main)
+gtest_discover_tests(foveation_tests)
+
 if (AURORA_ENABLE_GX)
   # GX FIFO round-trip tests
   # Compile GX sources directly to avoid pulling in the full renderer/WebGPU runtime
@@ -95,6 +106,8 @@ if (AURORA_ENABLE_GX)
     ../lib/gx/fifo.cpp
     ../lib/gx/command_processor.cpp
     ../lib/gfx/perf.cpp
+    ../lib/gx/geometry_cache.cpp
+    gx_geometry_cache_test.cpp
     ../lib/gx/regs.cpp
     ../lib/gx/resident.cpp
     ../lib/thread.cpp
@@ -192,6 +205,7 @@ if (AURORA_ENABLE_GX)
 
   add_executable(gfx_recording_tests
     gfx_recording_test.cpp
+    native_vertex_test.cpp
     gx_uniform_limit_test.cpp
     gx_suit_glass_test.cpp
     gx_inventory_visor_test.cpp
@@ -211,6 +225,7 @@ if (AURORA_ENABLE_GX)
   target_link_libraries(gfx_recording_tests PRIVATE
     aurora::gx
     aurora::vi
+    absl::flat_hash_map
     gtest
     gtest_main
     absl::btree # gx.hpp includes absl headers; aurora_gx only gets them privately

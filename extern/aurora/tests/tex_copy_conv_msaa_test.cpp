@@ -210,9 +210,8 @@ TEST_F(TexCopyConvMsaaTest, CompatibilityDeviceHasNoMultisampledDepthConversion)
   for (const auto fmt : DepthFormats) {
     SCOPED_TRACE(static_cast<int>(fmt));
     EXPECT_FALSE(tex_copy_conv::depth_conversion_supported(fmt, 4));
-    // MP2's vendored Aurora has no Compatibility depth conversion at all (MP1 reads depth there
-    // through a comparison sampler), so a 1x copy has no pipeline either, as it never had.
-    EXPECT_FALSE(tex_copy_conv::depth_conversion_supported(fmt, 1));
+    // A 1x copy converts here as it always did.
+    EXPECT_TRUE(tex_copy_conv::depth_conversion_supported(fmt, 1));
   }
   EXPECT_TRUE(g_uncapturedErrors.empty()) << g_uncapturedErrors.front();
 }

@@ -7,6 +7,10 @@
 extern "C" {
 #endif
 
+// Invert front/back culling while drawing reflected model geometry. Returns
+// the previous setting so nested model-draw scopes can restore it.
+u8 AuroraSetCullMirrored(u8 mirrored);
+
 //
 // Subcommands for GX_AURORA.
 //
@@ -277,11 +281,11 @@ extern "C" {
 //   f32 diffuse r, g, b, a, f32 incan r, g, b, a, f32 coverage
 #define GX_AURORA_SET_PBR_MODEL_MODULATION 0x006D
 
-// Port extension: Remastered's bloom, colour grade and frame average over the EFB as drawn so
-// far (see GXPortPostProcess). Queued, so the game thread does not wait for the FIFO to be
+// Port extension: Remastered's bloom, colour grade and frame average over the HDR scene as drawn
+// so far (see GXPortPostProcessScene). Queued, so the game thread does not wait for the FIFO to be
 // processed before it can record it.
 // Payload:
-//   32 u32: aurora::gfx::bloom::Params, word for word
+//   49 u32: aurora::gfx::bloom::Params, word for word
 #define GX_AURORA_PORT_POST_PROCESS 0x0052
 
 // Replaces one light's colour, position and attenuation in the following PBR draws with a
@@ -369,15 +373,85 @@ extern "C" {
 #define GX_AURORA_PORT_XRAY 0x006B
 // Port extension: one pass of Remastered's thermal visor post (GXPortThermalPass). Payload: 20 u32 words.
 #define GX_AURORA_PORT_THERMAL 0x006C
-// Port extension: EFB draws go to the RGBA16F linear HDR scene (GXPortSceneHdr). Payload: u8 on.
+// Port extension: EFB draws go to the RGBA16F linear HDR scene (GXPortSceneHdr).
+// Payload: u8 mode, 0 display / 1 scene / 2 pause (reuse colour, clear depth).
 #define GX_AURORA_PORT_SCENE_HDR 0x006E
 // Port extension: the EFB copies that follow are linear scene copies (GXPortCopyScene). Payload: u8 on.
 #define GX_AURORA_PORT_COPY_SCENE 0x006F
 // Port extension: Remastered's actor shadow (GXPortActorShadow*). Payload: u8 mode (0 end, 1 casters
 // begin, 2 decal begin, 3 render the actor maps), then for 1 and 2 u8 layer and 16 vec4 floats.
 #define GX_AURORA_PORT_ACTOR_SHADOW 0x0070
+// Port extension: a user clip plane for the following triangle draws (GXSetClipPlane): a fragment
+// is kept where dot(view-space position, plane.xyz) + plane.w >= 0. Stays in effect until changed.
+// Payload: u8 on, then 4 f32 (the plane in view space).
+#define GX_AURORA_SET_CLIP_PLANE 0x0071
+// Port extension: Remastered's silhouette shell (GXPortShell). Payload: u8 mode (0 end, 1 depth
+// prepass, 2 colour), then for 1 and 2 24 f32 (CCH0..CCH4, then time, depth shift, tex0 sRGB, 0).
+#define GX_AURORA_PORT_SHELL 0x0072
+
+// Remastered's Model_ThermalOverride on the following PBR draws in the HDR scene (see GXSetPBRThermal).
+// Payload:
+//   f32 x, f32 y, f32 blended, u32 on
+#define GX_AURORA_SET_PBR_THERMAL 0x0073
 
 #define GX2_SET_POLYGON_OFFSET 0x1000
+
+/*
+ * PrimedGun: the OpenXR fork's subcommands live in a block of their own, 0xF000-0xF0FF. Upstream numbers its
+ * own up from 0x0001 (0x0010-0x001F are GX_AURORA_LOAD_ARRAYBASE's, the GX2_ ones start at 0x1000), and in two
+ * merges running (2026-10-07, 2026-10-08) its next IDs landed on ours while ours followed its last one. Number new
+ * PrimedGun subcommands up from the last one below, as plain hex literals so the configure-time scan sees them,
+ * and add each to both ids[] lists in lib/gx/command_processor.cpp (aurora_subcommand_ids_unique and
+ * primedgun_aurora_subcommands_in_block) as well as giving it a handler in handle_aurora.
+ * A duplicate fails the build (aurora_subcommand_ids_unique in lib/gx/command_processor.cpp, and the scan of
+ * this header in extern/aurora/CMakeLists.txt).
+ */
+#define PRIMEDGUN_AURORA_SUBCMD_FIRST 0xF000
+#define PRIMEDGUN_AURORA_SUBCMD_LAST 0xF0FF
+
+/**
+ * Stereo replay draw route for the draws that follow (AuroraStereoDrawRoute in aurora/gfx.h).
+ * Must be followed by one u8.
+ */
+#define GX_AURORA_STEREO_DRAW_ROUTE 0xF000
+
+/**
+ * The plane in front of the head that AURORA_STEREO_ROUTE_HEAD_LOCKED_2D lays orthographic draws on and takes EFB
+ * copies through (AuroraSetStereoHeadLockedPlane). Must be followed by three f32.
+ */
+#define GX_AURORA_STEREO_HEAD_LOCKED_PLANE 0xF001
+
+/**
+ * A texture matrix of the draws that follow projects positions onto the screen (AuroraSetStereoScreenTexMtx), so
+ * the stereo replay derives it again per eye. Must be followed by two u8: the texture matrix slot (0-9, 0xFF for
+ * none) and the position matrix slot (0-9) it projects through.
+ */
+#define GX_AURORA_STEREO_SCREEN_TEX_MTX 0xF002
+
+/**
+ * Ordered map triangles: POS/NRM carry both line endpoints, CLR0 the colour,
+ * TEX0 the signed logical line width and endpoint selector (negative for fills).
+ * A u8 enables/disables this shader variant; fills retain GX culling, lines do not.
+ */
+#define GX_AURORA_MAP_BATCH 0xF003
+
+/**
+ * A static world surface's display list, read where it lives by the FIFO processor instead of being copied
+ * into the FIFO: u32 geometry set (nonzero, one per CCubeRenderer area list item), u64 address, u32 byte
+ * size. The display list and the arrays it indexes stay valid until the set is freed.
+ */
+#define GX_AURORA_CALL_CACHED_DL 0xF004
+/**
+ * Frees a geometry set (u32): nothing of it is drawn afterwards, and the FIFO processor drops what it
+ * kept for the set.
+ */
+#define GX_AURORA_FREE_GEOMETRY_SET 0xF005
+/**
+ * Where AURORA_STEREO_ROUTE_ANCHORED_3D / FLOATING_3D place the camera-space draws that follow
+ * (AuroraSetStereoPlacement3D, AuroraSetStereoPlacement3DFollowHead). Must be followed by eight f32:
+ * scale, the offset's x, y, z, then the head point's x, y, z and how far it follows the head.
+ */
+#define GX_AURORA_STEREO_PLACEMENT_3D 0xF006
 
 
 /*
@@ -427,6 +501,63 @@ void AuroraGXSync(void);
  * Overrides the automatically scaled values set by the logical GXSetViewport.
  */
 void GXSetViewportRender(f32 left, f32 top, f32 wd, f32 ht, f32 nearz, f32 farz);
+
+/**
+ * Routes the GX draws that follow through the stereo replay (an AuroraStereoDrawRoute). Ordered with the
+ * draws through the FIFO; resets to AURORA_STEREO_ROUTE_WORLD at every frame begin.
+ */
+void AuroraSetStereoDrawRoute(u32 route);
+
+void AuroraSetMapBatch(u8 enabled);
+
+/**
+ * Draws a static world surface's display list as part of geometry set `set` (GX_AURORA_CALL_CACHED_DL): the
+ * FIFO processor reads it in place, so the data must outlive the set (AuroraFreeGeometrySet). Flushes pending
+ * state like GXCallDisplayList.
+ */
+void AuroraCallCachedDisplayList(u32 set, const void* data, u32 nbytes);
+void AuroraFreeGeometrySet(u32 set);
+
+/**
+ * The plane in front of the head that AURORA_STEREO_ROUTE_HEAD_LOCKED_2D lays orthographic draws on and takes EFB
+ * copies through: the tangents of the half angles the mono viewport spans across and up (those of the HUD camera the
+ * 2D draws should stay registered with) and the plane's distance along the view, in the game camera's units, before
+ * the head-locked scales. Ordered with the draws through the FIFO; kept until set again.
+ */
+void AuroraSetStereoHeadLockedPlane(f32 tanHalfWidth, f32 tanHalfHeight, f32 distance);
+
+/**
+ * Tells the stereo replay that texture matrix `texMtx` (GX_TEXMTX0..GX_TEXMTX9) of the draws that follow projects
+ * positions onto the screen through position matrix `pnMtx` (GX_PNMTX0..GX_PNMTX9): the (s, t, q) rows of a
+ * GX_TG_MTX3x4 texgen from GX_TG_POS, with s = (x + w) / 2, t = (w - y) / 2 and q = w of the vertex's clip position,
+ * so s / q and t / q are its own place in a copy of the viewport. The game loads it from its own projection and
+ * modelview; each eye's copy of the draw's uniform gets it derived again from that eye's projection and position
+ * matrix, so a draw that samples the viewport's EFB copy through it reads what lies behind it in that eye's own copy
+ * rather than where the mono camera put it. GX_IDENTITY ends it. Ordered with the draws through the FIFO; resets at
+ * every frame begin.
+ */
+void AuroraSetStereoScreenTexMtx(u32 texMtx, u32 pnMtx);
+
+/**
+ * Places the camera-space draws that follow on AURORA_STEREO_ROUTE_ANCHORED_3D or FLOATING_3D: each
+ * position p of the draw's camera space (GX: x right, y up, looking down -z) is taken as scale * p + offset
+ * in the anchor's (or floating plane's) space before the eye's view. A 3D model drawn through its own
+ * camera can so stand where its flat picture would on the virtual screen, at its size, with its depth.
+ * Ordered with the draws through the FIFO; resets to (1, 0, 0, 0) at every frame begin.
+ */
+void AuroraSetStereoPlacement3D(f32 scale, f32 x, f32 y, f32 z);
+
+/**
+ * AuroraSetStereoPlacement3D with a point of the placed space (headX, headY, headZ, after the scale and
+ * offset) that belongs where the head's own space has it, AURORA_STEREO_ROUTE_HEAD_LOCKED's (the head-locked
+ * HUD's camera space as that route scales it): the placed space is moved `follow` of the way into the head's,
+ * the point along a straight line and the rest turned about it by that share of the turn, as the head
+ * stands in the frame shown (1: exactly as the head-locked route). A draw can so grow out of a head-locked HUD element
+ * (follow 1, the point at the element) into the anchor's space (follow 0) and shrink back into it,
+ * whichever way the head has turned since the anchor was placed.
+ */
+void AuroraSetStereoPlacement3DFollowHead(f32 scale, f32 x, f32 y, f32 z, f32 headX, f32 headY, f32 headZ,
+                                          f32 follow);
 
 /**
  * Sets the actual render scissor in native framebuffer coordinates.

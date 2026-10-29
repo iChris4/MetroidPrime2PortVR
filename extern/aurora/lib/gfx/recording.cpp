@@ -1,16 +1,27 @@
 #include "recording.hpp"
+#include "overdraw.hpp"
+
+#include <cstdlib>
+#include <atomic>
 
 #include <aurora/phase.hpp>
 
 #include "encoding.hpp"
+#include "floating_hud.hpp"
 #include "frame.hpp"
 #include "perf.hpp"
+#include "geometry_buffer.hpp"
 #include "resource_cache.hpp"
 
 #include "bloom.hpp"
 #include "clear.hpp"
+#include "draw_payload.hpp"
+#include "perf_counters.hpp"
 #include "depth_peek.hpp"
 #include "pipeline_cache.hpp"
+#include "stereo_eyes.hpp"
+#include "stereo_shadow.hpp"
+#include "stereo_uniform.hpp"
 #include "render_worker.hpp"
 #include "tex_copy_conv.hpp"
 #include "tex_palette_conv.hpp"
@@ -25,6 +36,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <new>
@@ -46,6 +58,12 @@
 namespace aurora::gfx {
 using namespace detail;
 
+// stereo_uniform.hpp mirrors the GX uniform's fixed counts so the tests need no GX headers.
+static_assert(kStereoPositionMatrices == gx::MaxPnMtx);
+static_assert(kStereoTextureMatrices == gx::MaxTexMtx);
+static_assert(kStereoLights == GX::MaxLights);
+static_assert(kStereoLightBytes == sizeof(gx::Light));
+
 namespace {
 constexpr Module Log{"aurora::gfx"};
 
@@ -54,6 +72,9 @@ struct FrameRecorder {
   size_t frameSlot = 0;
   uint32_t currentRenderPass = UINT32_MAX;
   uint32_t drawCallCount = 0;
+  // Draws recorded under each stereo route this frame (AURORA_STEREO_ROUTE_*), for the
+  // diagnostics line (log_stereo_frame_stats).
+  std::array<uint32_t, 12> routeDrawCounts{};
   uint32_t mergedDrawCallCount = 0;
   uint32_t renderPassCount = 0;
   bool inOffscreen = false;
@@ -69,6 +90,12 @@ struct FrameRecorder {
   Viewport cachedViewport;
   ClipRect cachedScissor;
   bool suppressRenderWorker = false;
+  uint8_t stereoRoute = AURORA_STEREO_ROUTE_WORLD;
+  bool finalPassMonoUnneeded = false;
+  stereo_replay::HeadLockedPlane headLockedPlane;
+  StereoPlacement3D placement3D;
+  StereoScreenTexMtx stereoScreenTexMtx;
+  uint8_t multiviewMode = 0; // gx::MultiviewMode of the last stage_stereo_uniforms
   // DepthAfter::IfUnread's sealed pass and task, whose ops aren't handed to the render worker yet,
   // and whether a draw in the pass after them may have tested against their depth.
   struct HeldDepth {
@@ -97,6 +124,177 @@ struct FrameRecorder {
 };
 
 FrameRecorder g_recorder;
+// MP2_FRAME_STATS keeps the frame statistics on whatever the VR settings say,
+// for scripted runs without a headset.
+bool frame_stats_forced() noexcept { return std::getenv("MP2_FRAME_STATS") != nullptr; }
+std::atomic_bool g_stereoDiagnostics{frame_stats_forced()};
+// What composing the eye uniform copies costs on the FIFO thread, between two
+// stereo statistics lines (log_stereo_frame_stats), while diagnostics are on.
+std::atomic<uint64_t> g_eyeUniformNs{0};
+std::atomic<uint32_t> g_eyeUniformDraws{0};
+} // namespace
+
+namespace perf {
+std::atomic<uint64_t> g_fifoNs{0};
+std::atomic<uint64_t> g_fifoBytes{0};
+std::atomic<uint64_t> g_encodeNs{0};
+std::atomic<uint64_t> g_submitNs{0};
+std::atomic<uint64_t> g_fifoXfTicks{0};
+std::atomic<uint64_t> g_fifoBpTicks{0};
+std::atomic<uint64_t> g_fifoCpTicks{0};
+std::atomic<uint64_t> g_fifoAuroraTicks{0};
+std::atomic<uint64_t> g_fifoVertsTicks{0};
+std::atomic<uint64_t> g_fifoPipelineTicks{0};
+std::atomic<uint64_t> g_fifoBindsTicks{0};
+std::atomic<uint64_t> g_fifoUniformTicks{0};
+std::atomic<uint64_t> g_fifoPushTicks{0};
+std::atomic<uint32_t> g_fifoXfLoads{0};
+std::atomic<uint32_t> g_fifoBpLoads{0};
+std::atomic<uint32_t> g_fifoDrawsMerged{0};
+std::atomic<uint32_t> g_fifoDrawsPushed{0};
+std::atomic<uint32_t> g_fifoPipelineBuilds{0};
+std::atomic<uint32_t> g_fifoBindGroupBuilds{0};
+std::atomic<uint32_t> g_fifoBindGroupMisses{0};
+std::atomic<uint64_t> g_fifoResolveTicks{0};
+std::atomic<uint32_t> g_fifoUniformBuilds{0};
+std::atomic<uint32_t> g_mergeBreaks[BreakCount]{};
+std::atomic<uint64_t> g_fifoDeindexTicks{0};
+std::atomic<uint32_t> g_fifoDeindexedVerts{0};
+std::atomic<uint32_t> g_fifoCachedDlCalls{0};
+std::atomic<uint64_t> g_fifoCachedDlBytes{0};
+std::atomic<uint64_t> g_fifoCachedDlVertBytes{0};
+std::atomic<uint64_t> g_fifoCachedDlIndexBytes{0};
+std::atomic<uint32_t> g_fifoCachedDlVerts{0};
+std::atomic<uint32_t> g_fifoGeometryHits{0};
+std::atomic<uint32_t> g_fifoGeometryMisses{0};
+std::atomic<uint32_t> g_fifoNativeDraws{0};
+std::atomic<uint32_t> g_geometryEntries{0};
+std::atomic<uint64_t> g_geometryResidentBytes{0};
+std::atomic<uint64_t> g_drainWaitNs{0};
+std::atomic<uint32_t> g_drainCalls{0};
+bool enabled() noexcept { return g_stereoDiagnostics.load(std::memory_order_relaxed); }
+} // namespace perf
+
+namespace {
+
+void log_stereo_frame_stats(const FramePacket& frame) {
+  // Every 600th frame, immersive or not (a desktop run measures the same FIFO)
+  static uint32_t sFrames = 0;
+  if ((sFrames++ % 600) != 0) {
+    return;
+  }
+  uint32_t efbPasses = 0;
+  uint32_t eyePasses = 0;
+  uint32_t monoSkipped = 0;
+  uint32_t foveated = 0;
+  uint32_t copies = 0;
+  uint32_t eyeCopies = 0;
+  uint32_t discarded = 0;
+  for (const auto& pass : frame.renderPasses) {
+    efbPasses += pass.efb ? 1 : 0;
+    eyePasses += pass.stereo.enabled ? 1 : 0;
+    monoSkipped += pass.stereo.enabled && pass.stereo.skipMono ? 1 : 0;
+    foveated += pass.stereo.enabled && pass.stereo.foveated ? 1 : 0;
+    copies += pass.resolveTarget ? 1 : 0;
+    eyeCopies += pass.stereo.copyTargets[0] ? 1 : 0;
+    discarded += pass.discardable ? 1 : 0;
+  }
+  const auto& routes = g_recorder.routeDrawCounts;
+  const double eyeUniformMs =
+      static_cast<double>(g_eyeUniformNs.exchange(0, std::memory_order_relaxed)) / 600.0 / 1.0e6;
+  const uint32_t eyeUniformDraws = g_eyeUniformDraws.exchange(0, std::memory_order_relaxed) / 600;
+  const auto perFrameMs = [](std::atomic<uint64_t>& ns) {
+    return static_cast<double>(ns.exchange(0, std::memory_order_relaxed)) / 600.0 / 1.0e6;
+  };
+  const double fifoMs = perFrameMs(perf::g_fifoNs);
+  const uint64_t fifoKb = perf::g_fifoBytes.exchange(0, std::memory_order_relaxed) / 600 / 1024;
+  const double drainWaitMs = perFrameMs(perf::g_drainWaitNs);
+  const uint32_t drainCalls = perf::g_drainCalls.exchange(0, std::memory_order_relaxed) / 600;
+  const double encodeMs = perFrameMs(perf::g_encodeNs);
+  const double submitMs = perFrameMs(perf::g_submitNs);
+  const auto& uploads = resources().stats;
+  Log.info("stereo frame: {} passes ({} EFB, {} replayed per eye, {} foveated, {} eyes only, {} discarded), "
+           "{} EFB copies "
+           "({} taken per eye), {} draws (world {}, head-locked {}, head-locked 2D {}, screen 2D {}, fullscreen {}, "
+           "sky {}, skipped {}), eye uniforms {:.2f} ms/frame ({} draws); per frame: fifo {:.2f} ms ({} KB), game waits "
+           "for fifo {:.2f} ms ({} drains), encode {:.2f} ms, submit {:.2f} ms; uploads verts {} KB, indices {} KB, "
+           "uniforms {} KB, storage {} KB, textures {} KB",
+           frame.renderPasses.size(), efbPasses, eyePasses, foveated, monoSkipped, discarded, copies, eyeCopies,
+           g_recorder.drawCallCount, routes[AURORA_STEREO_ROUTE_WORLD], routes[AURORA_STEREO_ROUTE_HEAD_LOCKED],
+           routes[AURORA_STEREO_ROUTE_HEAD_LOCKED_2D], routes[AURORA_STEREO_ROUTE_SCREEN_2D],
+           routes[AURORA_STEREO_ROUTE_FULLSCREEN],
+           routes[AURORA_STEREO_ROUTE_SKY], routes[AURORA_STEREO_ROUTE_SKIP], eyeUniformMs, eyeUniformDraws, fifoMs,
+           fifoKb, drainWaitMs, drainCalls, encodeMs, submitMs, uploads.lastVertSize / 1024,
+           uploads.lastIndexSize / 1024, uploads.lastUniformSize / 1024, uploads.lastStorageSize / 1024,
+           uploads.lastTextureUploadSize / 1024);
+  // The FIFO processor's buckets, in ticks calibrated over the window since the
+  // last line (the first line, with no window yet, shows zeros).
+  static uint64_t sLastTick = perf::tick();
+  static auto sLastSteady = std::chrono::steady_clock::now();
+  const uint64_t nowTick = perf::tick();
+  const auto nowSteady = std::chrono::steady_clock::now();
+  const double windowNs =
+      static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(nowSteady - sLastSteady).count());
+  const double ticksPerNs = windowNs > 0.0 ? static_cast<double>(nowTick - sLastTick) / windowNs : 0.0;
+  sLastTick = nowTick;
+  sLastSteady = nowSteady;
+  const auto bucketMs = [ticksPerNs](std::atomic<uint64_t>& ticks) {
+    const auto value = static_cast<double>(ticks.exchange(0, std::memory_order_relaxed));
+    return ticksPerNs > 0.0 ? value / ticksPerNs / 600.0 / 1.0e6 : 0.0;
+  };
+  const auto perFrame = [](std::atomic<uint32_t>& calls) { return calls.exchange(0, std::memory_order_relaxed) / 600; };
+  const double xfMs = bucketMs(perf::g_fifoXfTicks);
+  const uint32_t xfLoads = perFrame(perf::g_fifoXfLoads);
+  const double bpMs = bucketMs(perf::g_fifoBpTicks);
+  const uint32_t bpLoads = perFrame(perf::g_fifoBpLoads);
+  const double cpMs = bucketMs(perf::g_fifoCpTicks);
+  const double auroraMs = bucketMs(perf::g_fifoAuroraTicks);
+  const double vertsMs = bucketMs(perf::g_fifoVertsTicks);
+  const uint32_t merged = perFrame(perf::g_fifoDrawsMerged);
+  const uint32_t pushed = perFrame(perf::g_fifoDrawsPushed);
+  const double pipelineMs = bucketMs(perf::g_fifoPipelineTicks);
+  const uint32_t pipelineBuilds = perFrame(perf::g_fifoPipelineBuilds);
+  const double bindsMs = bucketMs(perf::g_fifoBindsTicks);
+  const uint32_t bindGroupBuilds = perFrame(perf::g_fifoBindGroupBuilds);
+  const uint32_t bindGroupMisses = perFrame(perf::g_fifoBindGroupMisses);
+  const double resolveMs = bucketMs(perf::g_fifoResolveTicks);
+  const double uniformMs = bucketMs(perf::g_fifoUniformTicks);
+  const uint32_t uniformBuilds = perFrame(perf::g_fifoUniformBuilds);
+  const double pushMs = bucketMs(perf::g_fifoPushTicks);
+  const double deindexMs = bucketMs(perf::g_fifoDeindexTicks);
+  const uint32_t deindexedVerts = perFrame(perf::g_fifoDeindexedVerts);
+  const auto perFrameKb = [](std::atomic<uint64_t>& bytes) {
+    return bytes.exchange(0, std::memory_order_relaxed) / 600 / 1024;
+  };
+  const uint32_t cachedDlCalls = perFrame(perf::g_fifoCachedDlCalls);
+  const uint64_t cachedDlKb = perFrameKb(perf::g_fifoCachedDlBytes);
+  const uint64_t cachedDlVertKb = perFrameKb(perf::g_fifoCachedDlVertBytes);
+  const uint64_t cachedDlIndexKb = perFrameKb(perf::g_fifoCachedDlIndexBytes);
+  const uint32_t cachedDlVerts = perFrame(perf::g_fifoCachedDlVerts);
+  const uint32_t geometryHits = perFrame(perf::g_fifoGeometryHits);
+  const uint32_t geometryMisses = perFrame(perf::g_fifoGeometryMisses);
+  const uint32_t nativeDraws = perFrame(perf::g_fifoNativeDraws);
+  Log.info("native vertex input: {} draws per frame", nativeDraws);
+  const uint32_t geometryEntries = perf::g_geometryEntries.load(std::memory_order_relaxed);
+  const uint64_t geometryMb = perf::g_geometryResidentBytes.load(std::memory_order_relaxed) >> 20;
+  std::array<uint32_t, perf::BreakCount> breaks{};
+  for (size_t i = 0; i < breaks.size(); ++i) {
+    breaks[i] = perFrame(perf::g_mergeBreaks[i]);
+  }
+  Log.info("fifo processor per frame: xf {:.2f} ms ({} loads), bp {:.2f} ms ({} loads), cp {:.2f} ms, aurora {:.2f} "
+           "ms; draws {} merged + {} pushed: verts {:.2f} ms, pipeline {:.2f} ms ({} builds), bind groups {:.2f} ms "
+           "({} builds, {} cache misses, resolve {:.2f} ms), uniform {:.2f} ms ({} builds), push {:.2f} ms; "
+           "de-indexing {:.2f} ms ({} vertices); in-place dl {} calls ({} KB): {} KB of records ({} de-indexed "
+           "vertices), {} KB of indices; geometry cache {} hits, {} misses ({} entries, {} MiB); tick {:.3f} GHz",
+           xfMs, xfLoads, bpMs, bpLoads, cpMs, auroraMs, merged, pushed, vertsMs, pipelineMs, pipelineBuilds, bindsMs,
+           bindGroupBuilds, bindGroupMisses, resolveMs, uniformMs, uniformBuilds, pushMs, deindexMs, deindexedVerts,
+           cachedDlCalls, cachedDlKb, cachedDlVertKb, cachedDlVerts, cachedDlIndexKb, geometryHits, geometryMisses,
+           geometryEntries, geometryMb, ticksPerNs);
+  Log.info("new draws per frame, by what kept them from joining the last one: pipeline state {}, textures {}, "
+           "uniform data {}, immediates {}, vertex format or primitive kind {}, no draw to join {}",
+           breaks[perf::BreakPipeline], breaks[perf::BreakTextures], breaks[perf::BreakUniform],
+           breaks[perf::BreakImmediates], breaks[perf::BreakFormat], breaks[perf::BreakNoDraw]);
+}
 
 std::string pass_label(std::string_view kind) {
 #ifdef AURORA_GFX_DEBUG_GROUPS
@@ -143,6 +341,7 @@ void set_efb_targets(RenderPass& pass) {
   pass.msaaSamples = layout.sampleCount;
   pass.hasDepth = true;
   pass.hasStencil = false;
+  pass.efb = true;
 }
 
 void set_single_color_target(RenderPass& pass, wgpu::TextureFormat format, const wgpu::Extent3D size,
@@ -254,6 +453,7 @@ StagingHighWater current_high_water(const FramePacket& frame) noexcept {
       .storage = static_cast<uint32_t>(logical_size(frame.storage, frame.spillStorage)),
       .textureUpload = static_cast<uint32_t>(frame.textureUpload.size()),
       .textureUploadCount = frame.textureUploads.size(),
+      .geometryUploadCount = frame.geometryUploads.size(),
       .bufferUploadCount = frame.bufferUploads.size(),
   };
 }
@@ -274,6 +474,10 @@ FrameOp capture_frame_op(FramePacket& frame, FrameOpType type, uint32_t index) {
   op.textureUploads.reserve(op.highWater.textureUploadCount);
   for (size_t i = 0; i < op.highWater.textureUploadCount; ++i) {
     op.textureUploads.push_back(&frame.textureUploads[i]);
+  }
+  op.geometryUploads.reserve(op.highWater.geometryUploadCount);
+  for (size_t i = 0; i < op.highWater.geometryUploadCount; ++i) {
+    op.geometryUploads.push_back(&frame.geometryUploads[i]);
   }
   op.bufferUploads.reserve(op.highWater.bufferUploadCount);
   for (size_t i = 0; i < op.highWater.bufferUploadCount; ++i) {
@@ -441,38 +645,10 @@ void push_command(CommandType type, const Command::Data& data) {
   });
 }
 
-template <class T>
-concept InlinePayload =
-    std::is_trivially_copyable_v<T> && std::is_aggregate_v<T> && std::is_trivially_destructible_v<T>;
-
-template <InlinePayload T>
-T& inline_payload(void* ptr) noexcept {
-  // C++20 equivalent of C++23's std::start_lifetime_as
-  return *std::launder(static_cast<T*>(std::memmove(ptr, ptr, sizeof(T))));
-}
-
-template <auto Renderer, InlinePayload T>
-void encode_draw(void* payload, const wgpu::RenderPassEncoder& pass, const RenderPass& passInfo) {
-  const T& data = inline_payload<T>(payload);
-  if constexpr (std::is_invocable_v<decltype(Renderer), const T&, const wgpu::RenderPassEncoder&,
-                                    const wgpu::Extent3D&>) {
-    Renderer(data, pass, passInfo.colorAttachments[SceneColorAttachmentIndex].size);
-  } else {
-    static_assert(std::is_invocable_v<decltype(Renderer), const T&, const wgpu::RenderPassEncoder&>);
-    Renderer(data, pass);
-  }
-}
-
-template <auto Renderer, InlinePayload T>
-DrawCommand make_draw_command(const T& data) {
-  static_assert(sizeof(T) <= InlineDrawPayloadSize);
-  static_assert(alignof(T) <= alignof(std::max_align_t));
-  DrawCommand command{.encoder = encode_draw<Renderer, T>};
-  std::memcpy(command.payload.data(), &data, sizeof(data));
-  return command;
-}
+// Inline payload helpers: draw_payload.hpp (shared with the stereo eye encoder).
 
 void push_draw_command(DrawCommand data) {
+  ++g_recorder.routeDrawCounts[std::min<size_t>(g_recorder.stereoRoute, g_recorder.routeDrawCounts.size() - 1)];
   push_command(CommandType::Draw, Command::Data{.draw = data});
   ++g_recorder.drawCallCount;
 }
@@ -570,6 +746,8 @@ void resume_efb_pass_loading(const RenderPass& prevPass) {
       .clearDepth = false,
       .hasDepth = prevPass.hasDepth,
       .hasStencil = prevPass.hasStencil,
+      // Still the EFB: the stereo replay carries on into the eyes after a copy.
+      .efb = prevPass.efb,
   };
   for (uint32_t i = 0; i < newPass.colorAttachmentCount; ++i) {
     newPass.colorAttachments[i].loadOp = wgpu::LoadOp::Undefined;
@@ -724,8 +902,54 @@ void dispatch_op(FramePacket& frame, uint32_t opIndex) {
     if (op.renderPass == nullptr && op.textureCopy == nullptr && op.encoderTask == nullptr) {
       return;
     }
+    const perf::Timer timer{perf::g_encodeNs};
     encode_op(packet->encoder, *packet, op);
   });
+}
+
+// Gives an EFB pass of an immersive frame its eye passes: encoding.cpp
+// re-encodes the pass into each eye target right after the mono pass.
+void stereo_seal_pass(FramePacket& frame, uint32_t passIndex) {
+  if (passIndex >= frame.renderPasses.size()) {
+    return;
+  }
+  auto& pass = frame.renderPasses[passIndex];
+  auto& state = frame.stereo;
+  if (!state.immersive || !pass.efb || pass.sealed || pass.stereo.enabled || pass.stereo.monoOnly) {
+    return;
+  }
+  for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
+    const auto& target = stereo_eye_target(eye);
+    if (!target.valid()) {
+      return;
+    }
+    // A foveated frame's eye pass renders through the foveated view of the
+    // same image (stereo_foveation.hpp); the copies keep the eye's own view.
+    const bool foveatedEye = !state.multiview && state.foveated && state.foveatedEyeColorViews[eye];
+    pass.stereo.eyes[eye] = StereoEyePass{
+        .colorView = foveatedEye ? state.foveatedEyeColorViews[eye] : target.color.view,
+        .resolveView = target.sampleCount > 1 ? target.resolved.view : wgpu::TextureView{},
+        .depthView = target.depth.view,
+        .copySourceView = target.color.view,
+        .size = {target.width, target.height, 1},
+    };
+  }
+  if (state.multiview) {
+    // Both eyes in one pass over the targets' two layers (stereo_multiview.hpp).
+    const auto& multiview = stereo_multiview_target();
+    if (!multiview.colorView || !multiview.depthView) {
+      return;
+    }
+    const bool foveated = state.foveated && state.foveatedMultiviewColorView;
+    pass.stereo.multiview = true;
+    pass.stereo.multiviewColorView = foveated ? state.foveatedMultiviewColorView : multiview.colorView;
+    pass.stereo.multiviewDepthView = multiview.depthView;
+    pass.stereo.foveated = foveated;
+  } else {
+    pass.stereo.foveated = state.foveated && state.foveatedEyeColorViews[0] && state.foveatedEyeColorViews[1];
+  }
+  pass.stereo.enabled = true;
+  state.replayed = true;
 }
 
 // Lets the GPU skip writing out attachments that nothing reads again, which saves a tile-based
@@ -772,6 +996,7 @@ void log_pass(const FramePacket& frame, const RenderPass& p) {
 
 // Without dispatch the op is only recorded; enqueue_op hands it to the render worker later.
 uint32_t enqueue_pass(FramePacket& frame, uint32_t passIndex, bool dispatch) {
+  stereo_seal_pass(frame, passIndex);
   if (!frame.renderPasses[passIndex].discardable) {
     ++g_recorder.renderPassCount;
   }
@@ -829,11 +1054,15 @@ void begin_recording(FramePacket& packet, size_t frameSlot) {
   g_recorder.frameSlot = frameSlot;
   g_passSnapshotPools[frameSlot].used = 0;
   g_recorder.drawCallCount = 0;
+  g_recorder.routeDrawCounts = {};
   g_recorder.mergedDrawCallCount = 0;
   g_recorder.renderPassCount = 0;
   g_deferredOps.clear(); // Port: see enqueue_op
   g_recorder.suspendedEfbPass.reset();
   g_uniformDedup.clear(); // Port: see push_uniform
+  g_recorder.stereoRoute = AURORA_STEREO_ROUTE_WORLD;
+  g_recorder.stereoScreenTexMtx = {};
+  g_recorder.placement3D = {};
   g_recorder.hdrScene = false;
   g_recorder.hdrSceneCleared = false;
 
@@ -899,8 +1128,8 @@ RecordedFrame end_recording() {
                peakStorage);
     }
   }
-  perf::count(AURORA_PERF_DRAWS, g_recorder.drawCallCount);
-  perf::end_frame();
+  aurora::perf::count(AURORA_PERF_DRAWS, g_recorder.drawCallCount);
+  aurora::perf::end_frame();
 
   for (auto& array : gx::g_gxState.arrays) {
     array.cachedRange = {};
@@ -955,9 +1184,9 @@ void seed_offscreen_cache(uint32_t width, uint32_t height, wgpu::TextureFormat c
 
 } // namespace testing
 
-void increment_merged_draw_count() noexcept {
+void increment_merged_draw_count(uint32_t count) noexcept {
   if (g_recorder.active()) {
-    ++g_recorder.mergedDrawCallCount;
+    g_recorder.mergedDrawCallCount += count;
   }
 }
 
@@ -1158,6 +1387,320 @@ void set_scissor(const ClipRect& cmd) noexcept {
   }
 }
 
+// --- stereo replay ---
+
+void set_frame_stereo(const StereoFrameState& state) noexcept {
+  stereo_shadow::begin_frame(state.immersive, state.multiview);
+  if (!g_recorder.active()) {
+    return;
+  }
+  g_recorder.frame().stereo = state;
+}
+
+StereoFrameState recorded_stereo_state() noexcept {
+  if (!g_recorder.active()) {
+    return {};
+  }
+  return g_recorder.frame().stereo;
+}
+
+void set_stereo_draw_route(uint8_t route) noexcept { g_recorder.stereoRoute = route; }
+
+bool recording_multiview() noexcept { return g_recorder.active() && g_recorder.frame().stereo.multiview; }
+
+void set_final_pass_mono_unneeded(bool unneeded) noexcept { g_recorder.finalPassMonoUnneeded = unneeded; }
+
+void set_stereo_diagnostics(bool enabled) noexcept {
+  g_stereoDiagnostics.store(enabled || frame_stats_forced(), std::memory_order_relaxed);
+}
+
+uint8_t stereo_draw_route() noexcept { return g_recorder.stereoRoute; }
+
+void set_stereo_head_locked_plane(float tanHalfWidth, float tanHalfHeight, float distance) noexcept {
+  g_recorder.headLockedPlane = {tanHalfWidth, tanHalfHeight, distance};
+}
+
+stereo_replay::HeadLockedPlane stereo_head_locked_plane() noexcept { return g_recorder.headLockedPlane; }
+
+void set_stereo_placement_3d(const StereoPlacement3D& placement) noexcept { g_recorder.placement3D = placement; }
+
+StereoPlacement3D stereo_placement_3d() noexcept { return g_recorder.placement3D; }
+
+void set_stereo_screen_tex_mtx(uint8_t texSlot, uint8_t pnSlot) noexcept {
+  g_recorder.stereoScreenTexMtx = {texSlot, pnSlot};
+}
+
+StereoScreenTexMtx stereo_screen_tex_mtx() noexcept { return g_recorder.stereoScreenTexMtx; }
+
+std::array<uint32_t, 2> stage_stereo_uniforms(const uint8_t* mono, Range monoRange,
+                                              const StereoUniformLayout& layout) noexcept {
+  constexpr std::array<uint32_t, 2> none{UINT32_MAX, UINT32_MAX};
+  g_recorder.multiviewMode = gx::MultiviewNone;
+  if (!g_recorder.active()) {
+    return none;
+  }
+  auto& frame = g_recorder.frame();
+  const auto& state = frame.stereo;
+  if (!state.immersive || g_recorder.inOffscreen || g_recorder.currentRenderPass == UINT32_MAX) {
+    return none;
+  }
+  const uint8_t route = g_recorder.stereoRoute;
+  if (route == AURORA_STEREO_ROUTE_SKIP) {
+    return none;
+  }
+  if (!layout.valid() || monoRange.size != layout.size) {
+    return none;
+  }
+  const size_t alignment = resources().limits.minUniformBufferOffsetAlignment;
+  const auto exhausted = [&] {
+    if (!frame.stereo.uniformsExhausted) {
+      Log.warn("Stereo replay ran out of uniform space at {} bytes; the rest of frame {} is mono only",
+               frame.uniforms.size(), frame.frameId);
+      frame.stereo.uniformsExhausted = true;
+    }
+    return none;
+  };
+  const auto& pass = current_render_passes()[g_recorder.currentRenderPass];
+  const auto& monoSize = pass.colorAttachments[SceneColorAttachmentIndex].size;
+  Mat4x4<float> monoProjection;
+  std::memcpy(&monoProjection, mono + layout.projectionOffset, sizeof(monoProjection));
+  // gx/shader.cpp MultiviewClip (and EyeClipImmediate for a frame replayed per eye):
+  // the draw keeps its mono uniform, followed by each eye's clip matrix and the eyes'
+  // render size (the eye target's, as compose_stereo_uniform makes it, or for 2D
+  // content the mono one).
+  const auto stage_eye_clips = [&](const std::array<Mat4x4<float>, AURORA_STEREO_EYE_COUNT>& clips,
+                                   bool eyeRenderSize) {
+    struct EyeClipBlock {
+      std::array<Mat4x4<float>, AURORA_STEREO_EYE_COUNT> clip;
+      std::array<float, 4> render;
+    };
+    static_assert(sizeof(EyeClipBlock) == 144);
+    float renderSize[2];
+    std::memcpy(renderSize, mono, sizeof(renderSize));
+    if (eyeRenderSize) {
+      const auto& params = state.eyes[0]; // both eyes share a size under multiview
+      renderSize[0] *=
+          monoSize.width != 0 ? static_cast<float>(params.width) / static_cast<float>(monoSize.width) : 1.0f;
+      renderSize[1] *=
+          monoSize.height != 0 ? static_cast<float>(params.height) / static_cast<float>(monoSize.height) : 1.0f;
+    }
+    const EyeClipBlock block{
+        .clip = clips,
+        .render = {renderSize[0], renderSize[1], 0.0f, 0.0f},
+    };
+    const size_t used = logical_size(frame.uniforms, frame.spillUniforms);
+    const size_t next = AURORA_ALIGN(used, alignment);
+    // A clip block must immediately follow its mono uniform, including when the
+    // new staging allocator moves a push into the spill buffer.
+    if (next != monoRange.offset + AURORA_ALIGN(monoRange.size, alignment) ||
+        (frame.spillUniforms.length == 0 && next + sizeof(block) > frame.uniforms.capacity())) {
+      ByteBuffer combined;
+      combined.append(mono, monoRange.size);
+      const size_t clipOffset = AURORA_ALIGN(monoRange.size, alignment);
+      combined.append_zeroes(clipOffset - monoRange.size);
+      combined.append(reinterpret_cast<const uint8_t*>(&block), sizeof(block));
+      const auto relocated = push(frame.uniforms, frame.spillUniforms, StagingKind::Uniform,
+                                  combined.data(), combined.size(), alignment, 2 * gx::MaxUniformSize, "stereo uniform");
+      if (overflowed(relocated)) { return exhausted(); }
+      g_recorder.multiviewMode = gx::MultiviewClip;
+      return std::array<uint32_t, 2>{relocated.offset, relocated.offset};
+    }
+    const auto range = push(frame.uniforms, frame.spillUniforms, StagingKind::Uniform,
+                            reinterpret_cast<const uint8_t*>(&block), sizeof(block), alignment,
+                            2 * gx::MaxUniformSize, "stereo uniform");
+    if (overflowed(range)) { return exhausted(); }
+    // The shader finds the block at the mono uniform's aligned end.
+    if (range.offset != monoRange.offset + AURORA_ALIGN(monoRange.size, alignment)) {
+      static bool sReported = false;
+      if (!sReported) {
+        sReported = true;
+        Log.error("Multiview eye clips staged at {}, not after the uniform at {} ({} bytes)", range.offset,
+                  monoRange.offset, monoRange.size);
+      }
+      return none;
+    }
+    g_recorder.multiviewMode = gx::MultiviewClip;
+    return std::array<uint32_t, 2>{monoRange.offset, monoRange.offset};
+  };
+  // The virtual screen (AURORA_STEREO_ROUTE_SCREEN_2D) takes the recorded
+  // picture's aspect, and the draw's viewport keeps its place in that picture.
+  stereo_replay::HudScreen screen{};
+  stereo_replay::HudNdcRemap screenNdc{};
+  const bool screenRoute = route == AURORA_STEREO_ROUTE_SCREEN_2D || route == AURORA_STEREO_ROUTE_FLOATING_HUD ||
+                           route == AURORA_STEREO_ROUTE_ANCHORED_SCREEN;
+  if (screenRoute && monoSize.width != 0 && monoSize.height != 0) {
+    const float width = static_cast<float>(monoSize.width);
+    const float height = static_cast<float>(monoSize.height);
+    screen = {
+        .halfWidth = state.screen2DHalfWidth,
+        .halfHeight = state.screen2DHalfWidth * height / width,
+        .distance = state.screen2DDistance,
+    };
+    const auto& viewport = g_recorder.cachedViewport;
+    screenNdc = stereo_replay::make_hud_ndc_remap(viewport.left, viewport.top, viewport.width, viewport.height, 0.0f,
+                                                  0.0f, width, height);
+  }
+  const bool onScreen = screen.valid();
+  // 2D content and full-screen effects: the same uniform in both eyes.
+  const std::array<uint32_t, 2> same{monoRange.offset, monoRange.offset};
+  if (route == AURORA_STEREO_ROUTE_FULLSCREEN || (screenRoute && !onScreen)) {
+    return state.multiview ? stage_eye_clips({monoProjection, monoProjection}, false) : same;
+  }
+  // An orthographic draw is 2D content, identical in both eyes, unless its
+  // route lays it on the head-locked plane (stereo_replay.hpp HeadLockedPlane)
+  // or on the virtual screen.
+  const bool perspective = stereo_uniform_is_perspective(mono, layout);
+  const bool onPlane =
+      !perspective && route == AURORA_STEREO_ROUTE_HEAD_LOCKED_2D && g_recorder.headLockedPlane.valid();
+  if (!perspective && !onPlane && !onScreen) {
+    return state.multiview ? stage_eye_clips({monoProjection, monoProjection}, false) : same;
+  }
+  const stereo_replay::HudScreen plane =
+      onPlane ? stereo_replay::head_locked_plane_screen(g_recorder.headLockedPlane, state.headLockedScaleXY,
+                                                        state.headLockedScaleZ)
+              : stereo_replay::HudScreen{};
+  const bool headLocked = route == AURORA_STEREO_ROUTE_HEAD_LOCKED || route == AURORA_STEREO_ROUTE_HEAD_LOCKED_2D;
+  // A 3D draw in the held anchor's (or floating pose's) space: its camera space scaled and moved there
+  // first (AuroraSetStereoPlacement3D), then seen through that pose.
+  const bool placed3D = route == AURORA_STEREO_ROUTE_ANCHORED_3D || route == AURORA_STEREO_ROUTE_FLOATING_3D;
+  const StereoPlacement3D placement = g_recorder.placement3D;
+  const auto placedView = [&](const StereoEyeParams& params) {
+    const Mat3x4<float>& poseView = route == AURORA_STEREO_ROUTE_FLOATING_3D ? params.floatingHudViewFromCenter
+                                                                             : params.anchoredScreenViewFromCenter;
+    Mat3x4<float> offset{};
+    offset.m0 = {1.0f, 0.0f, 0.0f, placement.x};
+    offset.m1 = {0.0f, 1.0f, 0.0f, placement.y};
+    offset.m2 = {0.0f, 0.0f, 1.0f, placement.z};
+    if (placement.follow != 0.0f) {
+      // Part of the way into the head's own space (the head-locked HUD's),
+      // moved and turned about the point.
+      const std::array<float, 3> pivot{placement.headX, placement.headY, placement.headZ};
+      offset = stereo_replay::compose_affine(
+          stereo_replay::follow_head(poseView, params.headLockedViewFromCenter, pivot, placement.follow), offset);
+    }
+    return stereo_replay::compose_affine(poseView, offset);
+  };
+  const float positionScaleXY = headLocked ? state.headLockedScaleXY : placed3D ? placement.scale : 1.0f;
+  const float positionScaleZ = headLocked ? state.headLockedScaleZ : placed3D ? placement.scale : 1.0f;
+  // A screen-projecting texture matrix (AuroraSetStereoScreenTexMtx) differs per eye:
+  // under multiview such a draw takes the full eye copies (MultiviewFull).
+  const auto screenTexMtx = g_recorder.stereoScreenTexMtx;
+  const bool perEyeTexMtx = !onPlane && !onScreen && screenTexMtx.texSlot != 0xFF;
+  if (!perEyeTexMtx) {
+    std::array<Mat4x4<float>, AURORA_STEREO_EYE_COUNT> clips;
+    for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
+      const auto& params = state.eyes[eye];
+      if (onScreen) {
+        const auto& screenView = route == AURORA_STEREO_ROUTE_FLOATING_HUD    ? params.floatingHudViewFromCenter
+                                 : route == AURORA_STEREO_ROUTE_ANCHORED_SCREEN ? params.anchoredScreenViewFromCenter
+                                                                               : params.viewFromCenter;
+        clips[eye] = stereo_replay::compose_screen_2d_projection(params.projection, screenView, screen,
+                                                                 monoProjection, screenNdc);
+      } else if (onPlane) {
+        clips[eye] = stereo_replay::compose_head_locked_2d_projection(
+            params.projection, params.headLockedViewFromCenter, plane, monoProjection);
+      } else {
+        const Mat3x4<float> placedViewFromCenter = placed3D ? placedView(params) : params.viewFromCenter;
+        const Mat3x4<float>& viewFromCenter = headLocked                            ? params.headLockedViewFromCenter
+                                              : route == AURORA_STEREO_ROUTE_SKY ? params.skyViewFromCenter
+                                                                                 : placedViewFromCenter;
+        clips[eye] = compose_eye_clip(stereo_replay::compose_projection(params.projection, monoProjection),
+                                      viewFromCenter, positionScaleXY, positionScaleZ);
+      }
+    }
+    return stage_eye_clips(clips, true);
+  }
+  const size_t needed =
+      2 * (AURORA_ALIGN(static_cast<size_t>(layout.size), alignment) + alignment) + 2 * gx::MaxUniformSize;
+  if (logical_size(frame.uniforms, frame.spillUniforms) + needed > frame_buffer_sizes().maxUniform) {
+    return exhausted();
+  }
+  // Diagnostics: what the eye copies cost (log_stereo_frame_stats).
+  struct EyeUniformTimer {
+    const bool on = g_stereoDiagnostics.load(std::memory_order_relaxed);
+    const std::chrono::steady_clock::time_point start =
+        on ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    ~EyeUniformTimer() {
+      if (on) {
+        g_eyeUniformNs.fetch_add(
+            static_cast<uint64_t>((std::chrono::steady_clock::now() - start).count()), std::memory_order_relaxed);
+        g_eyeUniformDraws.fetch_add(1, std::memory_order_relaxed);
+      }
+    }
+  } eyeUniformTimer;
+  // A screen-projecting texture matrix is derived from position matrix pnSlot, so
+  // that slot must be composed whichever one the vertices use.
+  StereoUniformLayout eyeLayout = layout;
+  if (screenTexMtx.texSlot != 0xFF) {
+    eyeLayout.fixedPositionSlot = -1;
+  }
+  thread_local std::vector<uint8_t> scratch;
+  std::array<uint32_t, 2> offsets{};
+  for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
+    scratch.assign(mono, mono + layout.size);
+    const auto& params = state.eyes[eye];
+    const float renderScaleX =
+        monoSize.width != 0 ? static_cast<float>(params.width) / static_cast<float>(monoSize.width) : 1.0f;
+    const float renderScaleY =
+        monoSize.height != 0 ? static_cast<float>(params.height) / static_cast<float>(monoSize.height) : 1.0f;
+    if (onScreen) {
+      const auto& screenView = route == AURORA_STEREO_ROUTE_FLOATING_HUD    ? params.floatingHudViewFromCenter
+                               : route == AURORA_STEREO_ROUTE_ANCHORED_SCREEN ? params.anchoredScreenViewFromCenter
+                                                                             : params.viewFromCenter;
+      compose_stereo_screen_2d_uniform(scratch.data(), layout,
+                                       StereoEyeScreenCompose{
+                                           .projection = &params.projection,
+                                           .viewFromCenter = &screenView,
+                                           .screen = screen,
+                                           .ndcRemap = screenNdc,
+                                           .renderScaleX = renderScaleX,
+                                           .renderScaleY = renderScaleY,
+                                       });
+    } else if (onPlane) {
+      compose_stereo_2d_uniform(scratch.data(), layout,
+                                StereoEye2DCompose{
+                                    .projection = &params.projection,
+                                    .headLockedViewFromCenter = &params.headLockedViewFromCenter,
+                                    .plane = plane,
+                                    .renderScaleX = renderScaleX,
+                                    .renderScaleY = renderScaleY,
+                                });
+    } else {
+      // A sky draw (AURORA_STEREO_ROUTE_SKY) takes the eye's rotation only; an
+      // anchored 3D draw (AURORA_STEREO_ROUTE_ANCHORED_3D) the eye's view from the held anchor.
+      const Mat3x4<float> placedViewFromCenter = placed3D ? placedView(params) : params.viewFromCenter;
+      const Mat3x4<float>* viewFromCenter = headLocked                            ? &params.headLockedViewFromCenter
+                                            : route == AURORA_STEREO_ROUTE_SKY ? &params.skyViewFromCenter
+                                                                               : &placedViewFromCenter;
+      compose_stereo_uniform(
+          scratch.data(), eyeLayout,
+          StereoEyeCompose{
+              .projection = &params.projection,
+              .viewFromCenter = viewFromCenter,
+              .positionScaleXY = positionScaleXY,
+              .positionScaleZ = positionScaleZ,
+              .renderScaleX = renderScaleX,
+              .renderScaleY = renderScaleY,
+          });
+      // A screen-projecting texture matrix (AuroraSetStereoScreenTexMtx) is
+      // derived again from the eye's composed projection and position matrix.
+      if (screenTexMtx.texSlot != 0xFF) {
+        compose_stereo_screen_tex_mtx(scratch.data(), eyeLayout, screenTexMtx.texSlot, screenTexMtx.pnSlot);
+      }
+    }
+    const auto range = push(frame.uniforms, frame.spillUniforms, StagingKind::Uniform,
+                            scratch.data(), layout.size, alignment, 2 * gx::MaxUniformSize, "stereo uniform");
+    if (overflowed(range)) { return exhausted(); }
+    offsets[eye] = range.offset;
+  }
+  if (state.multiview) {
+    g_recorder.multiviewMode = gx::MultiviewFull;
+  }
+  return offsets;
+}
+
+uint8_t stereo_multiview_mode() noexcept { return g_recorder.multiviewMode; }
+
 template <>
 void push_draw_command(clear::DrawData data) {
   push_draw_command(make_draw_command<clear::render>(data));
@@ -1168,10 +1711,19 @@ PipelineRef pipeline_ref(const clear::PipelineConfig& config) {
   return find_pipeline(ShaderType::Clear, config, [=] { return create_pipeline(config); });
 }
 
+PipelineRef clear_multiview_pipeline_ref(const clear::PipelineConfig& config) noexcept {
+  if (!recording_multiview()) {
+    return {};
+  }
+  clear::PipelineConfig multiviewConfig = config;
+  multiviewConfig.multiview = true;
+  return pipeline_ref(multiviewConfig);
+}
+
 void resolve_pass_into(TextureHandle texture, ClipRect rect, bool clearColor, bool clearAlpha, bool clearDepth,
                        Vec4<float> clearColorValue, float clearDepthValue, GXTexFmt resolveFormat,
                        int probeFace, bool resolveMips, const ResolveHdr* hdr, bool opaqueAlpha) {
-  perf::pass_break(AURORA_PERF_BREAK_COPY);
+  aurora::perf::pass_break(AURORA_PERF_BREAK_COPY);
   if (scene_hdr_pass_active()) {
     // The scene holds exposed linear light: a display copy post-tones it, a linear copy keeps it,
     // and the clear colour (display-referred) goes in as the light that post-tones back to it.
@@ -1218,6 +1770,58 @@ void resolve_pass_into(TextureHandle texture, ClipRect rect, bool clearColor, bo
   const auto bottom = std::clamp<int32_t>(rect.y + rect.height, top, targetHeight);
   const ClipRect clearRect{.x = left, .y = top, .width = right - left, .height = bottom - top};
   const bool fullTarget = left == 0 && top == 0 && right == targetWidth && bottom == targetHeight;
+  // Stereo replay: a copy from an EFB pass that replays per eye is also taken
+  // from each eye, into the copy's stand-ins (stereo_shadow.hpp), so effects
+  // that sample it (the thermal and X-ray visors) see each eye's own view. Set
+  // before the pass is enqueued: the frame worker may encode it at once.
+  // A copy made under AURORA_STEREO_ROUTE_SKIP is not a view (a shadow rendered
+  // from a light): it is taken from the mono EFB only and the eyes sample it.
+  // When it also clears the whole EFB, the next pass's eye passes clear the
+  // eyes too, so nothing could see this pass in them: it is not replayed.
+  const bool monoCopy = g_recorder.stereoRoute == AURORA_STEREO_ROUTE_SKIP && probeFace < 0;
+  if (monoCopy && fullTarget && clearColor && clearAlpha && (clearDepth || !prevPass.hasDepth) && !prevPass.hasStencil) {
+    prevPass.stereo.monoOnly = true;
+  }
+  stereo_seal_pass(current_frame_packet(), g_recorder.currentRenderPass);
+  if (probeFace < 0) {
+    // VR MERGE NOTE: keep depth copies eligible alongside colour copies.
+    // Upstream can change an effect's GXCopyTex format without touching this
+    // code: retail lava/fog changed A8 -> Z16 in 0.32 and silently became mono
+    // when depth was excluded here. See RetailFogDepthCopiesHaveSeparateEyeTargets.
+    if (prevPass.stereo.enabled && !monoCopy) {
+      // Each eye's copy at that eye's resolution (stereo_shadow.hpp).
+      const auto& efbSize = prevPass.colorAttachments[SceneColorAttachmentIndex].size;
+      std::array<stereo_shadow::EyeSize, AURORA_STEREO_EYE_COUNT> eyeTargets{};
+      for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
+        eyeTargets[eye] = {prevPass.stereo.eyes[eye].size.width, prevPass.stereo.eyes[eye].size.height};
+      }
+      prevPass.stereo.copyTargets = stereo_shadow::copy_targets(
+          prevPass.resolveTarget, {efbSize.width, efbSize.height}, eyeTargets);
+      // A copy made under AURORA_STEREO_ROUTE_HEAD_LOCKED_2D is taken from
+      // each eye through the head-locked plane, so it holds what that eye sees
+      // behind the copied rectangle: the scan visor's window magnifies what
+      // is straight ahead of the head (stereo_replay.hpp HeadLockedPlane).
+      if (g_recorder.stereoRoute == AURORA_STEREO_ROUTE_HEAD_LOCKED_2D && g_recorder.headLockedPlane.valid()) {
+        const auto& stereo = current_frame_packet().stereo;
+        const auto plane = stereo_replay::head_locked_plane_screen(g_recorder.headLockedPlane,
+                                                                   stereo.headLockedScaleXY, stereo.headLockedScaleZ);
+        const float ndcLeft = 2.0f * static_cast<float>(rect.x) / srcW - 1.0f;
+        const float ndcRight = 2.0f * static_cast<float>(rect.x + rect.width) / srcW - 1.0f;
+        const float ndcTop = 1.0f - 2.0f * static_cast<float>(rect.y) / srcH;
+        const float ndcBottom = 1.0f - 2.0f * static_cast<float>(rect.y + rect.height) / srcH;
+        for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
+          const auto& params = stereo.eyes[eye];
+          const auto uv = stereo_replay::head_locked_plane_uv_rect(params.projection, params.headLockedViewFromCenter,
+                                                                   plane, ndcLeft, ndcTop, ndcRight, ndcBottom);
+          if (uv.valid()) {
+            prevPass.stereo.copyUniformRanges[eye] = push_uniform(tex_copy_conv::Uniforms{.offset = {uv.u, uv.v}, .scale = {uv.width, uv.height}, .opaqueAlpha = opaqueAlpha});
+          }
+        }
+      }
+    } else {
+      stereo_shadow::invalidate(prevPass.resolveTarget.get());
+    }
+  }
   // The continuation's load op clears whatever the copy clears.
   discard_dead_stores(prevPass, clearColor && clearAlpha && fullTarget, clearDepth && fullTarget);
   enqueue_pass(current_frame_packet(), g_recorder.currentRenderPass);
@@ -1243,6 +1847,8 @@ void resolve_pass_into(TextureHandle texture, ClipRect rect, bool clearColor, bo
       .clearDepth = clearDepth && fullTarget,
       .hasDepth = prevPass.hasDepth,
       .hasStencil = prevPass.hasStencil,
+      // Still the EFB after a copy: the stereo replay carries on into the eyes.
+      .efb = prevPass.efb,
   };
   const bool fullColorClear = clearColor && clearAlpha && fullTarget;
   for (uint32_t i = 0; i < newPass.colorAttachmentCount; ++i) {
@@ -1267,9 +1873,9 @@ void resolve_pass_into(TextureHandle texture, ClipRect rect, bool clearColor, bo
   if (clearRect.width > 0 && clearRect.height > 0 && (drawClearColor || drawClearAlpha || drawClearDepth)) {
     // Part of the target, or only its colour or alpha: a clear draw
     const auto targetLayout = current_render_passes()[g_recorder.currentRenderPass].target_layout();
+    const auto clearConfig = clear::make_pipeline_config(targetLayout, drawClearColor, drawClearAlpha, drawClearDepth);
     push_draw_command(clear::DrawData{
-        .pipeline = pipeline_ref(
-            clear::make_pipeline_config(targetLayout, drawClearColor, drawClearAlpha, drawClearDepth)),
+        .pipeline = pipeline_ref(clearConfig),
         .color =
             wgpu::Color{
                 .r = clearColorValue.x(),
@@ -1277,8 +1883,11 @@ void resolve_pass_into(TextureHandle texture, ClipRect rect, bool clearColor, bo
                 .b = clearColorValue.z(),
                 .a = clearColorValue.w(),
             },
+        .multiviewPipeline = clear_multiview_pipeline_ref(clearConfig),
         .depth = clearDepthValue,
         .rect = clearRect,
+        .rectReferenceWidth = static_cast<uint32_t>(targetWidth),
+        .rectReferenceHeight = static_cast<uint32_t>(targetHeight),
     });
   }
   push_command(CommandType::SetViewport, Command::Data{.setViewport = g_recorder.cachedViewport});
@@ -1289,6 +1898,15 @@ void queue_palette_conv(tex_palette_conv::ConvRequest req) {
   auto& renderPass = current_render_passes()[g_recorder.currentRenderPass];
   AURORA_ASSERT(!renderPass.sealed, "Attempted to append palette conversion to sealed render pass {}",
                 g_recorder.currentRenderPass);
+  // Stereo replay: a palette read of a copy with eye stand-ins runs per eye too
+  // (DolphinXR's layered palette conversion), so the visor's coloured image
+  // stays per eye.
+  std::array<tex_palette_conv::ConvRequest, 2> eyeConvs;
+  if (!g_recorder.inOffscreen && stereo_shadow::palette_conv(req, eyeConvs)) {
+    for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
+      renderPass.stereo.paletteConvs[eye].push_back(std::move(eyeConvs[eye]));
+    }
+  }
   renderPass.paletteConvs.push_back(std::move(req));
 }
 
@@ -1366,8 +1984,8 @@ bool scene_hdr_pass_active() noexcept {
   return pass.colorAttachments[SceneColorAttachmentIndex].view.Get() == webgpu::g_sceneHdr.view.Get();
 }
 
-bool set_scene_hdr(bool on) {
-  if (g_recorder.hdrScene == on) {
+bool set_scene_hdr(bool on, bool pause) {
+  if (g_recorder.hdrScene == on && !pause) {
     return true;
   }
   // Only between EFB draws: not outside a frame, offscreen, or in a begin_color_pass pass.
@@ -1382,11 +2000,17 @@ bool set_scene_hdr(bool on) {
     return false;
   }
   // An HDR scene must be convertible before its first draw. Check the same FIFO-owned post budget
-  // used by bloom::record so an unsupported third segment falls back to the display EFB here.
+  // used by bloom::record so an unsupported third segment is refused here, and draws without the post.
   if (on && !bloom::scene_post_available()) {
     return false;
   }
   if (on && !webgpu::ensure_scene_hdr_target()) {
+    // No retail fallback: the frame draws without the Remastered post, each PBR draw toned on its own.
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      Log.warn("HDR scene unavailable: the frame draws without the Remastered post (warned once)");
+    }
     return false;
   }
 
@@ -1398,7 +2022,16 @@ bool set_scene_hdr(bool on) {
   g_recorder.hdrScene = on;
   auto& pass = current_render_passes()[g_recorder.currentRenderPass];
   set_efb_targets(pass);
-  if (on && !g_recorder.hdrSceneCleared) {
+  if (pause) {
+    // RenderPauseScreenElements clears depth (flags 2), not the reused colour.
+    auto& color = pass.colorAttachments[SceneColorAttachmentIndex];
+    color.clear = false;
+    color.loadOp = wgpu::LoadOp::Load;
+    pass.clearDepth = true;
+    pass.depthLoadOp = wgpu::LoadOp::Clear;
+    pass.clearDepthValue = gx::UseReversedZ ? 0.f : 1.f;
+    g_recorder.hdrSceneCleared = true;
+  } else if (on && !g_recorder.hdrSceneCleared) {
     auto& color = pass.colorAttachments[SceneColorAttachmentIndex];
     color.clear = true;
     color.loadOp = wgpu::LoadOp::Clear;
@@ -1465,7 +2098,7 @@ void begin_offscreen(uint32_t width, uint32_t height) {
   AURORA_ASSERT(g_recorder.active() && g_recorder.currentRenderPass != UINT32_MAX,
                 "begin_offscreen called outside of an active recording frame");
 
-  perf::pass_break(AURORA_PERF_BREAK_OFFSCREEN);
+  aurora::perf::pass_break(AURORA_PERF_BREAK_OFFSCREEN);
   if (g_recorder.inOffscreen) {
     finish_current_offscreen();
   } else {
@@ -1476,7 +2109,7 @@ void begin_offscreen(uint32_t width, uint32_t height) {
 
 void end_offscreen() {
   ZoneScoped;
-  perf::pass_break(AURORA_PERF_BREAK_OFFSCREEN);
+  aurora::perf::pass_break(AURORA_PERF_BREAK_OFFSCREEN);
   finish_current_offscreen();
   restore_efb();
 }
@@ -1511,7 +2144,7 @@ bool resolve_scene_copy(TextureHandle color, const ResolveHdr* hdr, wgpu::Textur
   const auto& attachment = pass.colorAttachments[SceneColorAttachmentIndex];
   const uint32_t width = attachment.size.width;
   const uint32_t height = attachment.size.height;
-  if (pass.hasDepth && tex_copy_conv::snapshot_depth_supported()) {
+  if (pass.hasDepth && tex_copy_conv::snapshot_depth_supported(pass.msaaSamples)) {
     auto& entry = acquire_pass_snapshot(width, height, attachment.format, pass.msaaSamples, false, true);
     pass.snapshotDepthDst = entry.depth.view;
     depth = entry.depth.view;
@@ -1533,13 +2166,13 @@ bool resolve_pass(const ResolveDesc& desc, ResolvedTargets& out) {
     return false;
   }
 
+  auto& prevPass = current_render_passes()[g_recorder.currentRenderPass];
   bool wantDepth = desc.depth;
-  if (wantDepth && !tex_copy_conv::snapshot_depth_supported()) {
+  if (wantDepth && !tex_copy_conv::snapshot_depth_supported(prevPass.msaaSamples)) {
     Log.warn("resolve_pass: depth snapshots are unsupported on this device");
     wantDepth = false;
   }
 
-  auto& prevPass = current_render_passes()[g_recorder.currentRenderPass];
   const uint32_t width = prevPass.colorAttachments[SceneColorAttachmentIndex].size.width;
   const uint32_t height = prevPass.colorAttachments[SceneColorAttachmentIndex].size.height;
   // Requesting no snapshots is a plain pass break (or offscreen close, discarding its output).
@@ -1568,7 +2201,7 @@ bool resolve_pass(const ResolveDesc& desc, ResolvedTargets& out) {
   // Seal the current EFB pass and continue on a new one that loads the existing contents.
   // EFB writes persist into the loading continuation, so content keeps the pass alive even
   // without a consumer.
-  perf::pass_break(AURORA_PERF_BREAK_RESOLVE);
+  aurora::perf::pass_break(AURORA_PERF_BREAK_RESOLVE);
   prevPass.discardable = !prevPass.has_consumer() && !prevPass.has_content();
   enqueue_pass(current_frame_packet(), g_recorder.currentRenderPass);
   resume_efb_pass_loading(prevPass);
@@ -1584,7 +2217,7 @@ void split_pass_for_depth_snapshot() {
   if (prevPass.msaaSamples > 1) {
     return; // depth_peek reads single-sampled depth only
   }
-  perf::pass_break(AURORA_PERF_BREAK_DEPTH_SNAPSHOT);
+  aurora::perf::pass_break(AURORA_PERF_BREAK_DEPTH_SNAPSHOT);
   prevPass.forceDepthSnapshot = true;
   prevPass.discardable = !prevPass.has_consumer() && !prevPass.has_content();
   enqueue_pass(current_frame_packet(), g_recorder.currentRenderPass);
@@ -1627,7 +2260,7 @@ bool record_encoder_task_between(EncoderTaskId type, const void* payload, size_t
   // Seal the current EFB pass, record the task between it and a continuation
   // pass that loads the existing contents. EFB writes persist into the continuation, so
   // content keeps the sealed pass alive even without a consumer.
-  perf::pass_break(AURORA_PERF_BREAK_ENCODER_TASK);
+  aurora::perf::pass_break(AURORA_PERF_BREAK_ENCODER_TASK);
   auto& frame = current_frame_packet();
   auto& prevPass = current_render_passes()[g_recorder.currentRenderPass];
   prevPass.discardable = !prevPass.has_consumer() && !prevPass.has_content();
@@ -1717,7 +2350,7 @@ void push_draw_command(rmlui::DrawData data) {
 
 // A GX draw's pipeline: blocking when the caller must not lose its draw (gx::blocking_pipelines).
 static PipelineRef gx_pipeline_ref(const gx::PipelineConfig& config, bool blocking) {
-  return find_pipeline(
+  const auto ref = find_pipeline(
       ShaderType::GX, config,
       [=] {
         phase::Scope compiling(render_worker::is_worker_thread() ? phase::Render : phase::Main,
@@ -1725,6 +2358,8 @@ static PipelineRef gx_pipeline_ref(const gx::PipelineConfig& config, bool blocki
         return create_pipeline(config);
       },
       blocking ? PipelinePriority::Blocking : PipelinePriority::Normal);
+  overdraw::note_pipeline(ref, config);
+  return ref;
 }
 
 template <>
@@ -1745,6 +2380,8 @@ PipelineRef pipeline_ref(const rmlui::PipelineConfig& config) {
 
 void finish() {
   ZoneScoped;
+  // One frame's worth: set again before every finish() (aurora.cpp end_frame).
+  const bool finalPassMonoUnneeded = std::exchange(g_recorder.finalPassMonoUnneeded, false);
   if (!g_recorder.active()) {
     return;
   }
@@ -1753,8 +2390,8 @@ void finish() {
     auto& frame = current_frame_packet();
     uint32_t padOffset = 0;
     if (uint8_t* pad = reserve_frame_bytes(frame.uniforms, frame.spillUniforms, StagingKind::Uniform,
-                                           gx::MaxUniformSize, 0, 0, "uniform", padOffset)) {
-      memset(pad, 0, gx::MaxUniformSize);
+                                           2 * gx::MaxUniformSize, 0, 0, "uniform", padOffset)) {
+      memset(pad, 0, 2 * gx::MaxUniformSize);
     }
     auto& pass = frame.renderPasses[g_recorder.currentRenderPass];
     // Only when a peek waits for it: the snapshot needs the depth stored, which a tile-based GPU
@@ -1766,7 +2403,14 @@ void finish() {
     }
     // The next frame starts by clearing the EFB.
     discard_dead_stores(pass, true, true);
+    // Honoured only if sealing gives the pass its eye passes (encoding.cpp). A pass the CPU reads back
+    // (MetroidPrime2Port's scan peek, EFB copy read-back, forced depth snapshot) keeps its mono image.
+    pass.stereo.skipMono = finalPassMonoUnneeded && !pass.scanPeek.has_value() && !pass.efbCpuCopy.has_value() &&
+                           !pass.forceDepthSnapshot;
     enqueue_pass(frame, g_recorder.currentRenderPass);
+    if (g_stereoDiagnostics.load(std::memory_order_relaxed)) {
+      log_stereo_frame_stats(frame);
+    }
     g_recorder.currentRenderPass = UINT32_MAX;
   }
 }
@@ -1789,6 +2433,23 @@ Range push_indices(const uint8_t* data, size_t length, size_t alignment) {
   return push(frame.indices, frame.spillIndices, StagingKind::Index, data, length, alignment, 0, "index");
 }
 
+ByteBuffer* staging_verts() noexcept { return g_recorder.active() ? &current_frame_packet().verts : nullptr; }
+
+void queue_geometry_upload(uint32_t offset, const uint8_t* data, uint32_t size) {
+  if (!check_recording("queue_geometry_upload") || size == 0) {
+    return;
+  }
+  // Through this frame's vertex staging: the frame worker copies it on to the
+  // geometry buffer before the frame's next op (encoding.cpp).
+  auto& frame = current_frame_packet();
+  const Range range = push(frame.verts, frame.spillVerts, StagingKind::Vertex, data, size, 4, 0, "geometry");
+  if (overflowed(range)) return;
+  const auto src = static_cast<uint32_t>(range.offset - frame_buffer_sizes().base(StagingKind::Vertex));
+  frame.geometryUploads.push_back(GeometryUpload{.src = src, .dst = offset, .size = size});
+}
+
+ByteBuffer* staging_indices() noexcept { return g_recorder.active() ? &current_frame_packet().indices : nullptr; }
+
 Range push_uniform(const uint8_t* data, size_t length) {
   ZoneScoped;
   if (!check_recording("push_uniform")) {
@@ -1796,9 +2457,12 @@ Range push_uniform(const uint8_t* data, size_t length) {
   }
   auto& frame = current_frame_packet();
   const auto alignment = resources().limits.minUniformBufferOffsetAlignment;
+  // PrimedGun: no de-dup on a frame replayed per eye. A multiview draw's eye clip block must follow its own
+  // mono uniform (stage_stereo_uniforms), so a shared earlier range would only be pushed again with it.
+  const bool dedup = length != 0 && !frame.stereo.immersive;
   const uint64_t key =
-      length != 0 ? absl::HashOf(std::string_view(reinterpret_cast<const char*>(data), length)) : 0;
-  if (length != 0) {
+      dedup ? absl::HashOf(std::string_view(reinterpret_cast<const char*>(data), length)) : 0;
+  if (dedup) {
     // Port: see g_uniformDedup. A block lies wholly in the staging buffer or wholly in the spill.
     if (const auto it = g_uniformDedup.find(key); it != g_uniformDedup.end() && it->second.size == length) {
       const size_t at = it->second.offset - frame_buffer_sizes().base(StagingKind::Uniform);
@@ -1813,9 +2477,10 @@ Range push_uniform(const uint8_t* data, size_t length) {
     }
   }
   // A uniform is bound as a MaxUniformSize window, which must stay inside the buffer.
+  // PrimedGun: 2 x MaxUniformSize, room for the eye clip block a multiview draw stages after the uniform.
   const Range range = push(frame.uniforms, frame.spillUniforms, StagingKind::Uniform, data, length, alignment,
-                           gx::MaxUniformSize, "uniform");
-  if (length != 0 && !overflowed(range)) {
+                           2 * gx::MaxUniformSize, "uniform");
+  if (dedup && !overflowed(range)) {
     g_uniformDedup[key] = range;
   }
   return range;
@@ -1830,7 +2495,7 @@ Range map_uniform(uint8_t*& out) {
   const auto alignment = resources().limits.minUniformBufferOffsetAlignment;
   uint32_t offset = 0;
   out = reserve_frame_bytes(frame.uniforms, frame.spillUniforms, StagingKind::Uniform, gx::MaxUniformSize,
-                            alignment, 0, "uniform", offset);
+                            alignment, 2 * gx::MaxUniformSize, "uniform", offset);
   if (out == nullptr) {
     return OverflowRange;
   }

@@ -7,6 +7,7 @@
 #include "types.hpp"
 #include "tex_copy_conv.hpp"
 #include "tex_palette_conv.hpp"
+#include "stereo_frame.hpp"
 #include "texture.hpp"
 
 #include <array>
@@ -19,6 +20,15 @@
 
 namespace aurora::gfx::detail {
 
+// A block of resolved vertex records for the geometry cache (gx/geometry_cache.hpp):
+// `size` bytes at `src` of this frame's vertex staging, copied to `dst` of the geometry
+// buffer (geometry_buffer.hpp) before the frame's next op.
+struct GeometryUpload {
+  uint32_t src = 0;
+  uint32_t dst = 0;
+  uint32_t size = 0;
+};
+
 struct StagingHighWater {
   uint32_t verts = 0;
   uint32_t uniforms = 0;
@@ -26,6 +36,7 @@ struct StagingHighWater {
   uint32_t storage = 0;
   uint32_t textureUpload = 0;
   size_t textureUploadCount = 0;
+  size_t geometryUploadCount = 0;
   size_t bufferUploadCount = 0;
 };
 
@@ -47,8 +58,17 @@ struct CustomDrawCommand {
 struct RenderPass;
 using DrawEncoder = void (*)(void* payload, const wgpu::RenderPassEncoder& pass, const RenderPass& passInfo);
 
+// What a draw's payload is, for the encoders that treat some draws specially
+// (the stereo eye passes re-issue GX and clear draws and leave the rest mono).
+enum class DrawKind : uint8_t {
+  Other,
+  GX,
+  Clear,
+};
+
 struct DrawCommand {
   DrawEncoder encoder = nullptr;
+  DrawKind kind = DrawKind::Other;
   alignas(std::max_align_t) std::array<std::byte, InlineDrawPayloadSize> payload{};
 };
 
@@ -137,6 +157,9 @@ struct RenderPass {
   // pass itself is discarded.
   bool forceDepthSnapshot = false;
   bool sealed = false;
+  // The frame's EFB (scene) target: the passes the stereo replay re-encodes per eye.
+  bool efb = false;
+  StereoPassReplay stereo;
   std::vector<tex_palette_conv::ConvRequest> paletteConvs;
 
   RenderTargetLayout target_layout() const noexcept;
@@ -212,6 +235,7 @@ struct FrameOp {
   EncoderTask* encoderTask = nullptr;
   StagingHighWater highWater;
   std::vector<const TextureUpload*> textureUploads;
+  std::vector<const GeometryUpload*> geometryUploads;
   std::vector<const BufferUpload*> bufferUploads;
 };
 
@@ -238,6 +262,7 @@ struct FramePacket {
   std::deque<EncoderTask> encoderTasks;
   std::deque<FrameOp> ops;
   std::deque<TextureUpload> textureUploads;
+  std::deque<GeometryUpload> geometryUploads;
   std::deque<BufferUpload> bufferUploads;
 #ifdef AURORA_GFX_DEBUG_GROUPS
   std::vector<std::string> debugMarkers;
@@ -258,6 +283,7 @@ struct FramePacket {
   size_t stagingBuffer = 0;
   StagingHighWater copied;
   AuroraStats stats{};
+  StereoFrameState stereo;
 };
 
 } // namespace aurora::gfx::detail

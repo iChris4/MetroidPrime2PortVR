@@ -11,6 +11,8 @@
 #include "../gfx/probe.hpp"
 #include "../gfx/recording.hpp"
 #include "../gfx/resource_cache.hpp"
+#include "../gfx/stereo_multiview.hpp"
+#include "../gfx/stereo_shadow.hpp"
 #include "../gfx/shadow.hpp"
 #include "../gfx/actor_shadow.hpp"
 #include "../gfx/volfog.hpp"
@@ -39,23 +41,36 @@ using webgpu::g_device;
 using webgpu::g_graphicsConfig;
 
 GXState g_gxState{};
-wgpu::BindGroup g_emptyTextureBindGroup;
+std::array<wgpu::BindGroup, 2> g_emptyTextureBindGroups;
+std::array<wgpu::BindGroup, 2> g_emptyMultiviewTextureBindGroups;
 
 namespace {
 wgpu::Sampler sEmptySampler;
-// The sampler each texture slot took last, by its descriptor's value fields (build_bind_groups)
+// The sampler each texture slot took last, by its descriptor's value fields (build_texture_bind_group)
 constexpr auto kSamplerKeyOffset = offsetof(wgpu::SamplerDescriptor, addressModeU);
 constexpr auto kSamplerKeySize = offsetof(wgpu::SamplerDescriptor, maxAnisotropy) + sizeof(uint16_t) - kSamplerKeyOffset;
 std::array<std::array<u8, kSamplerKeySize>, MaxTextures> sSlotSamplerKeys{};
 std::array<wgpu::Sampler, MaxTextures> sSlotSamplers;
 wgpu::Texture sEmptyTexture;
 wgpu::TextureView sEmptyTextureView;
+wgpu::TextureView sEmptyArrayTextureView;
 std::mutex sBindGroupLayoutMutex;
 absl::flat_hash_map<u32, wgpu::BindGroupLayout> sUniformBindGroupLayouts;
 absl::flat_hash_map<u32, std::pair<wgpu::BindGroupLayout, wgpu::BindGroupLayout>> sTextureBindGroupLayouts;
 wgpu::BindGroupLayout sTextureBindGroupLayout;
 wgpu::BindGroupLayout sSamplerBindGroupLayout;
 wgpu::PipelineLayout sPipelineLayout;
+// The Lean layout (TextureLayout): the GX textures alone.
+wgpu::BindGroupLayout sLeanTextureBindGroupLayout;
+wgpu::PipelineLayout sLeanPipelineLayout;
+// Multiview stereo replay (gfx/stereo_multiview.hpp): the GX textures as 2D arrays.
+wgpu::BindGroupLayout sMultiviewTextureBindGroupLayout;
+wgpu::PipelineLayout sMultiviewPipelineLayout;
+wgpu::BindGroupLayout sMultiviewLeanTextureBindGroupLayout;
+wgpu::PipelineLayout sMultiviewLeanPipelineLayout;
+// ... and a shadow receiver's (sShadowTextureBindGroupLayout with the GX textures as 2D arrays).
+wgpu::BindGroupLayout sMultiviewShadowTextureBindGroupLayout;
+wgpu::PipelineLayout sMultiviewShadowRecvPipelineLayout;
 // A shadow receiver's group 2 (the shadow map in the froxel's slots) and its pipeline layout, and the
 // shadow map pass's layout, which has no group 2.
 wgpu::BindGroupLayout sShadowTextureBindGroupLayout;
@@ -364,6 +379,18 @@ u16 draw_sync_token() noexcept { return sDrawSyncToken.load(std::memory_order_ac
 
 const gfx::TextureBind& get_texture(GXTexMapID id) noexcept { return g_gxState.textures[static_cast<size_t>(id)]; }
 
+// The GX pipeline layout whose group 2 has `textures` (TextureLayout), mono or multiview.
+static const wgpu::PipelineLayout& pipeline_layout(TextureLayout textures, bool multiview) noexcept {
+  switch (textures) {
+  case TextureLayout::Lean:
+    return multiview ? sMultiviewLeanPipelineLayout : sLeanPipelineLayout;
+  case TextureLayout::ShadowRecv:
+    return multiview ? sMultiviewShadowRecvPipelineLayout : sShadowRecvPipelineLayout;
+  default:
+    return multiview ? sMultiviewPipelineLayout : sPipelineLayout;
+  }
+}
+
 DstAlphaMode dst_alpha_mode(const PipelineConfig& config) noexcept {
   // A zero constant times any source alpha is still zero.
   if (config.shadowPass != 0 || !config.alphaUpdate || config.dstAlpha == UINT32_MAX || config.dstAlpha == 0) {
@@ -371,7 +398,7 @@ DstAlphaMode dst_alpha_mode(const PipelineConfig& config) noexcept {
   }
   // The draw-id and actor-decal shaders end in their own return (alpha 1).
   const auto& sc = config.shaderConfig;
-  if (sc.drawId || (sc.actorDecal != 0 && sc.lineMode == 0)) {
+  if (sc.drawId || sc.shell != 0 || (sc.actorDecal != 0 && sc.lineMode == 0)) {
     return DstAlphaMode::None;
   }
   const auto usesSourceAlpha = [](GXBlendFactor factor) {
@@ -448,9 +475,16 @@ wgpu::RenderPipeline build_pipeline(const PipelineConfig& config, ArrayRef<wgpu:
       .targetCount = colorTargets.size(),
       .targets = colorTargets.data(),
   };
-  const wgpu::RenderPipelineDescriptor descriptor{
+  // EyeClipImmediate keeps the plain layout: its larger uniform binding is bound at the draw.
+  const bool multiview =
+      config.shaderConfig.multiview == MultiviewClip || config.shaderConfig.multiview == MultiviewFull;
+  const wgpu::PipelineLayout& layout = pipeline_layout(texture_layout(config.shaderConfig), multiview);
+  // Never a null layout: Dawn would infer one from the shader, whose groups ours don't match, and the
+  // draws would come out as garbage rather than an error.
+  CHECK(layout || (multiview && !sMultiviewPipelineLayout), "GX pipeline layout missing");
+  wgpu::RenderPipelineDescriptor descriptor{
       .label = label,
-      .layout = shadow_receives(config.shaderConfig) ? sShadowRecvPipelineLayout : sPipelineLayout,
+      .layout = layout,
       .vertex =
           {
               .module = shader,
@@ -466,6 +500,18 @@ wgpu::RenderPipeline build_pipeline(const PipelineConfig& config, ArrayRef<wgpu:
           },
       .fragment = &fragmentState,
   };
+#if defined(WGPU_DAWN_RENDER_PIPELINE_MULTIVIEW_INIT)
+  // Both views of a multiview eye pass (gfx/stereo_multiview.hpp).
+  wgpu::DawnRenderPipelineMultiview multiviewState{};
+  multiviewState.viewMask = gfx::stereo_multiview::kViewMask;
+  if (multiview) {
+    descriptor.nextInChain = &multiviewState;
+  }
+#endif
+  if (multiview && !sMultiviewPipelineLayout) {
+    // A cached multiview config on a device without the feature (pipeline_cache prewarm).
+    return {};
+  }
   return g_device.CreateRenderPipeline(&descriptor);
 }
 
@@ -504,6 +550,14 @@ static u8 vol_fog_mode(bool depthOnly) noexcept {
   return VolFogNone;
 }
 
+bool depth_prepass_eligible(u8 lineMode) noexcept {
+  const auto& st = g_gxState;
+  const bool opaque = st.blendMode == GX_BM_NONE ||
+                      (st.blendMode == GX_BM_BLEND && st.blendFacSrc == GX_BL_ONE && st.blendFacDst == GX_BL_ZERO);
+  return lineMode == 0 && st.depthCompare && st.depthUpdate && st.depthFunc == GX_LEQUAL && st.colorUpdate &&
+         (st.alphaUpdate || !efb_has_alpha(st.pixelFmt)) && opaque && st.shell == 0 && !st.actorDecal;
+}
+
 void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXVtxFmt fmt) noexcept {
   ZoneScoped;
 
@@ -517,20 +571,30 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
   config.shaderConfig.pbr = g_gxState.pbr;
   if (g_gxState.pbr != 0) {
     config.shaderConfig.pbrKind = static_cast<u8>(std::clamp(std::lround(g_gxState.pbrLayer.y()), 0L, 255L));
+    config.shaderConfig.pbrCut = pbr_cut_mode(g_gxState.pbrBacklight);
     // The lightmap's UV attribute, when the bound vertex format has it (and the device a slot for the lightmap).
     const u8 lightmapAttr = g_gxState.pbrLightmapAttr;
     if (webgpu::g_lightmapBinding && lightmapAttr >= GX_VA_TEX0 && lightmapAttr <= GX_VA_TEX7 &&
         g_gxState.vtxDesc[lightmapAttr] != GX_NONE) {
       config.shaderConfig.pbrLightmapAttr = lightmapAttr;
     }
+    config.shaderConfig.pbrThermal = config.shaderConfig.sceneHdr && g_gxState.pbrThermal.w() > 0.5f;
   }
-  if (bind_pos_active()) {
+  // Port (VR fork): the shader reads the bind pose with the vertex's own POS index, which a
+  // de-indexed record (GXState::deindexVertices, and the native/cached records built from it)
+  // no longer carries: its POS is inline floats, and the arrays are not bound. Those draws keep
+  // the view-space height fade (pbr_bind_y = -1).
+  if (bind_pos_active() && !g_gxState.deindexVertices) {
     config.shaderConfig.pbrBindPos = true;
     config.shaderConfig.pbrBindLe = g_gxState.arrays[GX_VA_TEX7].le;
   }
   config.shaderConfig.sdf = g_gxState.sdf;
+  config.shaderConfig.nativeVertices = g_gxState.nativeVertices;
+  config.shaderConfig.mapBatch = g_gxState.mapBatch && primitive == GX_TRIANGLES;
+  config.shaderConfig.mapCull = config.shaderConfig.mapBatch ? g_gxState.cullMode : GX_CULL_NONE;
   config.shaderConfig.hudSample = g_gxState.hudSample;
   u8 vtxOffset = 0;
+  const bool aligned = deindexed_layout();
   for (int i = GX_VA_PNMTXIDX; i <= GX_VA_TEX7; ++i) {
     const auto attr = static_cast<GXAttr>(i);
     const auto type = g_gxState.vtxDesc[i];
@@ -538,6 +602,9 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
     if (type == GX_NONE) {
       mapping = {};
       continue;
+    }
+    if (aligned) {
+      vtxOffset = static_cast<u8>(AURORA_ALIGN(vtxOffset, deindexed_attr_align(attr)));
     }
     const auto& attrFmt = vtxFmt.attrs[i];
     const auto cnt = comp_cnt_count(attr, attrFmt.cnt);
@@ -558,20 +625,27 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
       break;
     }
     case GX_INDEX8:
-      mapping.stride = g_gxState.arrays[i].stride;
-      mapping.le = g_gxState.arrays[i].le;
-      vtxOffset += nbt3 ? 3 : 1;
-      break;
     case GX_INDEX16:
+      if (g_gxState.deindexVertices) {
+        // Resolved by the FIFO processor (command_processor.cpp deindex_plan): the
+        // array's elements inline, in the array's byte order, NBT3 as one block
+        mapping.attrType = GX_DIRECT;
+        mapping.le = g_gxState.arrays[i].le;
+        mapping.nbt3 = false;
+        vtxOffset += comp_type_size(attr, attrFmt.type) * cnt;
+        break;
+      }
       mapping.stride = g_gxState.arrays[i].stride;
       mapping.le = g_gxState.arrays[i].le;
-      vtxOffset += nbt3 ? 6 : 2;
+      vtxOffset += (type == GX_INDEX8 ? 1 : 2) * (nbt3 ? 3 : 1);
       break;
     default:
       Log.fatal("populate_pipeline_config: Invalid vertex type {}", type);
     }
   }
-  config.shaderConfig.vtxStride = vtxOffset;
+  config.shaderConfig.vtxStride = aligned ? static_cast<u8>(AURORA_ALIGN(vtxOffset, 4u)) : vtxOffset;
+  config.shaderConfig.currentPnMtx =
+      config.shaderConfig.attrs[GX_VA_PNMTXIDX].attrType == GX_NONE ? static_cast<u8>(g_gxState.currentPnMtx) : 0;
   if (primitive == GX_LINES) {
     config.shaderConfig.lineMode = 1;
   } else if (primitive == GX_LINESTRIP) {
@@ -581,11 +655,17 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
   } else {
     config.shaderConfig.lineMode = 0;
   }
+  config.shaderConfig.clipPlane = g_gxState.clipPlane && config.shaderConfig.lineMode == 0;
   config.shaderConfig.tevSwapTable = g_gxState.tevSwapTable;
   for (u8 i = 0; i < g_gxState.numTevStages; ++i) {
     config.shaderConfig.tevStages[i] = g_gxState.tevStages[i];
   }
   config.shaderConfig.tevStageCount = g_gxState.numTevStages;
+  if (config.shaderConfig.mapBatch) {
+    // Map colours are RGBA vertex data, independent of a previous TEV swap.
+    config.shaderConfig.tevSwapTable[0] = {};
+    config.shaderConfig.tevStages[0].tevSwapRas = GX_TEV_SWAP0;
+  }
   for (u8 i = 0; i < g_gxState.numIndStages; ++i) {
     config.shaderConfig.indStages[i] = g_gxState.indStages[i];
   }
@@ -608,15 +688,18 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
   if (g_gxState.alphaCompare) {
     config.shaderConfig.alphaCompare = g_gxState.alphaCompare;
   }
-  const auto cullMode = config.shaderConfig.lineMode == 0 ? g_gxState.cullMode : GX_CULL_NONE;
+  const auto cullMode = config.shaderConfig.lineMode == 0 && !config.shaderConfig.mapBatch
+                            ? g_gxState.cullMode : GX_CULL_NONE;
   const auto [polygonOffset, polygonOffsetScale] = polygon_offset_for_cull_mode(cullMode);
   // GX_AURORA_PORT_DEPTH_PREPASS: pass 1 writes only the depth, pass 2 shades where it is equal.
   // Both keep the vertex stage and the polygon offset, so their depths match exactly (the
-  // position is @invariant).
-  const bool writesDepth = g_gxState.depthCompare && g_gxState.depthUpdate;
-  const bool depthOnly = g_gxState.depthPrepass == 1;
-  const bool depthEqual = g_gxState.depthPrepass == 2 && writesDepth;
-  config.shaderConfig.depthOnly = depthOnly;
+  // position is @invariant). Only depth_prepass_eligible draws take part: the others are left out
+  // of pass 1 (push_gx_draw) and draw unchanged in pass 2.
+  const bool depthOnly = g_gxState.depthPrepass == 1 || g_gxState.depthPrepass == 3;
+  // Pass 3's mark: only in an EFB without alpha, where nothing reads it.
+  const bool depthMark = g_gxState.depthPrepass == 3 && !efb_has_alpha(g_gxState.pixelFmt);
+  const bool depthEqual = g_gxState.depthPrepass == 2 && depth_prepass_eligible(config.shaderConfig.lineMode);
+  config.shaderConfig.depthOnly = depthMark ? 2 : depthOnly ? 1 : 0;
   // The "drawid" view: flat colours that must reach the frame as they are, so no fog and no blend (a
   // depth-only pass stays one).
   const bool drawId = g_gxState.drawIdMode && !depthOnly;
@@ -634,6 +717,8 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
     sc.actorDecal = 1;
     sc.pbr = 0;
     sc.pbrKind = 0;
+    sc.pbrCut = 0;
+    sc.pbrThermal = 0;
     sc.pbrBindPos = false;
     sc.pbrBindLe = false;
     sc.pbrLightmapAttr = GX_VA_NULL;
@@ -652,6 +737,37 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
     sc.tevStageCount = 1;
   } else if (g_gxState.actorDecal) {
     config.shaderConfig.shadow = false;
+  }
+  // GX_AURORA_PORT_SHELL: Remastered's Model_SilhouetteShell. The shell is the model pushed out along
+  // its normals; pass 1 writes its depth alone, pass 2 shades it from the scene copy and the shell's
+  // two textures, so none of the draw's own shading reaches the shader.
+  const u8 shell = config.shaderConfig.lineMode == 0 && !drawId ? g_gxState.shell : 0;
+  config.shaderConfig.shell = shell;
+  if (shell != 0) {
+    auto& sc = config.shaderConfig;
+    sc.depthOnly = shell == 1;
+    sc.actorDecal = 0;
+    sc.pbr = 0;
+    sc.pbrKind = 0;
+    sc.pbrCut = 0;
+    sc.pbrThermal = 0;
+    sc.pbrBindPos = false;
+    sc.pbrBindLe = false;
+    sc.pbrLightmapAttr = GX_VA_NULL;
+    sc.sdf = 0;
+    sc.hudSample = 0;
+    sc.perPixelLight = 0;
+    sc.fogType = GX_FOG_NONE;
+    sc.fogRangeEnabled = false;
+    sc.volFog = VolFogNone;
+    sc.alphaCompare = {};
+    sc.numIndStages = 0;
+    sc.indStages = {};
+    for (auto& ts : sc.tevStages) {
+      ts = {};
+    }
+    sc.tevStageCount = 1;
+    sc.shadow = false;
   }
   // Field by field: an aggregate assignment would copy the 2.7 KB shader config twice more on
   // every pipeline switch. Every field outside shaderConfig is written here.
@@ -693,8 +809,19 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
     // The receiver keeps its own cull (back faces for the world's geometry), as Remastered's
     // decal draw does.
   }
-  config.alphaUpdate = hasAlpha && g_gxState.alphaUpdate && !depthOnly;
-  config.colorUpdate = g_gxState.colorUpdate && !depthOnly;
+  if (shell != 0) {
+    // Both passes test LEQUAL, write depth (the model flags Remastered draws them with, Normal)
+    // and keep the model's cull; the colour pass replaces the frame where the shell's depth won.
+    config.blendMode = GX_BM_NONE;
+    config.depthFunc = GX_LEQUAL;
+    config.depthCompare = true;
+    config.depthUpdate = true;
+  }
+  config.alphaUpdate = (hasAlpha && g_gxState.alphaUpdate && !depthOnly && shell != 1) || depthMark;
+  if (depthMark) {
+    config.blendMode = GX_BM_NONE;
+  }
+  config.colorUpdate = g_gxState.colorUpdate && !depthOnly && shell != 1;
   static_assert(sizeof(PipelineConfig) == sizeof(ShaderConfig) + 13 * sizeof(uint32_t) + 4 * sizeof(bool),
                 "a new PipelineConfig field must be written above");
 }
@@ -702,48 +829,73 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
 // The lightmap's slot is the last binding, left out of group 2 when the device has no room for it.
 static size_t texture_binding_count() noexcept { return kTextureBindings - (webgpu::g_lightmapBinding ? 0 : 1); }
 
-GXBindGroups build_bind_groups(const ShaderInfo& info) noexcept {
-  ZoneScoped;
-
-  if (!info.sampledTextures.any() && !info.sampledIndTextures.any() && !info.usesVolFog && !info.shadowReceive &&
-      !info.usesLightmap) {
-    // Don't bother re-binding anything
-    return {};
+// Group 2's layout object for `textures` (TextureLayout), mono or multiview, and how many of
+// kTextureBindings it has: the Lean layout stops after the GX textures.
+static const wgpu::BindGroupLayout& texture_bind_group_layout(TextureLayout textures, bool multiview) noexcept {
+  switch (textures) {
+  case TextureLayout::Lean:
+    return multiview ? sMultiviewLeanTextureBindGroupLayout : sLeanTextureBindGroupLayout;
+  case TextureLayout::ShadowRecv:
+    return multiview ? sMultiviewShadowTextureBindGroupLayout : sShadowTextureBindGroupLayout;
+  default:
+    return multiview ? sMultiviewTextureBindGroupLayout : sTextureBindGroupLayout;
   }
+}
+static size_t texture_layout_binding_count(TextureLayout textures) noexcept {
+  return textures == TextureLayout::Lean ? MaxTextures * 2 : texture_binding_count();
+}
 
+namespace {
+// Whether a draw binds a group 2 of its own: textures, or the volumetric fog, the sun's shadow map or
+// a baked lightmap.
+bool needs_texture_group(const ShaderInfo& info) noexcept {
+  return info.sampledTextures.any() || info.sampledIndTextures.any() || info.usesVolFog || info.shadowReceive ||
+         info.usesLightmap;
+}
+
+// The GX texture bind group of the textures `info` samples, each texture's view
+// chosen by `view_for` (the mono view, or a stereo eye's stand-in). A multiview
+// bind group (gfx/stereo_multiview.hpp) binds 2D array views in its own layout.
+template <typename ViewFor>
+gfx::BindGroupRef build_texture_bind_group(const ShaderInfo& info, const ViewFor& view_for,
+                                           bool multiview = false) noexcept {
   // Using C WGPU types instead of C++ wrappers to avoid destructor overhead
   std::array<WGPUBindGroupEntry, kTextureBindings> textureEntries{};
-  textureEntries[MaxTextures * 2].binding = MaxTextures * 2;
-  textureEntries[MaxTextures * 2].textureView = gfx::probe::cube_view(g_gxState.pbrCube).Get();
-  textureEntries[MaxTextures * 2 + 1].binding = MaxTextures * 2 + 1;
-  textureEntries[MaxTextures * 2 + 1].sampler = gfx::probe::sampler().Get();
-  for (u32 i = 0; i < gfx::probe::VolumeTextures; ++i) {
-    textureEntries[MaxTextures * 2 + 2 + i].binding = MaxTextures * 2 + 2 + i;
-    textureEntries[MaxTextures * 2 + 2 + i].textureView = gfx::probe::volume_view(g_gxState.pbrVolume, i).Get();
-  }
-  textureEntries[kLightmapBinding].binding = kLightmapBinding;
-  textureEntries[kLightmapBinding].textureView = gfx::probe::lightmap_view(g_gxState.pbrLightmap).Get();
-  textureEntries[kBrdfLutBinding].binding = kBrdfLutBinding;
-  textureEntries[kBrdfLutBinding].textureView = gfx::probe::brdf_lut_view().Get();
-  textureEntries[kVolFogFroxelBinding].binding = kVolFogFroxelBinding;
-  textureEntries[kVolFogFroxelBinding].textureView = gfx::volfog::froxel_view().Get();
-  textureEntries[kVolFogSamplerBinding].binding = kVolFogSamplerBinding;
-  textureEntries[kVolFogSamplerBinding].sampler = gfx::volfog::sampler().Get();
-  if (info.shadowReceive && info.actorDecal) {
-    textureEntries[kShadowMapBinding].textureView = gfx::actor_shadow::map_view().Get();
-    textureEntries[kShadowSamplerBinding].sampler = gfx::actor_shadow::sampler().Get();
-  } else if (info.shadowReceive) {
-    textureEntries[kShadowMapBinding].textureView = gfx::shadow::map_view().Get();
-    textureEntries[kShadowSamplerBinding].sampler = gfx::shadow::sampler().Get();
+  const TextureLayout layout = texture_layout(info);
+  if (layout != TextureLayout::Lean) {
+    textureEntries[MaxTextures * 2].binding = MaxTextures * 2;
+    textureEntries[MaxTextures * 2].textureView = gfx::probe::cube_view(g_gxState.pbrCube).Get();
+    textureEntries[MaxTextures * 2 + 1].binding = MaxTextures * 2 + 1;
+    textureEntries[MaxTextures * 2 + 1].sampler = gfx::probe::sampler().Get();
+    for (u32 i = 0; i < gfx::probe::VolumeTextures; ++i) {
+      textureEntries[MaxTextures * 2 + 2 + i].binding = MaxTextures * 2 + 2 + i;
+      textureEntries[MaxTextures * 2 + 2 + i].textureView = gfx::probe::volume_view(g_gxState.pbrVolume, i).Get();
+    }
+    textureEntries[kLightmapBinding].binding = kLightmapBinding;
+    textureEntries[kLightmapBinding].textureView = gfx::probe::lightmap_view(g_gxState.pbrLightmap).Get();
+    textureEntries[kBrdfLutBinding].binding = kBrdfLutBinding;
+    textureEntries[kBrdfLutBinding].textureView = gfx::probe::brdf_lut_view().Get();
+    textureEntries[kVolFogFroxelBinding].binding = kVolFogFroxelBinding;
+    textureEntries[kVolFogFroxelBinding].textureView = gfx::volfog::froxel_view().Get();
+    textureEntries[kVolFogSamplerBinding].binding = kVolFogSamplerBinding;
+    textureEntries[kVolFogSamplerBinding].sampler = gfx::volfog::sampler().Get();
+    if (info.shadowReceive && info.actorDecal) {
+      textureEntries[kShadowMapBinding].textureView = gfx::actor_shadow::map_view().Get();
+      textureEntries[kShadowSamplerBinding].sampler = gfx::actor_shadow::sampler().Get();
+    } else if (info.shadowReceive) {
+      textureEntries[kShadowMapBinding].textureView = gfx::shadow::map_view().Get();
+      textureEntries[kShadowSamplerBinding].sampler = gfx::shadow::sampler().Get();
+    }
   }
   for (u32 i = 0; i < MaxTextures; ++i) {
-    const auto& tex = g_gxState.textures[i];
+    const auto& tex = info.shellScene && i < g_gxState.shellTextures.size() ? g_gxState.shellTextures[i]
+                                                                             : g_gxState.textures[i];
     WGPUBindGroupEntry& textureEntry = textureEntries[i * 2];
     WGPUBindGroupEntry& samplerEntry = textureEntries[i * 2 + 1];
     textureEntry.binding = i * 2;
     samplerEntry.binding = i * 2 + 1;
     if (tex && (info.sampledTextures[i] || info.sampledIndTextures[i])) {
-      textureEntry.textureView = tex.ref->sampleTextureView.Get();
+      textureEntry.textureView = view_for(tex);
       auto samplerDescriptor = tex.get_descriptor();
       // A mod's native maps under PBR tile many times over a floor. Anisotropic filtering keeps
       // them sharp across the view and averages them along it, so each screen column shows the
@@ -771,30 +923,194 @@ GXBindGroups build_bind_groups(const ShaderInfo& info) noexcept {
       }
       samplerEntry.sampler = sSlotSamplers[i].Get();
     } else {
-      textureEntry.textureView = sEmptyTextureView.Get();
+      textureEntry.textureView = multiview ? sEmptyArrayTextureView.Get() : sEmptyTextureView.Get();
       samplerEntry.sampler = sEmptySampler.Get();
     }
   }
+  // The shell's colour pass reads the scene copy (CBUF, textureLod 1, bilinear, clamped) in slot 2;
+  // without this frame's copy it reads the empty texture, and the caller draws no colour pass.
+  wgpu::TextureView shellScene;
+  if (info.shellScene) {
+    static const wgpu::Sampler shellSceneSampler = gfx::sampler_ref(wgpu::SamplerDescriptor{
+        .addressModeU = wgpu::AddressMode::ClampToEdge,
+        .addressModeV = wgpu::AddressMode::ClampToEdge,
+        .magFilter = wgpu::FilterMode::Linear,
+        .minFilter = wgpu::FilterMode::Linear,
+        .mipmapFilter = wgpu::MipmapFilterMode::Linear,
+        .maxAnisotropy = 1,
+    });
+    shellScene = gfx::vfx::scene_copy_view(gfx::scene_hdr_pass_active());
+    textureEntries[GX_TEXMAP2 * 2].textureView = shellScene ? shellScene.Get() : sEmptyTextureView.Get();
+    textureEntries[GX_TEXMAP2 * 2 + 1].sampler = shellSceneSampler.Get();
+  }
   const WGPUBindGroupDescriptor textureBindGroupDescriptor{
-      .label = {"GX Texture Bind Group", WGPU_STRLEN},
-      .layout = info.shadowReceive ? sShadowTextureBindGroupLayout.Get() : sTextureBindGroupLayout.Get(),
-      .entryCount = texture_binding_count(),
+      .label = {multiview ? "GX Multiview Texture Bind Group" : "GX Texture Bind Group", WGPU_STRLEN},
+      .layout = texture_bind_group_layout(layout, multiview).Get(),
+      .entryCount = texture_layout_binding_count(layout),
       .entries = textureEntries.data(),
   };
   // Every entry holds only a texture view or a sampler at a fixed binding, so those handles and the layout
-  // identify the bind group; hashing them is far cheaper than hashing the whole entries.
+  // identify the bind group; hashing them is far cheaper than hashing the whole entries. The layout tells
+  // the Lean, Full, shadow receiver and multiview groups apart, and a stereo eye's stand-in views are
+  // handles of their own.
   std::array<const void*, kTextureBindings + 1> key{};
   key[0] = textureBindGroupDescriptor.layout;
   for (size_t i = 0; i < textureBindGroupDescriptor.entryCount; ++i) {
     key[i + 1] = textureEntries[i].textureView ? static_cast<const void*>(textureEntries[i].textureView)
                                                : static_cast<const void*>(textureEntries[i].sampler);
   }
+  return gfx::bind_group_ref(xxh3_hash(key), textureBindGroupDescriptor);
+}
+} // namespace
+
+gfx::BindGroupRef build_multiview_bind_group(const ShaderInfo& info) noexcept {
+  if (!sMultiviewTextureBindGroupLayout || !needs_texture_group(info)) {
+    return {};
+  }
+  ZoneScoped;
+  // An EFB copy taken per eye binds its two-layer stand-in, any other texture its
+  // own single layer.
+  return build_texture_bind_group(
+      info,
+      [](const gfx::TextureBind& tex) {
+        if (const WGPUTextureView layered = gfx::stereo_shadow::layered_view(tex.ref.get())) {
+          return layered;
+        }
+        return gfx::array_texture_view(*tex.ref).Get();
+      },
+      true);
+}
+
+GXBindGroups build_bind_groups(const ShaderInfo& info) noexcept {
+  ZoneScoped;
+
+  if (!needs_texture_group(info)) {
+    // Don't bother re-binding anything
+    return {};
+  }
   return {
-      .textureBindGroup = gfx::bind_group_ref(xxh3_hash(key), textureBindGroupDescriptor),
+      .textureBindGroup =
+          build_texture_bind_group(info, [](const gfx::TextureBind& tex) { return tex.ref->sampleTextureView.Get(); }),
   };
 }
 
+std::array<gfx::BindGroupRef, 2> build_stereo_bind_groups(const ShaderInfo& info) noexcept {
+  if (!gfx::stereo_shadow::active() || (!info.sampledTextures.any() && !info.sampledIndTextures.any())) {
+    return {};
+  }
+  bool shadowed = false;
+  for (u32 i = 0; i < MaxTextures && !shadowed; ++i) {
+    const auto& tex = g_gxState.textures[i];
+    shadowed = tex && (info.sampledTextures[i] || info.sampledIndTextures[i]) &&
+               gfx::stereo_shadow::eye_texture(tex.ref.get(), 0) != nullptr;
+  }
+  if (!shadowed) {
+    return {};
+  }
+  ZoneScoped;
+  std::array<gfx::BindGroupRef, 2> groups{};
+  for (uint32_t eye = 0; eye < 2; ++eye) {
+    groups[eye] = build_texture_bind_group(info, [eye](const gfx::TextureBind& tex) {
+      if (const gfx::TextureRef* stand_in = gfx::stereo_shadow::eye_texture(tex.ref.get(), eye)) {
+        return stand_in->sampleTextureView.Get();
+      }
+      return tex.ref->sampleTextureView.Get();
+    });
+  }
+  return groups;
+}
+
+namespace {
+// group 2's entries with nothing bound: the PBR, fog and lightmap defaults, and `gxView` for every GX
+// texture (a 2D view, or a 2D array view for the multiview group).
+std::array<wgpu::BindGroupEntry, kTextureBindings> empty_texture_entries(const wgpu::TextureView& gxView) {
+  std::array<wgpu::BindGroupEntry, kTextureBindings> entries;
+  entries[MaxTextures * 2] = {
+      .binding = MaxTextures * 2,
+      .textureView = gfx::probe::cube_view(),
+  };
+  entries[MaxTextures * 2 + 1] = {
+      .binding = MaxTextures * 2 + 1,
+      .sampler = gfx::probe::sampler(),
+  };
+  for (u32 i = 0; i < gfx::probe::VolumeTextures; ++i) {
+    entries[MaxTextures * 2 + 2 + i] = {
+        .binding = MaxTextures * 2 + 2 + i,
+        .textureView = gfx::probe::volume_view(0, i),
+    };
+  }
+  entries[kLightmapBinding] = {
+      .binding = kLightmapBinding,
+      .textureView = gfx::probe::lightmap_view(0),
+  };
+  entries[kBrdfLutBinding] = {
+      .binding = kBrdfLutBinding,
+      .textureView = gfx::probe::brdf_lut_view(),
+  };
+  entries[kVolFogFroxelBinding] = {
+      .binding = kVolFogFroxelBinding,
+      .textureView = gfx::volfog::froxel_view(),
+  };
+  entries[kVolFogSamplerBinding] = {
+      .binding = kVolFogSamplerBinding,
+      .sampler = gfx::volfog::sampler(),
+  };
+  for (u32 i = 0; i < MaxTextures; ++i) {
+    entries[i * 2] = {
+        .binding = i * 2,
+        .textureView = gxView,
+    };
+    entries[i * 2 + 1] = {
+        .binding = i * 2 + 1,
+        .sampler = sEmptySampler,
+    };
+  }
+  return entries;
+}
+
+// The Lean and Full groups with nothing bound (g_emptyTextureBindGroups), from `entries`.
+std::array<wgpu::BindGroup, 2> empty_texture_bind_groups(const std::array<wgpu::BindGroupEntry, kTextureBindings>& entries,
+                                                        bool multiview) {
+  std::array<wgpu::BindGroup, 2> groups;
+  for (const TextureLayout layout : {TextureLayout::Lean, TextureLayout::Full}) {
+    const bool lean = layout == TextureLayout::Lean;
+    const wgpu::BindGroupDescriptor desc{
+        .label = multiview ? (lean ? "GX Empty Multiview Lean Texture Bind Group" : "GX Empty Multiview Texture Bind Group")
+                           : (lean ? "GX Empty Lean Texture Bind Group" : "GX Empty Texture Bind Group"),
+        .layout = texture_bind_group_layout(layout, multiview),
+        .entryCount = texture_layout_binding_count(layout),
+        .entries = entries.data(),
+    };
+    groups[static_cast<size_t>(layout)] = g_device.CreateBindGroup(&desc);
+  }
+  return groups;
+}
+
+// A GX pipeline layout: the frame's buffers, the uniform and `textures` as group 2 (none for the
+// shadow map pass, which samples nothing).
+wgpu::PipelineLayout make_pipeline_layout(const wgpu::BindGroupLayout* textures, const char* label) {
+  std::array<wgpu::BindGroupLayout, 3> layouts{
+      gfx::detail::resources().staticBindGroupLayout,
+      gfx::detail::resources().uniformBindGroupLayout,
+  };
+  if (textures != nullptr) {
+    layouts[2] = *textures;
+  }
+  const wgpu::PipelineLayoutDescriptor desc{
+      .label = label,
+      .bindGroupLayoutCount = textures != nullptr ? 3u : 2u,
+      .bindGroupLayouts = layouts.data(),
+      .immediateSize = sizeof(DrawImmediateData),
+  };
+  return g_device.CreatePipelineLayout(&desc);
+}
+} // namespace
+
 void initialize() noexcept {
+  // Native vertex input for resident world geometry, on unless MP2_NATIVE_VERTICES=0.
+  const char* nativeInput = std::getenv("MP2_NATIVE_VERTICES");
+  g_gxState.nativeVertexInputRequested = nativeInput == nullptr || nativeInput[0] != '0';
+  Log.info("Native cached vertex input: {}", g_gxState.nativeVertexInputRequested);
   {
     std::array<wgpu::BindGroupLayoutEntry, kTextureBindings> textureEntries;
     // The PBR environment probe (GX_AURORA_COPY_PROBE_FACE)
@@ -881,6 +1197,13 @@ void initialize() noexcept {
         .entries = textureEntries.data(),
     };
     sTextureBindGroupLayout = g_device.CreateBindGroupLayout(&descriptor);
+    const auto plainEntries = textureEntries;
+    const wgpu::BindGroupLayoutDescriptor leanDescriptor{
+        .label = "GX Lean Texture Bind Group Layout",
+        .entryCount = MaxTextures * 2,
+        .entries = textureEntries.data(),
+    };
+    sLeanTextureBindGroupLayout = g_device.CreateBindGroupLayout(&leanDescriptor);
     // A shadow receiver's: the sun's shadow map and its comparison sampler in the froxel's slots
     textureEntries[kShadowMapBinding] = {
         .binding = kShadowMapBinding,
@@ -902,6 +1225,28 @@ void initialize() noexcept {
         .entries = textureEntries.data(),
     };
     sShadowTextureBindGroupLayout = g_device.CreateBindGroupLayout(&shadowDescriptor);
+    if (webgpu::g_multiviewSupported) {
+      // Multiview stereo replay (gfx/stereo_multiview.hpp): the same bindings, the GX textures as
+      // 2D arrays.
+      const auto multiviewLayout = [](std::array<wgpu::BindGroupLayoutEntry, kTextureBindings> entries,
+                                      size_t count, const char* label) {
+        for (u32 i = 0; i < MaxTextures; ++i) {
+          entries[i * 2].texture.viewDimension = wgpu::TextureViewDimension::e2DArray;
+        }
+        const wgpu::BindGroupLayoutDescriptor layoutDescriptor{
+            .label = label,
+            .entryCount = count,
+            .entries = entries.data(),
+        };
+        return g_device.CreateBindGroupLayout(&layoutDescriptor);
+      };
+      sMultiviewTextureBindGroupLayout =
+          multiviewLayout(plainEntries, texture_binding_count(), "GX Multiview Texture Bind Group Layout");
+      sMultiviewLeanTextureBindGroupLayout =
+          multiviewLayout(plainEntries, MaxTextures * 2, "GX Multiview Lean Texture Bind Group Layout");
+      sMultiviewShadowTextureBindGroupLayout = multiviewLayout(textureEntries, texture_binding_count(),
+                                                               "GX Multiview Shadow Receiver Texture Bind Group Layout");
+    }
   }
   {
     constexpr wgpu::SamplerDescriptor descriptor{.label = "Empty sampler"};
@@ -918,96 +1263,23 @@ void initialize() noexcept {
     sEmptyTexture = g_device.CreateTexture(&descriptor);
     sEmptyTextureView = sEmptyTexture.CreateView();
   }
-  {
-    std::array<wgpu::BindGroupEntry, kTextureBindings> entries;
-    entries[MaxTextures * 2] = {
-        .binding = MaxTextures * 2,
-        .textureView = gfx::probe::cube_view(),
+  g_emptyTextureBindGroups = empty_texture_bind_groups(empty_texture_entries(sEmptyTextureView), false);
+  sPipelineLayout = make_pipeline_layout(&sTextureBindGroupLayout, "GX Pipeline Layout");
+  sLeanPipelineLayout = make_pipeline_layout(&sLeanTextureBindGroupLayout, "GX Lean Pipeline Layout");
+  sShadowRecvPipelineLayout = make_pipeline_layout(&sShadowTextureBindGroupLayout, "GX Shadow Receiver Pipeline Layout");
+  sShadowPipelineLayout = make_pipeline_layout(nullptr, "GX Shadow Map Pipeline Layout");
+  if (sMultiviewTextureBindGroupLayout) {
+    const wgpu::TextureViewDescriptor arrayViewDescriptor{
+        .label = "Empty texture array view",
+        .dimension = wgpu::TextureViewDimension::e2DArray,
     };
-    entries[MaxTextures * 2 + 1] = {
-        .binding = MaxTextures * 2 + 1,
-        .sampler = gfx::probe::sampler(),
-    };
-    for (u32 i = 0; i < gfx::probe::VolumeTextures; ++i) {
-      entries[MaxTextures * 2 + 2 + i] = {
-          .binding = MaxTextures * 2 + 2 + i,
-          .textureView = gfx::probe::volume_view(0, i),
-      };
-    }
-    entries[kLightmapBinding] = {
-        .binding = kLightmapBinding,
-        .textureView = gfx::probe::lightmap_view(0),
-    };
-    entries[kBrdfLutBinding] = {
-        .binding = kBrdfLutBinding,
-        .textureView = gfx::probe::brdf_lut_view(),
-    };
-    entries[kVolFogFroxelBinding] = {
-        .binding = kVolFogFroxelBinding,
-        .textureView = gfx::volfog::froxel_view(),
-    };
-    entries[kVolFogSamplerBinding] = {
-        .binding = kVolFogSamplerBinding,
-        .sampler = gfx::volfog::sampler(),
-    };
-    for (u32 i = 0; i < MaxTextures; ++i) {
-      entries[i * 2] = {
-          .binding = i * 2,
-          .textureView = sEmptyTextureView,
-      };
-      entries[i * 2 + 1] = {
-          .binding = i * 2 + 1,
-          .sampler = sEmptySampler,
-      };
-    }
-    const wgpu::BindGroupDescriptor desc{
-        .label = "GX Empty Texture Bind Group",
-        .layout = sTextureBindGroupLayout,
-        .entryCount = texture_binding_count(),
-        .entries = entries.data(),
-    };
-    g_emptyTextureBindGroup = g_device.CreateBindGroup(&desc);
-  }
-  {
-    const std::array layouts{
-        gfx::detail::resources().staticBindGroupLayout,
-        gfx::detail::resources().uniformBindGroupLayout,
-        sTextureBindGroupLayout,
-    };
-    const wgpu::PipelineLayoutDescriptor desc{
-        .label = "GX Pipeline Layout",
-        .bindGroupLayoutCount = layouts.size(),
-        .bindGroupLayouts = layouts.data(),
-        .immediateSize = sizeof(DrawImmediateData),
-    };
-    sPipelineLayout = g_device.CreatePipelineLayout(&desc);
-  }
-  {
-    const std::array layouts{
-        gfx::detail::resources().staticBindGroupLayout,
-        gfx::detail::resources().uniformBindGroupLayout,
-        sShadowTextureBindGroupLayout,
-    };
-    const wgpu::PipelineLayoutDescriptor desc{
-        .label = "GX Shadow Receiver Pipeline Layout",
-        .bindGroupLayoutCount = layouts.size(),
-        .bindGroupLayouts = layouts.data(),
-        .immediateSize = sizeof(DrawImmediateData),
-    };
-    sShadowRecvPipelineLayout = g_device.CreatePipelineLayout(&desc);
-  }
-  {
-    const std::array layouts{
-        gfx::detail::resources().staticBindGroupLayout,
-        gfx::detail::resources().uniformBindGroupLayout,
-    };
-    const wgpu::PipelineLayoutDescriptor desc{
-        .label = "GX Shadow Map Pipeline Layout",
-        .bindGroupLayoutCount = layouts.size(),
-        .bindGroupLayouts = layouts.data(),
-        .immediateSize = sizeof(DrawImmediateData),
-    };
-    sShadowPipelineLayout = g_device.CreatePipelineLayout(&desc);
+    sEmptyArrayTextureView = sEmptyTexture.CreateView(&arrayViewDescriptor);
+    g_emptyMultiviewTextureBindGroups = empty_texture_bind_groups(empty_texture_entries(sEmptyArrayTextureView), true);
+    sMultiviewPipelineLayout = make_pipeline_layout(&sMultiviewTextureBindGroupLayout, "GX Multiview Pipeline Layout");
+    sMultiviewLeanPipelineLayout =
+        make_pipeline_layout(&sMultiviewLeanTextureBindGroupLayout, "GX Multiview Lean Pipeline Layout");
+    sMultiviewShadowRecvPipelineLayout = make_pipeline_layout(&sMultiviewShadowTextureBindGroupLayout,
+                                                              "GX Multiview Shadow Receiver Pipeline Layout");
   }
 }
 
@@ -1015,6 +1287,17 @@ void shutdown() noexcept {
   // TODO we should probably store this all in g_state.gx instead
   sSamplerBindGroupLayout = {};
   sTextureBindGroupLayout = {};
+  sMultiviewTextureBindGroupLayout = {};
+  sMultiviewPipelineLayout = {};
+  sMultiviewShadowTextureBindGroupLayout = {};
+  sMultiviewShadowRecvPipelineLayout = {};
+  sEmptyArrayTextureView = {};
+  g_emptyTextureBindGroups = {};
+  g_emptyMultiviewTextureBindGroups = {};
+  sLeanTextureBindGroupLayout = {};
+  sLeanPipelineLayout = {};
+  sMultiviewLeanTextureBindGroupLayout = {};
+  sMultiviewLeanPipelineLayout = {};
   sShadowTextureBindGroupLayout = {};
   sShadowRecvPipelineLayout = {};
   sShadowPipelineLayout = {};

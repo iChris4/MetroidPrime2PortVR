@@ -14,6 +14,8 @@
 #include "gfx/efb_copy.hpp"
 #include "gfx/recording.hpp"
 #include "gfx/scan_peek.hpp"
+#include "gfx/perf_counters.hpp"
+#include "gfx/stereo_shadow.hpp"
 #include "gfx/tex_copy_conv.hpp"
 #include "gfx/tex_palette_conv.hpp"
 #include "gfx/texture.hpp"
@@ -52,7 +54,7 @@ Resources& resources() noexcept {
   return resources;
 }
 
-void increment_merged_draw_count() noexcept {}
+void increment_merged_draw_count(uint32_t) noexcept {}
 } // namespace aurora::gfx::detail
 
 namespace aurora::webgpu {
@@ -86,11 +88,17 @@ void configure(const GXRenderModeObj*) noexcept {}
 
 // --- get_texture ---
 namespace aurora::gx {
+namespace testing {
+bool sampledTexture = false;
+uint64_t bindGeneration = 1;
+uint32_t bindBuilds = 0;
+uint32_t multiviewBuilds = 0;
+} // namespace testing
 const gfx::TextureBind& get_texture(GXTexMapID id) noexcept { return g_gxState.textures[id]; }
 bool shader_has_cut_caster(const ShaderConfig&) noexcept { return false; }
 namespace texture {
 void invalidate_bindings() noexcept {}
-uint64_t current_bind_generation() noexcept { return 1; }
+uint64_t current_bind_generation() noexcept { return testing::bindGeneration; }
 } // namespace texture
 void evict_texture_object(u32 texObjId) noexcept {
   for (auto& obj : g_gxState.loadedTextures) {
@@ -138,21 +146,36 @@ namespace aurora::gfx {
 bool scene_hdr_pass_active() noexcept;
 } // namespace aurora::gfx
 namespace aurora::gx {
-// How many times a draw rebuilt its pipeline config; the HDR bit is taken as the real one takes it.
+namespace testing {
+ShaderConfig nativeVertexSource{};
+}
 uint32_t g_testPopulateCount = 0;
 void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXVtxFmt fmt) noexcept {
   ++g_testPopulateCount;
+  config = {};
   config.shaderConfig.sceneHdr = gfx::scene_hdr_pass_active();
+  config.shaderConfig.attrs = testing::nativeVertexSource.attrs;
+  config.shaderConfig.vtxStride = testing::nativeVertexSource.vtxStride;
+  config.shaderConfig.nativeVertices = g_gxState.nativeVertices;
+  config.cullMode = g_gxState.cullMode;
+  config.shaderConfig.currentPnMtx = g_gxState.currentPnMtx;
+  config.shaderConfig.mapBatch = g_gxState.mapBatch && primitive == GX_TRIANGLES;
+  config.shaderConfig.mapCull = config.shaderConfig.mapBatch ? g_gxState.cullMode : GX_CULL_NONE;
+  config.shaderConfig.lineMode = primitive == GX_LINES ? 1 : primitive == GX_LINESTRIP ? 2 : primitive == GX_POINTS ? 3 : 0;
 }
-bool per_pixel_lighting() noexcept { return false; }
-// The GPU self-test is not linked here; its blocking lookups stay off.
-bool blocking_pipelines() noexcept { return false; }
-GXBindGroups build_bind_groups(const ShaderInfo& info) noexcept { return {}; }
+GXBindGroups build_bind_groups(const ShaderInfo& info) noexcept {
+  return {.textureBindGroup = ++testing::bindBuilds};
+}
+gfx::BindGroupRef build_multiview_bind_group(const ShaderInfo&) noexcept { return ++testing::multiviewBuilds; }
+bool depth_prepass_eligible(u8) noexcept { return false; }
 ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
   ShaderInfo info{};
+  info.sampledTextures[0] = testing::sampledTexture;
   info.usesHdrTone = config.sceneHdr && !config.pbr;
   return info;
 }
+bool per_pixel_lighting() noexcept { return false; }
+bool blocking_pipelines() noexcept { return false; }
 uint32_t g_testUniformBuildCount = 0;
 bool g_testUniformCompatSrcAlphaAdditive = false;
 gfx::Range build_uniform(const ShaderInfo& info) noexcept {
@@ -162,7 +185,30 @@ gfx::Range build_uniform(const ShaderInfo& info) noexcept {
                                         (g_gxState.blendFacDst == GX_BL_ONE || g_gxState.blendFacDst == GX_BL_INVSRCALPHA);
   return {.offset = g_testUniformBuildCount, .size = 1};
 }
+
+static void write_test_uniform_snapshot(const ShaderInfo& info, ByteBuffer& snapshot) {
+  snapshot.clear();
+  snapshot.append(g_gxState.lineWidth);
+  if (info.usesHdrTone) {
+    const bool compat = g_gxState.blendMode == GX_BM_BLEND &&
+                        g_gxState.blendFacSrc == GX_BL_SRCALPHA && g_gxState.blendFacDst == GX_BL_ONE;
+    snapshot.append(compat);
+  }
+}
+gfx::Range build_uniform(const ShaderInfo& info, std::array<uint32_t, 2>& stereoUniformOffsets,
+                         ByteBuffer* snapshot) noexcept {
+  stereoUniformOffsets = {UINT32_MAX, UINT32_MAX};
+  if (snapshot != nullptr) write_test_uniform_snapshot(info, *snapshot);
+  return build_uniform(info);
+}
+bool uniform_matches(const ShaderInfo& info, const ByteBuffer& snapshot) noexcept {
+  ByteBuffer current;
+  write_test_uniform_snapshot(info, current);
+  return snapshot.size() == current.size() &&
+         std::memcmp(snapshot.data(), current.data(), current.size()) == 0;
+}
 void resolve_sampled_textures(const ShaderInfo& info) noexcept {}
+std::array<gfx::BindGroupRef, 2> build_stereo_bind_groups(const ShaderInfo& info) noexcept { return {}; }
 u32 dump_shaders(const char* dir) noexcept { return 0; }
 void set_shader_override_dir(const char* dir) noexcept {}
 void set_draw_shader_log(bool on) noexcept {}
@@ -182,30 +228,81 @@ void aurora_pipeline_prefetch(uint64_t) {}
 void aurora_get_pipeline_stats(AuroraPipelineStats* out) { *out = {}; }
 }
 
+// --- Stereo replay stubs (the FIFO never runs immersive here) ---
+namespace aurora::gfx {
+namespace testing {
+uint32_t frame = 0;
+bool bindGroupsAlive = true;
+bool multiview = false;
+uint64_t stereoEpoch = 1;
+} // namespace testing
+uint32_t current_frame() noexcept { return testing::frame; }
+bool touch_bind_group(BindGroupRef) { return testing::bindGroupsAlive; }
+bool recording_multiview() noexcept { return testing::multiview; }
+uint8_t stereo_multiview_mode() noexcept { return 0; }
+uint32_t align_uniform(uint32_t value) { return (value + 255u) & ~255u; }
+PipelineRef clear_multiview_pipeline_ref(const clear::PipelineConfig&) noexcept { return 0; }
+void set_stereo_draw_route(uint8_t route) noexcept {}
+uint8_t stereo_draw_route() noexcept { return 0; }
+void set_stereo_head_locked_plane(float tanHalfWidth, float tanHalfHeight, float distance) noexcept {}
+stereo_replay::HeadLockedPlane stereo_head_locked_plane() noexcept { return {}; }
+void set_stereo_placement_3d(const StereoPlacement3D&) noexcept {}
+StereoPlacement3D stereo_placement_3d() noexcept { return {}; }
+void set_stereo_screen_tex_mtx(uint8_t texSlot, uint8_t pnSlot) noexcept {}
+StereoScreenTexMtx stereo_screen_tex_mtx() noexcept { return {}; }
+namespace stereo_shadow {
+bool active() noexcept { return testing::multiview; }
+uint64_t epoch() noexcept { return testing::stereoEpoch; }
+} // namespace stereo_shadow
+} // namespace aurora::gfx
+
 // --- Buffer push stubs ---
 namespace aurora::gfx {
-// Opt-in staging/merging for tests that inspect the processor's merged triangle stream.
-bool g_testMergeDraws = false;
-std::vector<uint8_t> g_testVertices;
-std::vector<uint8_t> g_testIndices;
-static Range test_stage(std::vector<uint8_t>& buffer, const uint8_t* data, size_t length, size_t alignment) {
-  if (!g_testMergeDraws) {
-    return {};
+const FrameBufferSizes& frame_buffer_sizes() noexcept { static const FrameBufferSizes sizes; return sizes; }
+namespace testing {
+std::vector<uint8_t> pushedVerts; // the last push_verts' bytes
+bool mergeDraws = false;
+ByteBuffer stagedVerts;
+ByteBuffer stagedIndices;
+} // namespace testing
+ByteBuffer* staging_verts() noexcept { return testing::mergeDraws ? &testing::stagedVerts : nullptr; }
+ByteBuffer* staging_indices() noexcept { return testing::mergeDraws ? &testing::stagedIndices : nullptr; }
+static Range stage_test_bytes(ByteBuffer& buffer, const uint8_t* data, size_t length, size_t alignment) {
+  const auto offset = (buffer.size() + alignment - 1) / alignment * alignment;
+  if (!buffer.owned() && offset + length > buffer.capacity()) {
+    return OverflowRange;
   }
-  if (alignment > 1) {
-    buffer.resize(AURORA_ALIGN(buffer.size(), alignment));
+  (void)buffer.append_uninitialized(offset - buffer.size());
+  auto* dst = buffer.append_uninitialized(length);
+  if (length != 0) {
+    std::memcpy(dst, data, length);
   }
-  const auto offset = static_cast<uint32_t>(buffer.size());
-  buffer.insert(buffer.end(), data, data + length);
-  return {.offset = offset, .size = static_cast<uint32_t>(length)};
+  return {static_cast<uint32_t>(offset), static_cast<uint32_t>(length)};
 }
 Range push_verts(const uint8_t* data, size_t length, size_t alignment) {
-  return test_stage(g_testVertices, data, length, alignment);
+  testing::pushedVerts.assign(data, data + length);
+  if (testing::mergeDraws) {
+    return stage_test_bytes(testing::stagedVerts, data, length, alignment);
+  }
+  return {};
 }
 Range push_indices(const uint8_t* data, size_t length, size_t alignment) {
-  return test_stage(g_testIndices, data, length, alignment);
+  return testing::mergeDraws ? stage_test_bytes(testing::stagedIndices, data, length, alignment) : Range{};
 }
 Range push_uniform(const uint8_t* data, size_t length) { return {}; }
+// --- The geometry buffer (gfx/geometry_buffer.hpp): the uploads kept for inspection ---
+namespace testing {
+struct GeometryUploadRecord {
+  uint32_t offset;
+  std::vector<uint8_t> bytes;
+};
+std::vector<GeometryUploadRecord> geometryUploads;
+uint64_t geometryCapacity = 1u << 20;
+} // namespace testing
+uint64_t geometry_buffer_capacity() noexcept { return testing::geometryCapacity; }
+void queue_geometry_upload(uint32_t offset, const uint8_t* data, uint32_t size) {
+  testing::geometryUploads.push_back({offset, std::vector<uint8_t>(data, data + size)});
+}
 // Tests set it to see draws dropped for want of storage room.
 bool g_testStorageFull = false;
 Range push_storage(const uint8_t* data, size_t length) { return g_testStorageFull ? OverflowRange : Range{}; }
@@ -228,7 +325,7 @@ bool g_testSceneHdr = false;
 uint32_t g_testSceneHdrSwitches = 0;
 // Tests set it to see a refused switch.
 bool g_testSceneHdrRefuse = false;
-bool set_scene_hdr(bool on) {
+bool set_scene_hdr(bool on, bool pause) {
   if (g_testSceneHdrRefuse) {
     return false;
   }
@@ -294,12 +391,13 @@ void push_draw_command<gx::DrawData>(gx::DrawData data) {
 }
 template <>
 gx::DrawData* get_last_draw_command() {
-  return g_testMergeDraws && g_testDrawCount != 0 ? &g_testLastDraw : nullptr;
+  return testing::mergeDraws && g_testDrawCount != 0 ? &g_testLastDraw : nullptr;
 }
 } // namespace aurora::gfx
 
 // --- TextureBind::get_descriptor ---
 namespace aurora::gfx {
+void TextureRef::count_live(int) noexcept {}
 wgpu::SamplerDescriptor TextureBind::get_descriptor() const noexcept { return wgpu::SamplerDescriptor{}; }
 } // namespace aurora::gfx
 
@@ -396,7 +494,6 @@ uint32_t records = 0;
 Params lastRecord{};
 bool leaveScene = false; // record leaves the HDR scene, as the real one does
 } // namespace testing
-bool push(const Params& params) { return false; }
 bool ensure_task() { return testing::task; }
 bool record(const Params& params) {
   ++testing::records;
@@ -407,6 +504,7 @@ bool record(const Params& params) {
   return testing::task;
 }
 void set_grade_lut(uint32_t id, const uint8_t* rgba) {}
+bool measure_scene(float exposure) { return false; }
 void after_submit() noexcept {}
 bool frame_radiance(float out[3], uint32_t& serial) { return false; }
 void shutdown() {}
@@ -573,3 +671,45 @@ void aurora::gfx::push_debug_group(std::string) {}
 void push_debug_group(const char*) {}
 void pop_debug_group() {}
 void aurora::gfx::insert_debug_marker(std::string) {}
+
+// Disabled diagnostics for the asset-free FIFO tests.
+namespace aurora::gfx::perf {
+bool enabled() noexcept { return false; }
+std::atomic<uint64_t> g_fifoNs{0};
+std::atomic<uint64_t> g_fifoBytes{0};
+std::atomic<uint64_t> g_encodeNs{0};
+std::atomic<uint64_t> g_submitNs{0};
+std::atomic<uint64_t> g_fifoXfTicks{0};
+std::atomic<uint64_t> g_fifoBpTicks{0};
+std::atomic<uint64_t> g_fifoCpTicks{0};
+std::atomic<uint64_t> g_fifoAuroraTicks{0};
+std::atomic<uint64_t> g_fifoVertsTicks{0};
+std::atomic<uint64_t> g_fifoPipelineTicks{0};
+std::atomic<uint64_t> g_fifoBindsTicks{0};
+std::atomic<uint64_t> g_fifoUniformTicks{0};
+std::atomic<uint64_t> g_fifoPushTicks{0};
+std::atomic<uint32_t> g_fifoXfLoads{0};
+std::atomic<uint32_t> g_fifoBpLoads{0};
+std::atomic<uint32_t> g_fifoDrawsMerged{0};
+std::atomic<uint32_t> g_fifoDrawsPushed{0};
+std::atomic<uint32_t> g_fifoPipelineBuilds{0};
+std::atomic<uint32_t> g_fifoBindGroupBuilds{0};
+std::atomic<uint32_t> g_fifoBindGroupMisses{0};
+std::atomic<uint64_t> g_fifoResolveTicks{0};
+std::atomic<uint32_t> g_fifoUniformBuilds{0};
+std::atomic<uint32_t> g_mergeBreaks[BreakCount]{};
+std::atomic<uint64_t> g_fifoDeindexTicks{0};
+std::atomic<uint32_t> g_fifoDeindexedVerts{0};
+std::atomic<uint32_t> g_fifoCachedDlCalls{0};
+std::atomic<uint64_t> g_fifoCachedDlBytes{0};
+std::atomic<uint64_t> g_fifoCachedDlVertBytes{0};
+std::atomic<uint64_t> g_fifoCachedDlIndexBytes{0};
+std::atomic<uint32_t> g_fifoCachedDlVerts{0};
+std::atomic<uint32_t> g_fifoGeometryHits{0};
+std::atomic<uint32_t> g_fifoGeometryMisses{0};
+std::atomic<uint32_t> g_fifoNativeDraws{0};
+std::atomic<uint32_t> g_geometryEntries{0};
+std::atomic<uint64_t> g_geometryResidentBytes{0};
+std::atomic<uint64_t> g_drainWaitNs{0};
+std::atomic<uint32_t> g_drainCalls{0};
+}

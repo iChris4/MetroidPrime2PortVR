@@ -8,6 +8,7 @@
 #include <SDL3/SDL_timer.h>
 
 #include <array>
+#include <atomic>
 #include <filesystem>
 #include <limits>
 #include <ranges>
@@ -40,6 +41,8 @@ std::array<bool, PAD_CHANMAX> g_virtualPadActive{};
 // status that replaces the controller + keyboard merge for a port on the next PADRead.
 std::array<PADStatus, PAD_CHANMAX> g_portOverride{};
 std::array<bool, PAD_CHANMAX> g_portOverrideSet{};
+std::array<bool, PAD_CHANMAX> g_virtualPadExclusive{};
+std::atomic<PADMotorCallback> g_motorCallback{nullptr};
 
 std::array<PADButtonMapping, PAD_BUTTON_COUNT> g_defaultButtonsXBox360{{
     {SDL_GAMEPAD_BUTTON_SOUTH, PAD_BUTTON_A},
@@ -1140,7 +1143,11 @@ u32 PADRead(PADStatus* status) {
     } else {
       apply_unblock_suppression(status[i], i, captureHeldInput);
       if (g_virtualPadActive[i]) {
-        merge_virtual_status(status[i], g_virtualPadStatus[i]);
+        if (g_virtualPadExclusive[i]) {
+          status[i] = g_virtualPadStatus[i];
+        } else {
+          merge_virtual_status(status[i], g_virtualPadStatus[i]);
+        }
       }
     }
   }
@@ -1204,6 +1211,10 @@ BOOL PADGetRawState(const u32 port, PADRawState* state) {
   return TRUE;
 }
 
+void PADSetVirtualExclusive(const u32 port, const BOOL exclusive) {
+  if (port < PAD_CHANMAX) g_virtualPadExclusive[port] = exclusive;
+}
+
 void PADClearVirtualStatus(const u32 port) {
   if (port >= PAD_CHANMAX) {
     return;
@@ -1211,14 +1222,21 @@ void PADClearVirtualStatus(const u32 port) {
 
   g_virtualPadStatus[port] = {};
   g_virtualPadActive[port] = false;
+  g_virtualPadExclusive[port] = false;
 }
 
 void PADClearAllVirtualStatus() {
   g_virtualPadStatus.fill({});
   g_virtualPadActive.fill(false);
+  g_virtualPadExclusive.fill(false);
 }
 
+void PADSetMotorCallback(const PADMotorCallback callback) { g_motorCallback.store(callback); }
+
 void PADControlMotor(const u32 chan, const u32 cmd) {
+  if (const PADMotorCallback callback = g_motorCallback.load(); callback != nullptr && callback(chan, cmd)) {
+    return;
+  }
   const auto controller = aurora::input::get_controller_for_player(chan);
   if (should_use_device_rumble(chan, controller)) {
     u16 low = 0;

@@ -4,6 +4,7 @@
 #include "../logging.hpp"
 #include "../webgpu/gpu.hpp"
 #include "../webgpu/gpu_prof.hpp"
+#include "geometry_buffer.hpp"
 #include "encoding.hpp"
 #include "pipeline_cache.hpp"
 #include "resource_cache.hpp"
@@ -165,6 +166,8 @@ void encode(const EncoderTaskContext&, const wgpu::CommandEncoder& cmd, const vo
     };
     const auto pass = cmd.BeginRenderPass(&passDescriptor);
     pass.SetBindGroup(0, resources.staticBindGroup);
+    int geometry = -1;
+    bool nativeBound = false;
     for (const auto& draw : casters) {
       wgpu::RenderPipeline pipeline;
       if (!get_pipeline(draw.pipeline, pipeline)) {
@@ -179,7 +182,17 @@ void encode(const EncoderTaskContext&, const wgpu::CommandEncoder& cmd, const vo
       }
       pass.SetImmediates(0, &immediates, sizeof(immediates));
       pass.SetBindGroup(1, resources.uniformBindGroup, 1, &draw.uniformRange.offset);
-      pass.SetIndexBuffer(resources.indexBuffer, wgpu::IndexFormat::Uint16, draw.idxRange.offset, draw.idxRange.size);
+      if (const int wanted = draw.cachedGeometry ? 1 : 0; wanted != geometry) {
+        pass.SetBindGroup(0, draw.cachedGeometry ? detail::geometry_bind_group() : resources.staticBindGroup);
+        geometry = wanted;
+      }
+      if (draw.nativeVertices && !nativeBound) {
+        pass.SetVertexBuffer(0, detail::geometry_buffer());
+        nativeBound = true;
+      }
+      pass.SetIndexBuffer(resources.indexBuffer,
+                          draw.cachedGeometry ? wgpu::IndexFormat::Uint32 : wgpu::IndexFormat::Uint16,
+                          draw.idxRange.offset, draw.idxRange.size);
       if (draw.indexCount == 0) {
         pass.Draw(draw.vtxCount, draw.instanceCount);
       } else {

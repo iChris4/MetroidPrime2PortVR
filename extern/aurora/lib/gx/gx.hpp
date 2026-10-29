@@ -8,6 +8,7 @@
 
 #include <absl/container/flat_hash_map.h>
 #include <type_traits>
+#include <cstddef>
 #include <cstring>
 #include <bitset>
 #include <memory>
@@ -90,17 +91,43 @@ enum DirtyFlag : u8 {
   DirtyAll = DirtyPipeline | DirtyTextures | DirtyUniform | DirtyImmediates,
 };
 
+// ShaderConfig::multiview (gfx/stereo_multiview.hpp).
+enum MultiviewMode : u8 {
+  MultiviewNone = 0,
+  // The mono uniform, then each eye's clip matrix (gfx/stereo_uniform.hpp compose_eye_clip):
+  // only the clip position depends on the view, which Adreno runs once for both.
+  MultiviewClip = 1,
+  // A pair of full eye uniforms, element view_index: a texture matrix that projects
+  // onto the screen differs per eye (AuroraSetStereoScreenTexMtx).
+  MultiviewFull = 2,
+  // MultiviewClip's uniform in the per-eye passes of a frame without multiview: the
+  // eye is the draw's immediate (set_eye_mask, 0 or 1), set per pass.
+  EyeClipImmediate = 3,
+};
+
 struct DrawImmediateData {
   u32 vtxStart = 0;
   u32 currentPnMtx = 0;
   u32 fogRangeBase = 0;
-  u32 serial = 0; // the draw's serial, read by shaders built with ShaderConfig::drawId; in the shadow pass, the cascade
+  // The draw's serial (bits 0-23), read by shaders built with ShaderConfig::drawId, and, for
+  // multiview stereo replay, the eye mask in bit 31 (set_eye_mask): 1 when the draw's uniform is a
+  // pair of eye copies (element `view_index & eye mask` of it), 0 when both eyes share the mono one.
+  u32 serial = 0;
   std::array<u32, MaxIndexAttr> arrayStart{};
 };
 static_assert(std::has_unique_object_representations_v<DrawImmediateData>);
 static_assert(sizeof(DrawImmediateData) == 64);
+inline void set_eye_mask(DrawImmediateData& data, u32 eyeMask) {
+  data.serial = (data.serial & 0x7FFFFFFFu) | (eyeMask != 0 ? 0x80000000u : 0u);
+}
 
-extern wgpu::BindGroup g_emptyTextureBindGroup;
+// Group 2 with nothing bound, by TextureLayout (Lean, Full; a shadow receiver always binds its own).
+extern std::array<wgpu::BindGroup, 2> g_emptyTextureBindGroups;
+// The multiview stereo replay's (gfx/stereo_multiview.hpp): 2D array views.
+extern std::array<wgpu::BindGroup, 2> g_emptyMultiviewTextureBindGroups;
+// GX draw commands the game has issued (GXBegin, GXCallDisplayList), for the port's
+// per-section draw counts (aurora_gx_draw_commands_issued). Game thread only.
+extern uint32_t g_drawCommandsIssued;
 
 template <typename Arg, Arg Default>
 struct TevPass {
@@ -409,8 +436,11 @@ struct GXState {
   u8 numTexGens = 0;
   u8 pbr = 0; // GX_AURORA_SET_PBR: above 1, a cost test (GXSetPBRCostTest)
   u8 sdf = 0; // GX_AURORA_SET_SDF
+  bool mapBatch = false; // GX_AURORA_MAP_BATCH
   u8 hudSample = 0; // GX_AURORA_SET_HUD_SAMPLE
   Vec4<float> hudDyin{0.f, 0.f, 0.f, 0.f}; // its DYIN
+  bool clipPlane = false; // GX_AURORA_SET_CLIP_PLANE
+  Vec4<float> clipPlaneEq{0.f, 0.f, 0.f, 0.f}; // its view-space plane
   u8 depthPrepass = 0; // GX_AURORA_PORT_DEPTH_PREPASS
   std::array<u32, 3> drawTag{0, UINT32_MAX, 0}; // GX_AURORA_SET_DRAW_TAG: asset, model index, material
   u32 drawSerial = 0; // GX_AURORA_PORT_DRAW_SERIAL
@@ -444,6 +474,8 @@ struct GXState {
   Vec4<float> pbrModelDiffuse{1.f, 1.f, 1.f, 1.f};
   Vec4<float> pbrModelIncan{0.f, 0.f, 0.f, 1.f};
   Vec4<float> pbrModelCoverage{1.f, 0.f, 0.f, 0.f};
+  // GX_AURORA_SET_PBR_THERMAL: x, y, blended (1 / 0), w 1 while on (all zero when off)
+  Vec4<float> pbrThermal{};
   std::array<Vec4<float>, 8> pbrShield{}; // GX_AURORA_SET_PBR_SHIELD: CCH0..6, then AUVI xyz + DIFC.w
   // GX_AURORA_SET_PBR_LIGHT_HDR, per light: colour (rgb, falloff + 1; w 0 = off), then
   // (view position, r0), then (r1, -, -, -).
@@ -471,6 +503,15 @@ struct GXState {
   bool actorSavedCasterOnly = false;
   bool actorSavedActive = false;
   std::array<Vec4<float>, 36> actorSavedUniform{};
+  // GX_AURORA_PORT_SHELL: 1 while the draws are a silhouette shell's depth prepass, 2 its colour;
+  // shellUniform holds CCH0..CCH4, (time, depth bias, tex0 sRGB, centre view depth), (1 / render target size, 0, 0).
+  u8 shell = 0;
+  std::array<Vec4<float>, 7> shellUniform{};
+  // Maps 0 and 1 as mode 1 found them loaded (TCH0, TCH1): the model's materials load their own
+  // into those slots as it draws, and the colour pass samples these instead, resolved apart from
+  // the slots' own binds (resolve_sampled_textures).
+  std::array<GXTexObj_, 2> shellTexObjs;
+  std::array<gfx::TextureBind, 2> shellTextures;
 
   // GX2 polygon offset state
   f32 frontOffset = 0.0f;
@@ -503,6 +544,14 @@ struct GXState {
   u16 lastVtxSize = 0;
   GXVtxFmt lastVtxFmt = GX_MAX_VTXFMT;
   u8 dirty = DirtyAll;
+  // Indexed vertex attributes are resolved by the FIFO processor into direct ones
+  // (aurora_set_gx_deindex_vertices, latched at frame end): one fetch per attribute
+  // in the vertex shader instead of an index fetch and a dependent array fetch,
+  // which stalls the Quest's GPU. The pipeline config describes the resolved layout.
+  bool deindexVertices = false;
+  // Only resident, supported static world records use native vertex attributes.
+  bool nativeVertices = false;
+  bool nativeVertexInputRequested = false;
 
   // Shadow registers
   std::array<u32, 0x100> bpRegCache = [] {
@@ -523,9 +572,12 @@ extern GXState g_gxState;
 // The bind-pose positions of a skinned draw: the array at GX_VA_TEX7 (which the draw's own vertices
 // must not use), read with the same index as GX_VA_POS, when the backlight asks for them (its z in
 // row 2 is the height scale).
+// Port: not with indexed vertices resolved by the FIFO processor (deindexVertices, also under the
+// geometry cache's native vertices): their records carry the POS element, not its index, and the
+// draw binds no arrays, so the shader would read the bind pose at a garbage index.
 inline bool bind_pos_active() noexcept {
   const auto& s = g_gxState;
-  return s.pbr != 0 && s.arrays[GX_VA_TEX7].data != nullptr && s.arrays[GX_VA_TEX7].size != 0 &&
+  return s.pbr != 0 && !s.deindexVertices && s.arrays[GX_VA_TEX7].data != nullptr && s.arrays[GX_VA_TEX7].size != 0 &&
          s.vtxDesc[GX_VA_TEX7] == GX_NONE && (s.vtxDesc[GX_VA_POS] == GX_INDEX8 || s.vtxDesc[GX_VA_POS] == GX_INDEX16) &&
          s.pbrBacklightLights[2].z() > 0.f;
 }
@@ -622,7 +674,7 @@ struct ShaderConfig {
   u8 sceneHdr : 1 = false;
   u8 pbr = 0; // GX_AURORA_SET_PBR
   u8 sdf = 0; // GX_AURORA_SET_SDF
-  u8 depthOnly = 0; // pass 1 of GX_AURORA_PORT_DEPTH_PREPASS: the colour is not written
+  u8 depthOnly = 0; // pass 1 of GX_AURORA_PORT_DEPTH_PREPASS: the colour is not written (2: pass 3's alpha mark)
   u8 pbrKind = 0; // with pbr, the special surface kind (pbrLayer.y), a constant in the shader
   // GXState::volFog: how the draw fogs itself (VolFog*), chosen from its blend.
   u8 volFog = 0;
@@ -632,11 +684,35 @@ struct ShaderConfig {
   // aurora_set_per_pixel_lighting, on a draw with a lit channel: the GX lights are summed per
   // fragment from the interpolated view-space position and normal instead of per vertex. The
   // old padding, so a config with it off keeps its bytes and cache keys.
-  u8 perPixelLight = 0;
+  u8 perPixelLight : 1 = 0;
+  // GX_AURORA_SET_CLIP_PLANE on a triangle draw: the clip_plane uniform and a discard. A bit of the
+  // perPixelLight byte, so a config with it off keeps its bytes and cache keys.
+  u8 clipPlane : 1 = 0;
+  // GX_AURORA_PORT_SHELL on a triangle draw: Remastered's silhouette shell, 1 its depth prepass, 2
+  // its colour (the shell_* uniforms, the scene copy on texture slot 2). Bits of the same byte.
+  u8 shell : 2 = 0;
+  // With pbr, the mode's cut bit (512, pbr_backlight.w): only a cutout's shader has the cut
+  // discards (a discard forces late depth on every pixel of the draw).
+  u8 pbrCut : 1 = 0;
+  // GX_AURORA_SET_PBR_THERMAL on a PBR draw into the HDR scene: the pbr_thermal uniform and
+  // Model_ThermalOverride's grey in place of the shading. A bit of the same byte, so a config with
+  // it off keeps its bytes and cache keys.
+  u8 pbrThermal : 1 = 0;
+  u8 padding0 : 2 = 0;
   // GX_AURORA_PORT_ACTOR_SHADOW decal: the draw is a receiver redrawn as Remastered's actor shadow
   // decal (multiplies the frame by the shadow, shadowUniform holds its view-space planes). The old
   // padding byte, so other configs keep their bytes and cache keys.
   u8 actorDecal = 0;
+  // VR fields no longer fit upstream's two spare bytes. Keep all upstream
+  // offsets intact and extend by four bytes; layout epoch 3 invalidates old
+  // GX caches instead of reinterpreting their stereo flags as new shader bits.
+  u8 currentPnMtx = 0;
+  u8 multiview : 2 = 0;
+  u8 mapBatch : 1 = 0;
+  u8 mapCull : 2 = 0;
+  u8 nativeVertices : 1 = 0;
+  u8 vrPadding : 2 = 0;
+  u16 vrPadding1 = 0;
   std::array<AttrConfig, MaxVtxAttr> attrs;
   std::array<TevSwap, MaxTevSwap> tevSwapTable;
   std::array<TevStage, MaxTevStages> tevStages;
@@ -650,12 +726,41 @@ struct ShaderConfig {
   bool operator==(const ShaderConfig& rhs) const { return memcmp(this, &rhs, sizeof(*this)) == 0; }
 };
 static_assert(std::has_unique_object_representations_v<ShaderConfig>);
+// Upstream 0.35 uses the former spare bytes; VR extends the header with explicit zeroed bytes.
+static_assert(offsetof(ShaderConfig, attrs) == 16);
+// PrimedGun: and every field upstream has at upstream's offset. Upstream's pipeline seed (the bundled
+// initial_pipeline_cache.db) holds these configs as bytes, which must read back here as the same
+// configs, and tools/pipeline_seed.py reads pbr, sdf, pbrKind, volFog and pbrLightmapAttr from them
+// by offset. It reads the shadow bit too (bit 4 of byte 2), which offsetof cannot check: the
+// bit-fields of byte 2 keep upstream's order. VR fields start at byte 12 (cache layout epoch 3).
+static_assert(offsetof(ShaderConfig, fogType) == 0);
+static_assert(offsetof(ShaderConfig, vtxStride) == 1);
+static_assert(offsetof(ShaderConfig, pbr) == 3);
+static_assert(offsetof(ShaderConfig, sdf) == 4);
+static_assert(offsetof(ShaderConfig, depthOnly) == 5);
+static_assert(offsetof(ShaderConfig, pbrKind) == 6);
+static_assert(offsetof(ShaderConfig, volFog) == 7);
+static_assert(offsetof(ShaderConfig, pbrLightmapAttr) == 8);
+static_assert(offsetof(ShaderConfig, hudSample) == 9);
 // Whether a draw samples the sun's shadow map: a lit PBR surface drawn in colour without per-pixel fog.
 inline bool shadow_receives(const ShaderConfig& sc) noexcept {
   return sc.shadow && (sc.pbr != 0 || sc.actorDecal != 0) && sc.volFog == VolFogNone && sc.depthOnly == 0 && sc.lineMode == 0 && !sc.drawId;
 }
 // Whether a draw is the actor shadow decal (samples gfx/actor_shadow.hpp's maps).
 inline bool actor_decal(const ShaderConfig& sc) noexcept { return sc.actorDecal != 0 && sc.shadow; }
+
+// Group 2's layout for a shader. Without PBR or volumetric fog a shader declares nothing past the GX
+// textures (bindings 0-15), so it takes the Lean layout: Dawn tracks every texture of a bind group
+// each time one is set, which is most of what encoding hundreds of draws costs. Full has every
+// binding, ShadowRecv a shadow receiver's (the shadow map in the froxel's slots). A draw without a
+// group of its own keeps the bound one only in its pipeline's layout (gfx::bind_gx_textures).
+enum class TextureLayout : u8 { Lean = 0, Full = 1, ShadowRecv = 2 };
+inline TextureLayout texture_layout(const ShaderConfig& sc) noexcept {
+  if (shadow_receives(sc)) {
+    return TextureLayout::ShadowRecv;
+  }
+  return sc.pbr != 0 || sc.volFog != VolFogNone ? TextureLayout::Full : TextureLayout::Lean;
+}
 
 struct PipelineConfig;
 
@@ -687,10 +792,26 @@ struct ShaderInfo {
   bool shadowReceive : 1 = false; // shadow_receives: group 2 uses the shadow layout
   bool actorDecal : 1 = false;    // actor_decal: group 2 uses the shadow layout with the actor maps
   bool usesHdrTone : 1 = false;   // sceneHdr without pbr: hdr_tone (pbrTone) and hdr_tev_blend
+  bool usesClipPlane : 1 = false; // ShaderConfig::clipPlane: the clip_plane uniform
+  bool usesShell : 1 = false;
+  bool usesPbrThermal : 1 = false; // ShaderConfig::pbrThermal: the pbr_thermal uniform
+  bool shellScene : 1 = false; // the shell's colour pass: texture slot 2 holds the scene copy     // ShaderConfig::shell: the shell uniforms; colour: the scene copy on slot 2
 };
+// As texture_layout(const ShaderConfig&), from the info built of that config.
+inline TextureLayout texture_layout(const ShaderInfo& info) noexcept {
+  if (info.shadowReceive) {
+    return TextureLayout::ShadowRecv;
+  }
+  return info.usesPbr || info.usesVolFog ? TextureLayout::Full : TextureLayout::Lean;
+}
 struct BindGroupRanges {
   std::array<gfx::Range, MaxIndexAttr> vaRanges{};
 };
+// GX_AURORA_PORT_DEPTH_PREPASS: whether the current draw can go in the depth-only pass and then
+// shade where the depth is equal. It must replace every pixel it passes (depth tested LEQUAL and
+// written; colour and alpha written without a blend), so the frame is what one depth-tested pass
+// of the same draws gives: the last of the nearest draws at a pixel wins either way.
+bool depth_prepass_eligible(u8 lineMode) noexcept;
 void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXVtxFmt fmt) noexcept;
 // aurora_set_per_pixel_lighting; any thread.
 void set_per_pixel_lighting(bool enabled) noexcept;
@@ -727,6 +848,10 @@ std::string build_shader_source(const ShaderConfig& config) noexcept;
 // source (build_shader_source's) writing its alpha as mode has it.
 // False (source unchanged) when it has no fs_main return to rewrite: the draw must then use DstAlphaMode::None.
 bool apply_dst_alpha_mode(std::string& source, DstAlphaMode mode) noexcept;
+// The PBR mode's cut bit (512) of GXState::pbrBacklight.w, as the shader decodes it.
+inline bool pbr_cut_mode(const Vec4<float>& backlight) noexcept {
+  return backlight.w() > 0.f && (static_cast<u32>(backlight.w()) & 512u) != 0;
+}
 // Whether the config's shader has the alpha-tested sun shadow caster (shadowPass 2: vs_shadow_cut, fs_shadow).
 bool shader_has_cut_caster(const ShaderConfig& config) noexcept;
 // dstAlphaMode falls back to None when the shader can't be rewritten for it; build the pipeline with that.
@@ -743,10 +868,38 @@ void note_draw_shader(u32 serial, const ShaderConfig& config) noexcept;
 u64 draw_shader_hash(u32 serial) noexcept;
 bool shader_overridden(u64 hash) noexcept;
 GXBindGroups build_bind_groups(const ShaderInfo& info) noexcept;
+// Stereo replay: the texture bind groups the left and right eye passes use when
+// a sampled texture has per-eye stand-ins (gfx/stereo_shadow.hpp); zero when the
+// mono bind group applies to both eyes.
+std::array<gfx::BindGroupRef, 2> build_stereo_bind_groups(const ShaderInfo& info) noexcept;
+// Multiview stereo replay (gfx/stereo_multiview.hpp): the texture bind group of a
+// multiview pipeline, every sampled texture as a 2D array view (an EFB copy taken
+// per eye as both its layers); zero when nothing is sampled.
+gfx::BindGroupRef build_multiview_bind_group(const ShaderInfo& info) noexcept;
 
 u8 comp_type_size(GXAttr attr, GXCompType type) noexcept;
 u8 comp_cnt_count(GXAttr attr, GXCompCnt cnt) noexcept;
 
+// The vertex records the FIFO processor resolves (GXState::deindexVertices, for a
+// format with an indexed attribute) are laid out aligned: every attribute but the
+// one-byte matrix indices starts on a 4-byte boundary and the stride is a multiple
+// of 4, so the vertex shader reads whole words. The Quest's Adreno mis-reads values
+// that straddle words in a storage buffer (textures smeared, vertices exploded).
+// populate_pipeline_config and the FIFO processor's plan both follow it.
+constexpr u32 deindexed_attr_align(GXAttr attr) noexcept {
+  return attr >= GX_VA_PNMTXIDX && attr <= GX_VA_TEX7MTXIDX ? 1u : 4u;
+}
+inline bool deindexed_layout() noexcept {
+  if (!g_gxState.deindexVertices) {
+    return false;
+  }
+  for (int i = GX_VA_POS; i <= GX_VA_TEX7; ++i) {
+    if (g_gxState.vtxDesc[i] == GX_INDEX8 || g_gxState.vtxDesc[i] == GX_INDEX16) {
+      return true;
+    }
+  }
+  return false;
+}
 // Only RGBA6_Z24 stores alpha: an RGB8 or RGB565 EFB writes none, and it reads (blends, copies) as 1.
 constexpr bool efb_has_alpha(GXPixelFmt format) noexcept { return format == GX_PF_RGBA6_Z24; }
 } // namespace aurora::gx

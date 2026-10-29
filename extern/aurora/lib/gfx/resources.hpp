@@ -9,6 +9,11 @@ inline constexpr uint64_t VertexBufferSize = 5242880;   // 5 MiB
 inline constexpr uint64_t IndexBufferSize = 2097152;    // 2 MiB
 inline constexpr uint64_t StorageBufferSize = 16777216;  // 16 MiB (port: 8 MiB aborted on a big area; see gfx/recording.cpp)
 inline constexpr uint64_t TextureUploadSize = 25165824; // 24 MiB
+// The least a frame holds of vertices at any scale. With indexed vertices resolved on the
+// CPU (GXState::deindexVertices), a virtual-screen transition on the Quest ran 5 MiB out
+// with one large draw left to stage. Each MiB costs one per staging buffer plus the device
+// copy; only the bytes a frame stages are copied.
+inline constexpr uint64_t MinVertexBufferSize = 10485760; // 10 MiB
 // What a staging buffer holds per kind at the start (unpinned scale): about twice the
 // per-frame peaks measured over a tour of the game's rooms. A frame that needs more spills
 // into memory it allocates for that frame (see SpillBuffer), up to the sizes above.
@@ -37,9 +42,11 @@ extern bool g_noCompute;
 
 
 // What a frame can hold of each kind of data. The constants above are the sizes at
-// AuroraConfig::frameBufferScale 1; initialize() fixes the sizes in use for the run.
+// AuroraConfig::frameBufferScale 1 (vertices: MinVertexBufferSize); initialize() fixes the
+// sizes in use for the run.
 struct FrameBufferSizes {
-  uint64_t vertex = VertexBufferSize;
+  uint32_t scale = 1;
+  uint64_t vertex = MinVertexBufferSize;
   uint64_t uniform = UniformBufferSize;
   uint64_t index = IndexBufferSize;
   uint64_t storage = StorageBufferSize;
@@ -59,11 +66,19 @@ struct FrameBufferSizes {
   uint64_t deviceStorage = StorageBufferSize;
   // The arrays' scaled size (frameStorageScale in use), before staging starts smaller.
   uint64_t scaledStorage = StorageBufferSize;
+  // The vertices' scaled size (frameBufferScale in use); maxVertex can be more in resident mode.
+  uint64_t scaledVertex = VertexBufferSize;
   // The most a frame's arrays take in the device storage buffer: the most `storage` can grow
   // to, which is also maxStorage.
   uint64_t storageReserve = StorageBufferSize;
   // The most `storage` grows to after an overflow (0: it is fixed).
   uint64_t storageCap = 0;
+  // The scaled limits AuroraConfig::frameBuffersDeferred holds back while the max* above are
+  // the unscaled ones (all 0: none held).
+  uint64_t heldVertex = 0;
+  uint64_t heldUniform = 0;
+  uint64_t heldIndex = 0;
+  uint64_t heldStorage = 0;
 
   // Kept across frames (AuroraConfig::residentGeometryMiB): the device buffers hold these
   // first, from offset 0, so they stay put when the per-frame part after them grows; no
@@ -149,6 +164,9 @@ struct Resources {
   wgpu::BindGroup staticBindGroup;
   wgpu::BindGroupLayout uniformBindGroupLayout;
   wgpu::BindGroup uniformBindGroup;
+  // The multiview stereo replay's (stereo_multiview.hpp): two GX uniforms wide, an
+  // eye pair from the dynamic offset. Only with the feature.
+  wgpu::BindGroup multiviewUniformBindGroup;
   wgpu::Limits limits;
   AuroraStats stats{};
 };

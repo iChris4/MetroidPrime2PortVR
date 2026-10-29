@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include <dolphin/gx.h>
 
@@ -41,6 +42,21 @@ enum Feature : uint32_t {
                         // + row 0.zw gives w = (d * 0.99609375 - 0.5) * row 0.xy, a view-space offset taken to the quad's
                         // own axes by extra[3] = the inverse basis's rows 0, 1 (xy each): t = colorSlot at uv + that,
                         // rgb = t.rgb * vc.rgb, a = max(0, t.w + row 1.z - 1). The runtime fills extra[2..3] (sprites)
+  // Explicit model raster policy in the backward-compatible VMAT features word. Only the
+  // audited Ice wedge MATI opts in; absent in older imports and every sprite recipe.
+  ModelBackCull = 1u << 17,
+  // VFX_FrameBuffer_Color_Erosion_Unlit (d8ece62c, FS perm 000_0; the frozen-player HUD effect GENP
+  // c23f13f7): t = colorSlot (BCLR) at the sprite's uv and layer; the scene copy (capture_scene) at the
+  // fragment, offset by (t.x, -t.y) x near / view depth x CCH0.xy and read at lod max(0, CCH0.z - 1), is
+  // added to it: rgb = (t.rgb + scene) x vc.rgb, a = t.w (Erosion then subtracts PMTR row 0's x).
+  // params = CCH0 (SMTR-animated). The depth is the HUD billboard's, as VisorRain's. No copy: t alone.
+  FrameBufferColorErosion = 1u << 18,
+  // VFX_VisorSteam (53eceaa4, FS perm 000_0, VS 000_1; the SteamMP1 HUD billboard's model particle, MATI
+  // f4970293): colorSlot = TCH0 (the repeat noise, wrap repeat), indirectSlot = TCH1 (the macro map), both at
+  // the TRSS uv; params = CCH0..4 (SMTR-animated from the Ship1 particle variables). TCH1 offsets the TCH0
+  // read; their channels make a radial cloud mask and a shade over CCH2.rgb: rgb = (shade + CCH2.rgb) x
+  // vc.rgb x PCMD, alpha the mask x vc.w (blend Alpha). No scene copy; Unfogged (DFOG 1).
+  VisorSteam = 1u << 19,
   // VFX_IceChargeBeam (9e0605cd, perms 000_1/000_0): a model particle whose CPU feed (CPortVfxMeshBatch::Add) has
   // turned and shaken the mesh by the shader's hash and filled tan. colorSlot = BCLR, normalSlot = NMAP, params =
   // CCH0..2, uv[1].x = the mesh's COLOR.z, extra rows 0..2 = PMTR A, B, C. Unfogged (DFOG 1: perm 000).
@@ -75,6 +91,43 @@ enum Feature : uint32_t {
   // probe + the clustered lights) x BLCM / pi, alpha unchanged. N is the view normal from vec (toward the
   // eye for a sprite). Takes DrawDesc::lit and DrawDesc::cluster as IceChargeCollisionLit does.
   ParticleLit = 1u << 26,
+  // Fogged whatever the blend: the fog follows the generator's PBDM/SBDM/EBDM row (SetupFogFromBlendMode), the
+  // factors its MATI's EBlendMode, so a MATI additive or premultiplied draw over a fogged row keeps the fog.
+  Fogged = 1u << 27,
+  // VFX_VisorRain (0ec41df0, FS perm 000): the visor's rain splash, a sprite. TCH0 (colorSlot) is a
+  // two-channel noise map read twice, at a per-particle patch (offset by PMTR row 0's xy, scaled by
+  // CCH0.y) and at the constant texel (0, 0) (the roundEven sample lands on it across the whole
+  // quad). The two channels warp a sum of sines into the drop mask H; 0.5 < H < 1 is inside the
+  // drop, whose height Z = (H - 0.5) x 1.8 + 0.1 gives the normal n that offsets the scene copy
+  // (capture_scene) at the fragment by (1 - fade) x CCH0.w x near / view depth, and the edge
+  // darkening f = Z^4 x 10 + 0.75 + 0.25 x fade; elsewhere the fragment is discarded. The bigger
+  // drops ("runners": PMTR row 1's y < CCH0.z and size > row 2's y) slide the pattern down by
+  // min(2 x row 1's x, 0.5) x 0.33 and take their own fade (row 1's z; row 0's z otherwise).
+  // rgb = f x scene x vc.rgb x PCMD, alpha vc.a. params = CCH0 (SMTR-animated), extra 0..2 = PMTR
+  // rows 0..2. Unfogged: the visor composite pass has no fog.
+  VisorRain = 1u << 28,
+  // VFX_BarrierShield (f197ec38, the Parasite Queen barrier's MATI 6429c234: FS perm 002, the refraction
+  // of the material flag MFC0 USE_FRAME_BUFFER_DISTORTION, "No displacement" perm; build/
+  // s-queenbarrier-20261024/SHADER-IMPLEMENTATION.md): a model particle whose CPU feed (AddBarrierShield)
+  // fills the mesh's own vertex colour (VMSH v2, flags bit 1) into Vertex::mesh, separate from the
+  // instance colour. colorSlot = TCH0 (read at (-2u, 2v): the pattern's scroll .b and its .rg, .a),
+  // indirectSlot = TCH1 (the two noise reads that make the mask), params = CCH0 (.x breakup, .y alpha
+  // gain), time = the modular simulation time. The scene copy at the fragment, offset by the .45-period
+  // sawtooth of 2 x (.rg - .5) + time x .008 (three samples: +0, -.002 and +.002, the first's .rg, the
+  // second's .rb, the third's .r), is the base colour; the rim/fresnel/mesh-colour glow is added over it,
+  // all x vc.rgb x PCMD. Unfogged: perm 002 carries DFOG 1 and the matted sibling perm 003 is not ported.
+  BarrierShield = 1u << 29,
+  // VFX_BarrierGlow (b1eb2b67, the same barrier's one-variable MATI ba0acbd6: FS perm 000, the
+  // non-refraction perm, whose MATI carries neither MFC0 nor MFC1; build/
+  // s-queenbarrier-20261024/GLOW-IMPLEMENTATION.md): a model particle with no scene copy. Its CPU feed
+  // (AddBarrierGlow) is BarrierShield's (the mesh's own colour in Vertex::mesh, the inverse-transpose view
+  // normal) plus the VS's displacement in the model coordinates: along the normal by
+  // .065 (1 + 3 mc.r) max(sin(20 phase), -.33) with phase = time - 10 mc.b, and on Remastered +Y (the
+  // port's model +Z, the mesh data is R2G) by .035 max(sin(20 (phase + 114)), -.33), the normal itself
+  // undisplaced. colorSlot = TCH0 (three reads at (-u, v)), params = CCH0 (.x breakup), time = the
+  // modular simulation time. rgb = rim x gain x vec3(k 1.125, k 7.5 - .5 mc.r + 1.4 p + .5,
+  // k 30 - .9 mc.r + 3 p + .9) x vc.rgb x PCMD, alpha vc.a. Unfogged: perm 000 has DFOG 1 and no fog code.
+  BarrierGlow = 1u << 30,
   // Not a shader feature: a VMAT blob's exposure policy, carried in its features word. The loader moves
   // it to DrawDesc::alreadyExposed; a draw ignores it in `features` (no shader or pipeline key sees it).
   AlreadyExposed = 1u << 31
@@ -82,11 +135,23 @@ enum Feature : uint32_t {
 // Multiply is port-only: the stand-in for the FrameBuffer_* shaders without a SceneWarp recipe
 // (3db95827). The warp is dropped and the target is multiplied by mix(1, rgb, a) instead.
 // AdditiveOne is the wave orb's model blend: RGB One/One, alpha Zero/One, drawn with depth write off.
-// The values are serialised in VMAT blobs (0..4 older, 5 new) and form part of the pipeline key.
-enum class Blend : uint32_t { Alpha = 0, Premultiplied = 1, Additive = 2, Opaque = 3, Multiply = 4, AdditiveOne = 5 };
+// PremultipliedAlpha and AdditiveAlpha are Remastered's EBlendMode 5 and 6 (SBlendModeState 0xf0164, tables
+// 0x1d0cc48/0x1d0cd38): One/InvSrcAlpha and SrcAlpha/One for colour and alpha alike, where the PBDM rows
+// Premultiplied and Additive keep the target's alpha (Zero/One).
+// The values are serialised in VMAT blobs (0..4 older, 5..7 new) and form part of the pipeline key.
+enum class Blend : uint32_t {
+  Alpha = 0,
+  Premultiplied = 1,
+  Additive = 2,
+  Opaque = 3,
+  Multiply = 4,
+  AdditiveOne = 5,
+  PremultipliedAlpha = 6,
+  AdditiveAlpha = 7
+};
 
 // The highest Blend value a VMAT blob may carry.
-inline constexpr uint32_t MaxBlend = uint32_t(Blend::AdditiveOne);
+inline constexpr uint32_t MaxBlend = uint32_t(Blend::AdditiveAlpha);
 
 // A model draw of this blend never writes depth and always depth-tests (LEqual), whatever its generator asked for.
 inline constexpr bool forces_depth_write_off(Blend blend) { return blend == Blend::AdditiveOne; }
@@ -113,8 +178,13 @@ struct Vertex {
   // IceCharge*: the camera-local tangent in vec's (x, z, y) order (the GX view tangent is (x, y, -z)), w the
   // handedness with the model matrix's mirror folded in. Unused (zero) elsewhere.
   float tan[4];
+  // BarrierShield: the mesh's own vertex colour (VMSH v2, flags bit 1), kept apart from `color` (the
+  // instance's): the fragment's alpha gain and its glow read this one, and only the instance colour
+  // scales the result. A full vec4 row so the two never alias, as Remastered passes them as v4 and v3.
+  // Unused (zero) elsewhere.
+  float mesh[4];
 };
-static_assert(sizeof(Vertex) == 156);
+static_assert(sizeof(Vertex) == 172);
 
 struct Texture {
   const GXTexObj* obj = nullptr;
@@ -220,6 +290,9 @@ struct DrawDesc {
   // room's (the GX tone row's exposure, as every other draw takes it). An LDR draw ignores it.
   // Set only for the material the converter validated (the wave orb's MATI), not for VFX in general.
   bool alreadyExposed = false;
+  // Explicit forward exposure for this draw's uniform only, never GX or pipeline state.
+  // LDR ignores it; an AlreadyExposed HDR draw still takes exposure 1.
+  std::optional<float> exposureOverride;
   // IceCharge*: the NMAP slot, Remastered's CCHn uniforms (MATI with the SMTR overrides) and its modular
   // simulation time (CScene::GetModularSimulationTime, the port's CGraphics::GetSimTime).
   int8_t normalSlot = -1;
@@ -247,6 +320,15 @@ void draw_triangles(const DrawDesc& desc, const Vertex* verts, uint32_t triCount
 // scene, else the RGBA8 display copy) for the later draws of this frame to read, at one pass break.
 // Call once per frame from the game thread. Draws of a frame without a copy, before it, or into
 // another target (an offscreen pass) bind 1x1 dummies, do no DepthSoften and draw no SceneWarp.
-void capture_scene();
+// again: copy anew over this frame's copy of the same kind (the pause screen's copy before its
+// silhouettes, RenderPauseScreenElements, flags 1); draws recorded after it read the new one, its
+// top level alone.
+void capture_scene(bool again = false);
+// Whether draws recorded now would read this frame's copy (capture_scene ran this frame, into the
+// current target, in the same HDR state). Game thread.
+bool scene_copy_available();
+// The pixel size of the target draws recorded now land in (the pass's colour attachment, else the
+// window's framebuffer): the space a fragment's position is in. Waits for the FIFO first. Game thread.
+void render_target_size(uint32_t& width, uint32_t& height);
 void shutdown();
 } // namespace aurora::gfx::vfx

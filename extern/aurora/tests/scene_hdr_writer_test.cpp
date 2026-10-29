@@ -329,7 +329,8 @@ bool has_pbr_lin(std::string_view s) {
 
 bool hdr_line(std::string_view line) {
   return line.find("hdr_") != std::string_view::npos || has_pbr_lin(line) ||
-         line.find("HDR") != std::string_view::npos;
+         line.find("HDR") != std::string_view::npos || line.find("pbr_keep") != std::string_view::npos ||
+         line.find("pbr_vf") != std::string_view::npos;
 }
 
 // A line of an output statement the HDR branch rewrites (prev = vec4f(...), possibly wrapped).
@@ -372,12 +373,16 @@ TEST(SceneHdrGx, PbrSourcesSkipTheEncodeOnlyInHdr) {
     EXPECT_EQ(ldr.find("hdr_exposed"), std::string::npos);
     EXPECT_FALSE(has_pbr_lin(ldr));
     EXPECT_NE(ldr.find("prev = vec4f(srgb_enc(pbr_tm + pbr_pass), pbr_alpha);"), std::string::npos);
-    EXPECT_NE(hdr.find("prev = vec4f(pbr_lin + pbr_pass, pbr_alpha);"), std::string::npos);
+    EXPECT_NE(hdr.find("prev = vec4f(pbr_lin + pbr_pass + pbr_keep, pbr_alpha);"), std::string::npos);
+    EXPECT_EQ(ldr.find("pbr_keep"), std::string::npos);
+    EXPECT_EQ(ldr.find("pbr_vfw"), std::string::npos);
     EXPECT_EQ(hdr.find("srgb_enc(pbr_tm + pbr_pass)"), std::string::npos);
     EXPECT_NE(hdr.find("fn hdr_untone("), std::string::npos);
     EXPECT_NE(hdr.find("var pbr_lin = pbr_out;"), std::string::npos);
     if (kind == 36) {
-      EXPECT_NE(hdr.find("pbr_lin *= inv_c;"), std::string::npos);
+      // C is in pbr_out, before the tone, so pbr_lin carries it without a second scale.
+      EXPECT_NE(hdr.find("let pbr_out = max(pbr_lo + pbr_glow, vec3f(0.0)) * inv_c;"), std::string::npos);
+      EXPECT_EQ(hdr.find("*= inv_c"), std::string::npos);
     }
 
     // Every line HDR adds is about HDR; every LDR line it drops is an output it replaced.
@@ -407,7 +412,8 @@ TEST(SceneHdrGx, PbrSourcesSkipTheEncodeOnlyInHdr) {
       if (line.find("pbr_alpha") != std::string::npos && line.find("prev = vec4f(") == std::string::npos)
         la.push_back(line);
     for (const auto& line : h)
-      if (line.find("pbr_alpha") != std::string::npos && line.find("prev = vec4f(") == std::string::npos)
+      if (line.find("pbr_alpha") != std::string::npos && line.find("prev = vec4f(") == std::string::npos &&
+          line.find("pbr_vfw") == std::string::npos)
         ha.push_back(line);
     EXPECT_FALSE(la.empty());
     EXPECT_EQ(la, ha);
@@ -464,7 +470,15 @@ TEST(SceneHdrGx, TheModeBitIsTheOldPaddingSoLdrKeysKeepTheirBytes) {
   EXPECT_EQ(differing, 1u);
   EXPECT_NE(xxh3_hash(hdr), xxh3_hash(defaults));
   EXPECT_FALSE(hdr == defaults);
-  EXPECT_EQ(GXPipelineConfigVersion, 15u);
+  // 16: pbrCut (also old padding) moved the cut tests into the key, so a cached cutout caster
+  // (shadowPass 2) of 15 names an fs_shadow its shader no longer has.
+  EXPECT_EQ(GXPipelineConfigVersion, 16u);
+  ShaderConfig cut = defaults;
+  cut.pbrCut = 1;
+  differing = 0;
+  for (size_t i = 0; i < sizeof(ShaderConfig); ++i)
+    differing += reinterpret_cast<const u8*>(&cut)[i] != reinterpret_cast<const u8*>(&defaults)[i];
+  EXPECT_EQ(differing, 1u);
   // The pipeline key around it has no padding either (pipeline.hpp asserts it too): every key byte
   // is a config field, so the xxh3 key of a config is fully determined by its values.
   static_assert(std::has_unique_object_representations_v<PipelineConfig>);
@@ -650,7 +664,24 @@ TEST(SceneHdrVfx, HdrSourcesWriteExposedLinear) {
     const std::string body = hdr.substr(tail, tone - tail);
     EXPECT_NE(body.find("var lin = max(rgb, vec3f(0.0));"), std::string::npos);
     EXPECT_NE(body.find("if (u.tone1.x > 0.0 && u.tone0.w > 0.0) { lin = lin * u.tone0.w; }"), std::string::npos);
-    EXPECT_NE(body.find("if ((BLEND == 0u || BLEND == 3u) && (FEAT & 1048576u) == 0u && (FEAT & 4194304u) == 0u) {"), std::string::npos);
+    // The fog condition is wrapped over two lines in the generated WGSL; collapse whitespace to match it,
+    // and pin every FEAT predicate: fogged (1 << 27) still fogs, while NoFog (1 << 20), the retail
+    // unfogged bit (1 << 22) and the Remastered no-fog bits 29 (BarrierShield/BarrierGlow) and 30 exclude it.
+    auto squeezed = [](const std::string& s) {
+      std::string out;
+      bool space = false;
+      for (const char c : s) {
+        if (c == ' ' || c == '\n' || c == '\t' || c == '\r') {
+          space = true;
+          continue;
+        }
+        if (space && !out.empty()) out += ' ';
+        space = false;
+        out += c;
+      }
+      return out;
+    };
+    EXPECT_NE(squeezed(body).find("if ((BLEND == 0u || BLEND == 3u || (FEAT & 134217728u) != 0u) && (FEAT & 1048576u) == 0u && (FEAT & 4194304u) == 0u && (FEAT & 536870912u) == 0u && (FEAT & 1073741824u) == 0u) {"), std::string::npos);
     EXPECT_NE(body.find("hdr_exposed(u.fogColor.rgb, u.tone0, u.tone1, u.tone2)"), std::string::npos);
     EXPECT_NE(body.find("return vec4f(lin, alpha);"), std::string::npos);
     EXPECT_EQ(body.find("tone("), std::string::npos);
@@ -712,6 +743,22 @@ TEST(SceneHdrVfx, TheHdrBitKeepsTheConfigLayout) {
   EXPECT_NE(xxh3_hash(a), xxh3_hash(b));
 }
 
+TEST(SceneHdrVfx, IceModelCullIsExplicitAndSeparatesCachedConfigs) {
+  auto plain = vfxConfig(0, true);
+  auto ice = plain;
+  ice.features = shader_features(plain.features | ModelBackCull);
+  EXPECT_EQ(ice.features ^ plain.features, uint32_t(ModelBackCull));
+  EXPECT_NE(xxh3_hash(plain), xxh3_hash(ice));
+  const auto a = pipeline_primitive(plain), b = pipeline_primitive(ice);
+  EXPECT_EQ(a.cullMode, wgpu::CullMode::None);
+  EXPECT_EQ(a.frontFace, wgpu::FrontFace::CCW);
+  EXPECT_EQ(b.cullMode, wgpu::CullMode::Back);
+  EXPECT_EQ(b.frontFace, wgpu::FrontFace::CCW);
+  EXPECT_EQ(b.topology, wgpu::PrimitiveTopology::TriangleList);
+  EXPECT_TRUE(same(pipeline_blend(plain).color, pipeline_blend(ice).color));
+  EXPECT_TRUE(same(pipeline_blend(plain).alpha, pipeline_blend(ice).alpha));
+}
+
 // The wave orb's exposure policy (DrawDesc::alreadyExposed, VMAT's AlreadyExposed bit) is a uniform
 // value per draw, not a shader feature: no source, config or key changes with it.
 TEST(SceneHdrVfx, ThePolicyBitIsNotAShaderFeature) {
@@ -732,6 +779,27 @@ TEST(SceneHdrVfx, ThePolicyBitIsNotAShaderFeature) {
 
 // What the HDR tail does with the uniform's exposure (tone0.w, tone1.x > 0 enables it).
 float hdr_tail(float rgb, float exposure, float tone1x) { return tone1x > 0.f && exposure > 0.f ? rgb * exposure : rgb; }
+
+TEST(SceneHdrVfx, ExplicitModelExposureDoesNotInheritThePriorModelMultiplier) {
+  constexpr float inverse = 13.7331038f;
+  constexpr float frameExposure = 0.07281675101006664f;
+  DrawDesc desc;
+  EXPECT_FALSE(desc.exposureOverride);
+  desc.exposureOverride = frameExposure;
+  for (const float inherited : {0.979701519f, 1.f, 0.125f, 8.f, 0.f}) {
+    SCOPED_TRACE(inherited);
+    const float uniform = draw_exposure(inherited, true, false, desc.exposureOverride);
+    EXPECT_EQ(uniform, frameExposure);
+    EXPECT_NEAR(inverse * uniform, 1.f, 1e-6f);
+    EXPECT_NEAR(hdr_tail(inverse, uniform, 1.38888872f), 1.f, 1e-6f);
+    EXPECT_EQ(draw_exposure(inherited, false, false, desc.exposureOverride), inherited);
+    EXPECT_EQ(draw_exposure(inherited, false, true, desc.exposureOverride), inherited);
+    EXPECT_EQ(draw_exposure(inherited, true, true, desc.exposureOverride), 1.f);
+    EXPECT_EQ(draw_exposure(inherited, false, true, std::nullopt), inherited);
+    EXPECT_EQ(draw_exposure(inherited, true, false, std::nullopt), inherited);
+    EXPECT_EQ(draw_exposure(inherited, true, true, std::nullopt), 1.f);
+  }
+}
 
 TEST(SceneHdrVfx, AnAlreadyExposedDrawIsExposureOneInHdrOnly) {
   constexpr float orb = 33.8f; // T 1 x COLR x ITEN of the source orb
