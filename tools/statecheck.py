@@ -504,6 +504,7 @@ def main():
     Path(a.log).parent.mkdir(parents=True, exist_ok=True)
 
     game = Game(a)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(2))  # a `timeout` or kill still stops the game (finally)
     failed, summary = False, []
     try:
         if a.userdir:
