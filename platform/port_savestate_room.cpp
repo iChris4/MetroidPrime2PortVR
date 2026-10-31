@@ -39,6 +39,7 @@
 #include "MetroidPrime/ScriptObjects/CScriptActor.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptPlatform.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptStreamedMusic.hpp"
+#include "MetroidPrime/ScriptObjects/CScriptSwitch.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptTimer.hpp"
 #include "MetroidPrime/TCastTo.hpp"
 
@@ -133,6 +134,7 @@ enum : uint32_t {
   kTagRng = 16,       // u32 seed of the state manager's CRandom16: room-wide, on the first object
   kTagPlayer = 17,    // 4 x f32 dark-air clocks of the player (CPlayer::PortGetDarkAir): room-wide, first object
   kTagDrop = 18,      // u8 live, then the drop's kTagFields bytes: the pickup a debris' Activate dropped
+  kTagSwitch = 19,    // u32 opened: a CScriptSwitch
 };
 
 // Per-object lines a restore logs, at most; the summary line always follows.
@@ -383,6 +385,11 @@ void CaptureObject(CStateManager& mgr, CEntity& ent, RoomObject& obj) {
     BlockWriter w;
     w.U32(static_cast< uint32_t >(counter->GetCurrent()));
     obj.blocks.push_back({kTagCounter, w.bytes});
+  }
+  if (const CScriptSwitch* sw = TCastToConstPtr< CScriptSwitch >(&ent)) {
+    BlockWriter w;
+    w.U32(sw->IsOpened() ? 1 : 0);
+    obj.blocks.push_back({kTagSwitch, w.bytes});
   }
   if (CScriptDoor* door = TCastToPtr< CScriptDoor >(&ent)) {
     // Open, then the lock (MP1's door block carries open plus close flags; Echoes' doors have a
@@ -641,6 +648,18 @@ bool ApplyObject(CStateManager& mgr, CEntity& ent, const RoomObject& obj, Change
       if (r.ok && current != counter->GetCurrent()) {
         PortRoomState::SetCounter(*counter, current);
         log.Note(obj.editorId, "counter restored");
+      }
+    }
+  }
+  if (CScriptSwitch* sw = TCastToPtr< CScriptSwitch >(&ent)) {
+    // The flag a later SetToZero reads: a switch that had closed would otherwise come back open
+    // and fire Open again, re-activating the triggers it had switched off.
+    if (const RoomBlock* b = FindBlock(obj, kTagSwitch)) {
+      BlockReader r(b->data);
+      const bool opened = r.U32() != 0;
+      if (r.ok && opened != sw->IsOpened()) {
+        sw->PortSetOpened(opened);
+        log.Note(obj.editorId, "switch restored");
       }
     }
   }

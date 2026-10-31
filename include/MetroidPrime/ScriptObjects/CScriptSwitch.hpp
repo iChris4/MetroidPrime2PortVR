@@ -17,6 +17,10 @@ public:
   void AcceptScriptMsg(CStateManager& mgr, const CScriptMsg& msg) override;
 
   bool IsOpened() const { return mOpened; } // Guessed name.
+#ifdef TARGET_PC
+  // Save states: the opened flag a load puts back (platform/port_savestate_room.cpp).
+  void PortSetOpened(bool opened) { mOpened = opened; }
+#endif
 
 private:
   bool mOpened;
