@@ -132,6 +132,7 @@ enum : uint32_t {
   kTagFields = 15,    // the schema fields of an enemy, pickup or debris (port_savestate_fields.cpp)
   kTagRng = 16,       // u32 seed of the state manager's CRandom16: room-wide, on the first object
   kTagPlayer = 17,    // 4 x f32 dark-air clocks of the player (CPlayer::PortGetDarkAir): room-wide, first object
+  kTagDrop = 18,      // u8 live, then the drop's kTagFields bytes: the pickup a debris' Activate dropped
 };
 
 // Per-object lines a restore logs, at most; the summary line always follows.
@@ -273,6 +274,24 @@ bool SavesCopy(CEntity& ent) {
 
 TUniqueId RawId(uint16_t value) { return TUniqueId(value); }
 
+// The pickup a debris dropped on its Activate (mGeneratedObject), if it is still there. The drop
+// is not a generator's copy: the restored debris drops a fresh one, which takes the saved fields.
+CScriptPickup* DebrisDrop(CStateManager& mgr, const CScriptDebris& debris) {
+  const TUniqueId g = debris.PortGeneratedObject();
+  return g != kInvalidUniqueId ? TCastToPtr< CScriptPickup >(mgr.ObjectById(g)) : nullptr;
+}
+
+// Whether a debris has a generator connection that drops something on Activate.
+bool DropsOnActivate(const CScriptDebris& debris) {
+  const rstl::vector< SConnection >& connections = debris.GetConnectionList();
+  for (int i = 0; i < connections.size(); ++i) {
+    if (connections[i].state == kSS_GeneratorConnection && connections[i].msg == kSM_Activate) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool IsScripted(const CEntity& ent) { return ent.GetEditorId().value != kInvalidEditorId.value; }
 
 // A dead enemy is gone for the room even while its corpse still runs.
@@ -413,6 +432,21 @@ void CaptureObject(CStateManager& mgr, CEntity& ent, RoomObject& obj) {
   std::string fields;
   if (CaptureEntityFields(mgr, ent, fields) && fields.size() <= 0xffff) {
     obj.blocks.push_back({kTagFields, std::move(fields)});
+  }
+  // A debris' dropped pickup: live or not, so a restore keeps or removes the fresh one it makes.
+  if (const CScriptDebris* debris = TCastToPtr< CScriptDebris >(&ent)) {
+    if (DropsOnActivate(*debris)) {
+      BlockWriter w;
+      std::string dropFields;
+      CScriptPickup* drop = DebrisDrop(mgr, *debris);
+      const bool live = drop != nullptr && CaptureEntityFields(mgr, *drop, dropFields, true) &&
+                        dropFields.size() <= 0xf000;
+      w.U8(live ? 1 : 0);
+      if (live) {
+        w.bytes += dropFields;
+      }
+      obj.blocks.push_back({kTagDrop, w.bytes});
+    }
   }
 }
 
@@ -708,7 +742,7 @@ bool ApplyObject(CStateManager& mgr, CEntity& ent, const RoomObject& obj, Change
       }
     }
   }
-  if (fieldsBlock != nullptr) {
+  if (fieldsBlock != nullptr || FindBlock(obj, kTagDrop) != nullptr) {
     later.push_back({ent.GetUniqueId(), &obj});
   }
   // Velocity and momentum go in last, after every block above: a class's own block can stop the
@@ -756,7 +790,19 @@ void CaptureRoomState(CStateManager& mgr, RoomState& out) {
     }
   }
   std::map< uint32_t, uint32_t > copyIndex;
+  std::set< uint32_t > drops; // pickups debris dropped: saved on the debris, not as objects
   ForEachObject(mgr, [&](CEntity& ent) {
+    if (const CScriptDebris* debris = TCastToPtr< CScriptDebris >(&ent)) {
+      const TUniqueId g = debris->PortGeneratedObject();
+      if (g != kInvalidUniqueId && DebrisDrop(mgr, *debris) != nullptr && !IsGeneratedCopy(mgr, *mgr.ObjectById(g))) {
+        drops.insert(g.Value());
+      }
+    }
+  });
+  ForEachObject(mgr, [&](CEntity& ent) {
+    if (drops.count(ent.GetUniqueId().Value()) != 0) {
+      return;
+    }
     // Objects without an editor id (projectiles, effects, owner-spawned children such as the Boost
     // Guardian's ball) are not recorded: nothing could rebuild them. An owner state that needs its child
     // re-makes it on re-entry (BoostAttack's Activate), and GetUid's kUidDynamic keeps the live id.
@@ -914,6 +960,8 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
     mgr.ClearGraveyard();
   }
   std::vector< DeferredFields > later;
+  int dropsRestored = 0;
+  int dropsRemoved = 0;
   std::vector< const RoomObject* > copies;
   for (const RoomObject& obj : room.objects) {
     if (now.count(TEditorId(obj.editorId).AreaNum()) == 0) {
@@ -979,6 +1027,12 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
         // are applied to (a patterned enemy's state machine exists only after it).
         if (saved[i]->active) {
           mgr.SendScriptMsg(ent, kInvalidUniqueId, kSM_Activate);
+          // A debris drops its pickup on this Activate: two of one template in one dispatch
+          // would be handed the same uid, so each runs alone.
+          if (TCastToPtr< CScriptDebris >(ent) != nullptr) {
+            mgr.DispatchScriptMessages();
+            mgr.ThinkNewObjects(1.f / 60.f);
+          }
         }
         pairs.push_back({made[i], saved[i]});
       }
@@ -1006,15 +1060,51 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
   mgr.DispatchScriptMessages();
   for (const DeferredFields& d : later) {
     CEntity* ent = mgr.ObjectById(d.uid);
-    const RoomBlock* fieldsBlock = ent != nullptr ? FindBlock(*d.obj, kTagFields) : nullptr;
-    if (fieldsBlock == nullptr) {
+    if (ent == nullptr) {
       continue;
     }
-    if (const int set = ApplyEntityFields(mgr, *ent, fieldsBlock->data)) {
-      stats.fields += set;
-      log.Note(d.obj->editorId, "fields restored");
-      ++stats.changed;
+    // The saved fields carry the debris' drop link as a uid of the saved world; the drop its
+    // Activate made now is the one that counts.
+    CScriptDebris* debris = TCastToPtr< CScriptDebris >(ent);
+    const TUniqueId liveDrop = debris != nullptr ? debris->PortGeneratedObject() : kInvalidUniqueId;
+    if (const RoomBlock* fieldsBlock = FindBlock(*d.obj, kTagFields)) {
+      if (const int set = ApplyEntityFields(mgr, *ent, fieldsBlock->data)) {
+        stats.fields += set;
+        log.Note(d.obj->editorId, "fields restored");
+        ++stats.changed;
+      }
     }
+    if (debris != nullptr && FindBlock(*d.obj, kTagDrop) != nullptr) {
+      debris->PortSetGeneratedObject(liveDrop);
+    }
+    // The pickup this debris dropped again on its Activate takes the saved drop's fields, or goes
+    // when the save had none (collected or expired before it).
+    const RoomBlock* dropBlock = FindBlock(*d.obj, kTagDrop);
+    if (dropBlock != nullptr && debris != nullptr && mgr.ObjectById(d.uid) == ent) {
+      CScriptPickup* drop = DebrisDrop(mgr, *debris);
+      if (drop != nullptr) {
+        if (!dropBlock->data.empty() && dropBlock->data[0] != 0) {
+          const int set = ApplyEntityFields(mgr, *drop, dropBlock->data.substr(1));
+          if (set) {
+            stats.fields += set;
+            log.Note(d.obj->editorId, "dropped pickup fields restored");
+            drop->SetTranslation(debris->GetTranslation());
+            ++dropsRestored;
+            ++stats.changed;
+          }
+        } else {
+          mgr.DeleteObjectRequest(drop->GetUniqueId());
+          debris->PortClearGeneratedObject();
+          log.Note(d.obj->editorId, "dropped pickup removed (none in the state)");
+          ++dropsRemoved;
+          ++stats.changed;
+        }
+      }
+    }
+  }
+  if (dropsRestored != 0 || dropsRemoved != 0) {
+    std::fprintf(stderr, "[savestate] room: debris drops: %d restored, %d removed\n", dropsRestored,
+                 dropsRemoved);
   }
   if (generatedCopies != 0) {
     std::fprintf(stderr, "[savestate] room: %d generated copies made again\n", generatedCopies);

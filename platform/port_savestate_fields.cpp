@@ -1134,8 +1134,8 @@ bool EntityFieldsSaved(const CStateManager& mgr, CEntity& ent) {
 
 bool SchemaFieldSaved(const PortSchemaClass& cls, const PortSchemaField& f) { return SavedField(cls, f); }
 
-bool CaptureEntityFields(const CStateManager& mgr, CEntity& ent, std::string& out) {
-  if (!EntityFieldsSaved(mgr, ent)) {
+bool CaptureEntityFields(const CStateManager& mgr, CEntity& ent, std::string& out, bool any) {
+  if (!(any && Enabled()) && !EntityFieldsSaved(mgr, ent)) {
     return false;
   }
   const std::vector< const PortSchemaClass* > chain = Chain(ent);

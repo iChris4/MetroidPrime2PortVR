@@ -48,7 +48,10 @@ guessed. Plain kinds are written as values; `pointer`, `smart_ptr`, `container` 
 A pickup a `CScriptDebris` drops (`mGeneratedObject`, made in the debris' own Activate) is not
 noted as a generated copy on purpose: the restored debris is activated again and drops its own
 pickup, so saving the drop as a copy too doubles it (tried 2026-10-31: 1 -> 2 pickups after the
-round trip). Such a drop is rebuilt fresh (life timer restarts, position follows the debris).
+round trip). The drop's fields (life timer and the rest) are saved on the owning debris instead
+(`kTagDrop` in `port_savestate_room.cpp`) and go into the pickup the restored debris drops; a
+save with no live drop leaves none. The debris' own saved `mGeneratedObject` is a uid of the saved
+world, so the restore keeps the live link over it.
 
 `SavedField` drops fields on purpose too: `const` ones, the port's own `mPort*`/`xPort*`
 members, anything named `...Loaded`/`...Loading` (asset streaming is this run's), every

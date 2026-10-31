@@ -201,7 +201,8 @@ bool SchemaFieldSaved(const PortSchemaClass& cls, const PortSchemaField& f);
 // Captures `ent`'s schema fields into a kTagFields block (false: not an entity that gets one);
 // applies one, returning the fields set; whether it covers every class of `ent` (the script
 // messages that woke the enemy need no replay then).
-bool CaptureEntityFields(const CStateManager& mgr, CEntity& ent, std::string& out);
+// `any` skips the which-entities gate (a debris' dropped pickup).
+bool CaptureEntityFields(const CStateManager& mgr, CEntity& ent, std::string& out, bool any = false);
 int ApplyEntityFields(CStateManager& mgr, CEntity& ent, const std::string& data);
 bool EntityFieldsCover(CEntity& ent, const std::string& data);
 std::string RoomStateJson(CStateManager& mgr, CEntity& ent);
