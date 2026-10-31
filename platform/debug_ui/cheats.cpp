@@ -116,9 +116,15 @@ constexpr SItemCheck kAbilityItems[] = {
 };
 
 constexpr SItemCheck kKeyItems[] = {
-    {"Temple Key 1", CPlayerState::kIT_TempleKey1},
-    {"Temple Key 2", CPlayerState::kIT_TempleKey2},
-    {"Temple Key 3", CPlayerState::kIT_TempleKey3},
+    {"Sky Temple Key 1", CPlayerState::kIT_TempleKey1},
+    {"Sky Temple Key 2", CPlayerState::kIT_TempleKey2},
+    {"Sky Temple Key 3", CPlayerState::kIT_TempleKey3},
+    {"Sky Temple Key 4", CPlayerState::kIT_TempleKey4},
+    {"Sky Temple Key 5", CPlayerState::kIT_TempleKey5},
+    {"Sky Temple Key 6", CPlayerState::kIT_TempleKey6},
+    {"Sky Temple Key 7", CPlayerState::kIT_TempleKey7},
+    {"Sky Temple Key 8", CPlayerState::kIT_TempleKey8},
+    {"Sky Temple Key 9", CPlayerState::kIT_TempleKey9},
     {"Agon Key 1", CPlayerState::kIT_AgonKey1},
     {"Agon Key 2", CPlayerState::kIT_AgonKey2},
     {"Agon Key 3", CPlayerState::kIT_AgonKey3},
@@ -238,6 +244,22 @@ void DrawCheatsSection() {
   }
   ImGui::EndDisabled();
   ItemHelp("Colour-locked doors open to any of the four beams. Missile locks stay.");
+  ImGui::BeginDisabled(PortOverlay::OriginalExperience());
+  bool stackBeams = sStackBeams;
+  if (ImGui::Checkbox("Stack beams", &stackBeams)) {
+    PortOverlay::SetStackBeams(stackBeams);
+  }
+  ImGui::SetItemTooltip("Each shot also fires the other beams you own, at no extra ammo cost.");
+  ImGui::SameLine();
+  ImGui::BeginDisabled(!sStackBeams);
+  bool skipDark = sStackBeamsSkipDark;
+  if (ImGui::Checkbox("Leave out Dark Beam", &skipDark)) {
+    PortOverlay::SetStackBeamsSkipDark(skipDark);
+  }
+  ImGui::SetItemTooltip("Stacked shots skip the Dark Beam unless it's the one in hand, so they "
+                        "don't drain light beacons and crystals.");
+  ImGui::EndDisabled();
+  ImGui::EndDisabled();
 
   CPlayerState* ps = gpGameState != nullptr ? gpGameState->GetPlayerState().GetPtr() : nullptr;
   // The front end has its own player state and its own Samus; the page is about the game's.

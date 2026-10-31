@@ -942,8 +942,14 @@ void CPlayerGun::MissileClosing(CStateManager& mgr, int message, float dt) {
     PlayAnim(mgr, NWeaponTypes::kGAT_FromMissile, false);
     break;
   case kSM_Update:
+#ifdef TARGET_PC
+    // Retail 0x801C7154 compares against lbl_8041D110 = double 0.8.
+    if (mCurrentBeam->GetSolidModelData().GetAnimationData()->GetAnimTimeRemaining(
+            rstl::string("Whole Body")) < 0.8) {
+#else
     if (mCurrentBeam->GetSolidModelData().GetAnimationData()->GetAnimTimeRemaining(
             rstl::string("Whole Body")) < 0.001) {
+#endif
       mMissileCloseAnimDone = true;
     }
     break;
@@ -2487,8 +2493,10 @@ void CPlayerGun::FireSecondary(float dt, CStateManager& mgr, TUniqueId target, u
   } else {
     bool canFire = true;
 #ifdef TARGET_PC
-    // Port: a combo needs only its own missile cost (the Combo missile cost option can be 0).
-    if (missiles < (mComboFiring ? playerState.GetMissileCostForAltAttack() : 1)) {
+    // Port: the Combo missile cost option can be 0, and then a combo fires with no
+    // missiles. Any other cost keeps retail's `missiles < 1` here; a short combo
+    // returns silently below, as retail does.
+    if (missiles < ((mComboFiring && playerState.GetMissileCostForAltAttack() < 1) ? 0 : 1)) {
 #else
     if (missiles < 1) {
 #endif

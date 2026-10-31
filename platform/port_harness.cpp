@@ -5,6 +5,7 @@
 
 #include "port_console.h"
 #include "port_overlay.h"
+#include "port_savestate.h"
 #include "port_timing.h"
 
 #include <atomic>
@@ -308,6 +309,9 @@ bool IntroDismissMemo(unsigned message) {
 
 bool IntroSkipCinematic(unsigned camera) {
   ReadIntroEnvOnce();
+  if (PortSaveState::LoadAwaitsCinematic()) {
+    return true;
+  }
   if (!sIntroArmed || sIntroDone) {
     return false;
   }

@@ -23,7 +23,8 @@ for binding examples, lifecycle rules, harness commands and desktop-only limitat
   driver.
 - F1: the settings overlay (the Prime 1 port's `platform/debug_ui/` layout). Pages: Game,
   Controls (Options, Mouse settings, Controller settings, Touch & gyro, Remap), Video (Display,
-  Quality, Frame rate), Randomizer, Cheats, Save states, System, Debug.
+  Quality, Frame rate, Compatibility), Enhancements, Mods, Save states, System, Debug; the
+  Randomizer page is built but hidden from the list.
   `MP2_DEBUG_TAB=<page>[/<sub-tab>]` opens the overlay on that page at launch; console
   `overlay <page>` does the same in a running game. `Cheats` (either way) opens Debug with Show
   cheats on.
@@ -39,8 +40,13 @@ for binding examples, lifecycle rules, harness commands and desktop-only limitat
   launch; System > Settings has **Save settings now**. Each key is one row of `kSettingKeys` in
   `platform/debug_ui/settings.cpp`, which both reads and writes it with two sample values;
   console `settings self-test` checks that every key reads back as written. An `MP2_<KEY>`
-  environment variable (the key upper-cased, unless listed otherwise below) overrides the file
-  for that run. A new key needs a mention here as `key`, or the index check fails.
+  environment variable (the key upper-cased, or the name the row here gives: `MP2_LOCK_ON_TOGGLE`
+  for `lockon_toggle`, `MP2_MOUSE_SENS` for `mouse_sensitivity`) overrides the file for that run
+  where the key's code reads one; most keys do, and the rows below name theirs. The file-only
+  keys are `mouse_dpi`, `texture_pack`, `overlay_windowed`, `ui_theme`, `show_cheats`,
+  `suit_colour_varia/dark/light`, `photo_supersample`, `photo_speed`, `discord`, `ui_sounds`,
+  `mods_disabled`, `low_power_gpu`, `game_options`, `emulator_folder`, `share_emulator_card`,
+  `mirror_trilogy_save` and `disc_path`. A new key needs a mention here as `key`, or the index check fails.
   `metroid_prime2_port --settings-selftest` runs the same check without starting the game
   (ctest `port_settings_roundtrip`).
 - F1 > System > Settings > **Reset configuration...** puts every port setting and control mapping
@@ -61,37 +67,35 @@ Save states page:
 - `quick_resume`: Save states > Quick resume (default on); env `MP2_QUICK_RESUME`. On quitting during
   play (and as the game keeps safe points, see Resume below) `savestates/resume.mp2ss` is written; the
   next launch asks "Resume where you left off?". Console: `resume [status|save|load|clear]`.
-- `savestate_hotkeys`: Save states > the "<keys> saves, <keys> loads the selected slot" checkbox
-  (default on); env `MP2_SAVESTATE_HOTKEYS`. Off, the Save state / Load state bindings do nothing;
-  the tab's buttons and the console `state` command still work.
-- `savestate_room_state`: Save states > Keep enemies and room objects (default on); env
-  `MP2_SAVESTATE_ROOM_STATE`. Off, states and quick resume store no room objects and a load rebuilds
-  the room as a card load does. A state saved with it on loads its objects only while it is on.
+- Save state bindings and room objects: no settings. The Save state / Load state bindings always
+  work (unbind them in Controls > Remap); env `MP2_SAVESTATE_HOTKEYS=0` turns them off. States and
+  quick resume store the loaded rooms' objects; env `MP2_SAVESTATE_ROOM_STATE=0` stores none, and a
+  load then rebuilds the room as a card load does.
 
 Game page:
 
 - `original_experience`: Cutscenes > Original experience (default off); env
   `MP2_ORIGINAL_EXPERIENCE`, console `original`. While on, the port's gameplay and cutscene tweaks read
   as retail and their rows are greyed: skippable cutscenes, world name on load, walk speed, hint
-  delay, scan speed, elevator ride, portal transition, rotating rooms, fast morph, spring ball, toggle lock-on, sticky charge, remastered
+  delay, scan speed, elevator ride, portal transition, rotating rooms, fast morph, spring ball, the Enhancements page, toggle lock-on, sticky charge, remastered
   charge, auto-aim (on). Your saved values are kept and return when it is switched off. Mods, input,
   video and audio settings are not affected.
-- `skip_cinematics`: Cutscenes > Skippable cutscenes.
-- `boot_logos`: Cutscenes > Skip splash screens (0 no, 1 with A or Start, 2 always), which sets both keys.
-- `world_name_card`: the same row, for the world name card on load (same values); env `MP2_WORLD_NAME`.
-- `walk_speed`: Cutscenes > Walk speed (50 to 200 percent, default 100 = retail); env
+- `skip_cinematics`: Enhancements > Pace > Skippable cutscenes.
+- Boot logos and the world name card on load: no setting; they end on A or Start (shown as retail
+  under Original experience). Env `MP2_BOOT_LOGOS`, `MP2_WORLD_NAME` (`show`, `skip`, `off`).
+- `walk_speed`: Enhancements > Pace > Walk speed (50 to 200 percent, default 100 = retail); env
   `MP2_WALK_SPEED`, console `walkspeed`. Scales how fast Samus moves on foot: the top speed,
   acceleration and friction of walking and strafing (on the ground, in the air and in water) and the
   orbit strafe and approach speeds are all multiplied by it, so she reaches k times the retail speed
   in the same time and stops in the same time. Jump height, sideways dashes, turning, the grapple
   and the Morph Ball are unchanged; speed carries into a jump. At 100 movement is exactly retail.
-- `scan_speed`: Cutscenes > Scan speed (50 to 400 percent, default 100 = retail); env
+- `scan_speed`: Enhancements > Pace > Scan speed (50 to 400 percent, default 100 = retail); env
   `MP2_SCAN_SPEED`, console `scanspeed`. Scales how fast a scan fills (CPlayer::UpdateScanningState);
   the visor, scan-point and hint text are unchanged.
-- `elevator_ride`: Cutscenes > Elevator ride (0 original, 1 fast, 2 skip); env `MP2_ELEVATOR_RIDE`
+- `elevator_ride`: Enhancements > Pace > Elevator ride cutscene (0 original, 1 fast, 2 skip); env `MP2_ELEVATOR_RIDE`
   (`original|fast|skip`). Fast runs the world-transition ride at double speed; Skip ends it as soon as
   the next world has loaded (the load itself still takes its time). Text transitions are unchanged.
-- `rotating_rooms`: Cutscenes > Rotating rooms (0 original, 1 fast); env `MP2_ROTATING_ROOMS`
+- `rotating_rooms`: Enhancements > Pace > Energy controller access cutscene (0 original, 1 fast); env `MP2_ROTATING_ROOMS`
   (`original|fast`), console `rooms`. Fast runs the energy controller rooms' bomb-slot cutscene (the
   room turning) at the game's own double speed: while a cinematic camera is active and a timed,
   one-shot CScriptActorRotate of 5 s or more plays (any such room, no list), `CStateManager::Update`
@@ -110,7 +114,7 @@ Game page:
   on load only when its record's hash matches the save's bytes. Without the sidecar (or after a
   copy through another tool) the save loads at the clamped 250. Lowering the slider mid-session
   only lowers the cap: amounts above the new cap are clamped the next time ammo is added.
-- `portal_transition`: Cutscenes > Portal transition (0 original, 1 fast, 2 skip); env
+- `portal_transition`: Enhancements > Pace > Portal transition (0 original, 1 fast, 2 skip); env
   `MP2_PORTAL_TRANSITION` (`original|fast|skip`), console `portal`. The ride through a light/dark world
   portal (`CPortalTransition`, run by `CMFGame` kFS_PortalTransition for a dock, or by `CWorldTransManager`
   from a teleporter). Fast runs it at double speed; Skip drops it, so the fade-in follows the load
@@ -124,29 +128,35 @@ Game page:
   only, so other languages show English there.
 - `igt_timer`: Speedrun > On-screen in-game time; env `MP2_IGT_TIMER`. The save file's play time
   (stops in cutscenes, menus and loads) in the bottom-right corner while a game runs.
-- `hint_delay`: Cutscenes > Hint delay (0 to 30 minutes, default 0 = the game's own timing); env
+- `hint_delay`: Enhancements > Hints > Hint delay (0 to 30 minutes, default 0 = the game's own timing); env
   `MP2_HINT_DELAY`. Caps the wait before a hint first shows, also for hints already waiting in a
   loaded save. Needs the in-game hint system on. Show current hint (Cutscenes button; console
   `hintshow`) shows the hint the game would show next: a hint already on screen comes back,
   otherwise the waiting hint due soonest shows now.
-- `unlock_hard_mode`, `unlock_galleries`, `stack_beams`: Unlocks > Hard mode (offered when
-  starting a file, as after finishing the game), Image galleries (all of them), Stack beams (each
-  shot also fires the other beams you own, at no extra ammo cost); env `MP2_UNLOCK_HARD_MODE`,
+- `unlock_hard_mode`, `unlock_galleries`, `stack_beams`: Game > Unlocks > Hard mode (offered when
+  starting a file, as after finishing the game), Image galleries (all of them); Debug > Cheats >
+  Stack beams (each shot also fires the other beams you own, at no extra ammo cost); env `MP2_UNLOCK_HARD_MODE`,
   `MP2_UNLOCK_GALLERIES`, `MP2_STACK_BEAMS`. Not written into the save, and Original experience
   greys them.
 - `unlock_beam_doors`: Debug > Cheats > Unlock beam doors; env `MP2_UNLOCK_BEAM_DOORS`.
   Colour-locked doors (the door's own vulnerability, or a damageable-trigger lock) open to any of
   the four beams; missile locks stay. Saved, not written into the save file; Original experience
   greys it.
-- `stack_beams_skip_dark`: Unlocks > Leave out Dark Beam (#27): stacked shots skip the Dark Beam
+- `stack_beams_skip_dark`: Debug > Cheats > Leave out Dark Beam (#27): stacked shots skip the Dark Beam
   unless it is in hand, so they don't drain light beacons and crystals; env
   `MP2_STACK_BEAMS_SKIP_DARK`.
-- `livesplit`, `livesplit_address`, `livesplit_split_upgrades`: Speedrun > LiveSplit, Server
-  (host:port), Split on upgrades; the address's env is `MP2_LIVESPLIT_ADDR`.
+- `livesplit`, `livesplit_address`, `livesplit_split_upgrades`: no F1 rows (settings.cfg or
+  console `livesplit <0|1> | addr <host:port>`); the address's env is `MP2_LIVESPLIT_ADDR`.
 - `mods`, `mods_disabled`: Mods > Load mods and one checkbox per mod folder (`mods_disabled` holds
   the turned-off folder names, `/`-separated); take effect on restart. Folder: `<user>/mods`, or
   `MP2_MODS`. See docs/MODS.md.
 - `suit_colour_varia`, `suit_colour_dark`, `suit_colour_light`: Video > Display > Suit colours (suit, colour per slot, Random). Each is one hex colour per slot (`FF4000,-`, `-` keeps that slot's original); empty is the original. The recoloured textures are built from the disc at startup, so a change applies on restart. Details: `docs/MODS.md` "Suit colours".
+- `music_boost`, `sfx_boost`: Game > Audio > Music volume and Sound effects volume above 100
+  percent (100 to 200, default 100 = no boost); env `MP2_MUSIC_BOOST`, `MP2_SFX_BOOST`. Up to 100
+  the row sets the game's own volume (`game_options`); above it the game stays at its maximum and
+  the port's mixer scales that path by percent / 100 (music = the streamed voices, sound effects =
+  every other voice, and the movie audio's stream), so the level goes past what the game alone
+  reaches. It can clip.
 - `game_options`: the game's own Options menu (volumes, sound mode, brightness...), stored as a
   hex blob so they survive without a memory card; not an overlay row.
 
@@ -183,7 +193,7 @@ Controls > Options:
   prompts; env `MP2_PROMPT_GLYPHS` 0-5, and `MP2_TEXTURE_DEVICE` still wins).
 - `minimap_tap`: Options > Menus > Tap minimap for map (a tap or click on the HUD minimap opens the
   map screen; default on; env `MP2_MINIMAP_TAP`; console `minimap`, `maptap`).
-- `fast_morph`, `spring_ball`: Morph ball > Fast Morph, Spring Ball (one row; C-stick up, the Spring Ball binding on the Remap page, touch swipe up, or a gyro flick).
+- `fast_morph`, `spring_ball`: Enhancements > Morph Ball > Fast Morph, Spring Ball (one row; C-stick up, the Spring Ball binding on the Remap page, touch swipe up, or a gyro flick).
 - `map_invert_x`, `map_invert_y`: Map > Invert map rotate X, Invert map rotate Y (off by
   default; env `MP2_MAP_INVERT_X`, `MP2_MAP_INVERT_Y`). They flip which way the map turns on
   the rotate inputs, left/right and up/down: the game turns the map opposite to the stick,
@@ -199,6 +209,11 @@ Controls > Mouse settings:
   sensitivity (same units); env `MP2_MOUSE_SENS_SPLIT`, `MP2_MOUSE_SENS_Y`.
 - `mouse_dpi`: Mouse aim > Mouse DPI (100..64000, default 800), only for the cm/360 readout.
 - `aim_crosshair`, `crosshair_size`: Mouse aim > Crosshair, Size.
+
+The cursor is not a setting: an uncaptured desktop cursor hides after 2 s without mouse input (a
+controller player in full screen) and shows again on the next motion, click or wheel. It stays
+while the overlay or photo mode's panel wants it, and mouse aim's capture hides it anyway
+(`PortMouse::UpdateIdleCursor`, #32).
 
 Controls > Controller settings:
 
@@ -295,6 +310,16 @@ Video > Display:
   the cutscene letterbox and its viewport shrink. Original experience keeps them.
 - `secondary_crosshairs` (default on, env `MP2_SECONDARY_CROSSHAIRS`): HUD and view > Secondary
   crosshairs; off hides the next-target reticle (lock-on and the scan box stay).
+- `dark_visor_full` (default off, env `MP2_DARK_VISOR_FULL`): Enhancements > Full-screen Dark
+  Visor; the Dark Visor's effect covers the whole view (the split-screen path, no lens mask),
+  and the HUD's centre gear, backing, spinner and rings are hidden (the boss bar stays). Original
+  experience keeps the lens.
+- `dark_visor_static` (0-100, default 100, env `MP2_DARK_VISOR_STATIC`): Enhancements > Dark Visor
+  static; how much of the visor's grey static covers the scene. Lower keeps the scene's colours,
+  0 leaves only the highlights. Original experience keeps 100.
+- `infinite_beam_ammo` (default off, env `MP2_INFINITE_BEAM_AMMO`): Enhancements > Infinite Light
+  and Dark Ammo; the beams spend no ammo and the HUD shows infinity. Saved, unlike the Infinite
+  cheat. Original experience turns it off.
 - `hud_opacity_echo`, `hud_opacity_dark`, `hud_opacity_scan` (`-1` = the game's Visor Opacity,
   default; else 0-100): HUD and view > Echo/Dark/Scan HUD opacity. Applies to that visor's HUD, its
   visor/beam menu, the radar and the map; the energy readout is part of the HUD frame and has no
@@ -389,8 +414,8 @@ Video > Compatibility (read once, when the GPU starts: a change applies after a 
 System and Debug:
 
 - `overlay_windowed`, `ui_theme`, `ui_scale`: System > Overlay > Overlay as a floating window
-  (desktop), Menu theme (`auto`, `prime`, `plain`, `echoes`), UI scale.
-- `texture_pack`: Game > Textures > Use the texture pack (off keeps the folder but shows the game's own
+  (desktop), Menu theme (`auto` = Echoes, `prime`, `plain`, `echoes`), UI scale.
+- `texture_pack`: Mods > Textures > Use the texture pack (off keeps the folder but shows the game's own
   textures); the Texture pack binding (F7, Controls > Remap > Port) flips it in game.
 - `emulator_folder`, `share_emulator_card`, `mirror_trilogy_save` (desktop only): System > Memory
   card > Installed emulators (which Dolphin or PrimeHack install to use; empty = Auto, the first

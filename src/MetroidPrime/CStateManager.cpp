@@ -1221,7 +1221,9 @@ void CStateManager::DrawDarkVisor(const CInGameGuiManagerSet& gui) {
   // is not where the head-locked lens lies in that eye (well right of it in the left eye), so the
   // red of the dark visor's targets stopped across that eye. In the headset the whole view is the
   // frame, as in split screen.
-  if (IsMultiplayer() || (mCurrentRenderPlayerIndex == 0 && PortVr::VrImmersive())) {
+  const bool fullScreen = IsMultiplayer() || PortOverlay::DarkVisorFullScreen() ||
+                          (mCurrentRenderPlayerIndex == 0 && PortVr::VrImmersive());
+  if (fullScreen) {
 #else
   if (IsMultiplayer()) {
 #endif
@@ -1235,12 +1237,25 @@ void CStateManager::DrawDarkVisor(const CInGameGuiManagerSet& gui) {
   } else {
     gpTweakGui->GetDarkVisorFrame(&x, &y, &width, &height);
   }
+#ifdef TARGET_PC
+  if (!fullScreen)
+#endif
   gui.GetPlayerGuiManager(mCurrentRenderPlayerIndex).DrawDarkVisorMask(*this);
   const CPlayer* player = mCurrentRenderPlayer;
+#ifdef TARGET_PC
+  // Port: the static color's alpha carries the Dark Visor static setting to the renderer.
+  gpRender->DrawDarkWorldTransition(
+      gpTweakGui->GetDarkVisorStaticColor().WithAlphaOf(
+          float(PortOverlay::DarkVisorStatic()) / float(PortOverlay::kDarkVisorStaticMax)),
+      gpTweakGui->GetDarkWorldBaseColor(),
+      gpTweakGui->GetDarkVisorPaletteModulate(), CColor(uchar(0), uchar(0), uchar(0), alpha),
+      player->GetScreenPosition(), CVector2i(x, y), CVector2i(width, height));
+#else
   gpRender->DrawDarkWorldTransition(
       gpTweakGui->GetDarkVisorStaticColor(), gpTweakGui->GetDarkWorldBaseColor(),
       gpTweakGui->GetDarkVisorPaletteModulate(), CColor(uchar(0), uchar(0), uchar(0), alpha),
       player->GetScreenPosition(), CVector2i(x, y), CVector2i(width, height));
+#endif
 }
 
 void CStateManager::DrawDarkWorldCloud(CPlayerState::EPlayerVisor visor) {
@@ -2266,11 +2281,11 @@ void CStateManager::CapturePlayerTextures() {
       if (portPick.vrHeadLocked) {
         AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED_2D);
       }
-      PortScanTarget::Request(pickLeft, pickTop, pickWidth, pickHeight);
+      const bool requested = PortScanTarget::Request(pickLeft, pickTop, pickWidth, pickHeight);
       if (portPick.vrHeadLocked) {
         AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
       }
-      PortScanTarget::SetPick(portPick);
+      if (requested) PortScanTarget::SetPick(portPick);
 #endif
       gpRender->CopyTextureRegion(mPlayers[i]->GetScanTargetIdTextureData(), 0, textureLeft,
                                   textureTop, textureWidth, textureHeight);
@@ -4368,6 +4383,13 @@ void CStateManager::Update(float inputDt, CArchitectureQueue& queue) {
   // A warp request from the platform (env, hotkey or MP2_INPUT token) is served here, once
   // the world exists; a world reload ends the update early through QuitGame.
   PortWarpTick();
+  if (PortSaveState::ConsumeSkipUpdate()) {
+    // a room state was just applied: the world does not advance this update; only the new objects
+    // get their first Think and the dead are freed
+    ThinkNewObjects(dt);
+    ClearGraveyard();
+    return;
+  }
   PortWarpSettle();
   PortLayerTick();
   PortPlaceArrivalTick();
@@ -4797,6 +4819,11 @@ void CStateManager::PortWarpTick() {
     // No world yet: leave any request alone; it is served as soon as one is there.
     return;
   }
+
+  // A layer is streamed in over frames (PortLayerTick, further down): tell the queue whether the
+  // last one is still running, so a second `layer` command in the same tick waits its turn instead
+  // of being merged into the first (PortWarp::Layer queues them).
+  PortWarp::SetLayerBusy(mPortLayerArea != kInvalidAreaId);
 
   // One line per world, so a sweep can see which area slots are real (a slot with an invalid MREA
   // is not an area the game can travel to) and so a test can wait for the game world without
@@ -5927,6 +5954,21 @@ bool CStateManager::PortLayerFlagOn(TAreaId aid, int layer) const {
     return false;
   }
   return mCurrentWorldLayerState->IsLayerActive(aid, TLayerId(layer));
+}
+
+bool CStateManager::PortLayerNeedsStream(TAreaId aid, int layer) {
+  if (!PortLayerFlagOn(aid, layer)) {
+    return false;
+  }
+  CWorld* world = World();
+  if (world == nullptr || !world->DoesAreaExist(aid)) {
+    return false;
+  }
+  CGameArea* area = world->Area(aid);
+  if (area == nullptr || !area->IsLoaded()) {
+    return false;
+  }
+  return area->GetLayerPhase(TLayerId(layer)) != CGameArea::kLP_Active;
 }
 
 void CStateManager::PortLayerTick() {

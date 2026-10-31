@@ -60,6 +60,12 @@ static int salStatsPeak;
 static SDL_AtomicInt salMuted;
 void salSetMuted(int muted) { SDL_SetAtomicInt(&salMuted, muted != 0); }
 
+// The port's volume boost (F1 > Game > Audio above 100 percent, `music_boost`/`sfx_boost`): a
+// linear factor on the decoded voice, 1.0 for the game's own maximum. The mix thread reads it once
+// per voice, so a change lands between voices; a plain float is enough for that.
+static float salVolumeBoostMusic = 1.0f;
+static float salVolumeBoostSfx = 1.0f;
+
 static SND_SOME_CALLBACK userCallback = NULL;
 
 extern float gPortListenerHeading[3];
@@ -121,6 +127,13 @@ void MusyxPortSetSampleMuted(unsigned smpId, int muted) {
 }
 
 void MusyxPortClearSampleMutes(void) { sMutedSampleCount = 0; }
+
+// The port's two volume boosts: the music path (a streamed voice) and everything else. 1.0 is no
+// boost, so the default mix stays exactly the game's.
+void MusyxPortSetVolumeBoost(float music, float sfx) {
+  salVolumeBoostMusic = music > 0.0f ? music : 1.0f;
+  salVolumeBoostSfx = sfx > 0.0f ? sfx : 1.0f;
+}
 
 int MusyxPortGetMutedSamples(unsigned* out, int maxIds) {
   salInitMuteList();
@@ -412,8 +425,9 @@ static int decodeSourceSamples(DSPvoice* vp, u32 voiceIdx, s32* out, int maxSamp
 
   for (; count < maxSamples; ++count) {
     if (state->srcPosHi >= end) {
-      if (smp->loopLength > 0 && smp->loop < end && smp->loopLength <= end - smp->loop) {
-        state->srcPosHi = smp->loop + ((state->srcPosHi - end) % smp->loopLength);
+      if (smp->loopLength > 0 && smp->loop < end && end - smp->loop <= smp->loopLength &&
+          smp->loopLength <= end - smp->loop + 1) {
+        state->srcPosHi = smp->loop + ((state->srcPosHi - end) % (end - smp->loop));
         resetVoiceLoopState(smp, voiceIdx);
       } else {
         *hitEnd = 1;
@@ -585,6 +599,21 @@ static int renderVoiceSegment(DSPvoice* vp, s32* mainL, s32* mainR, s32* mainS, 
   }
 #endif
 
+  /* The port's volume boost above the game's own maximum: scale this voice, the music path (a
+   * stream) or the effects, and saturate to the decode buffer's 16-bit range. No boost means no
+   * multiply at all, so the default output stays bit-identical. */
+  {
+    const float boost =
+        musyxPcStreamedAdpcm(smp->compType) ? salVolumeBoostMusic : salVolumeBoostSfx;
+    if (boost != 1.0f) {
+      for (int i = 0; i < nSamples; ++i) {
+        const float scaled = (float)voiceDecodeBuf[i] * boost;
+        voiceDecodeBuf[i] =
+            scaled >= 32767.0f ? 32767 : scaled <= -32768.0f ? -32768 : (s32)scaled;
+      }
+    }
+  }
+
   mixRampChannel(mainL ? mainL + frameOffset : NULL, voiceDecodeBuf, nSamples,
                  (s16)vp->lastVolL + dVolL * frameOffset, dVolL, (s16)adsrStart, adsrDelta);
   mixRampChannel(mainR ? mainR + frameOffset : NULL, voiceDecodeBuf, nSamples,
@@ -635,6 +664,7 @@ void salCtrlDsp(s16* dest) {
       if (vp->state != 0) {
         u32 voiceIdx = (u32)(vp - dspVoice);
         u8 mixStart = 0;
+        int newVoice = 0;
 
         /* New voice initialization (mirrors salBuildCommandList state==1 path) */
         if (vp->state == 1) {
@@ -691,6 +721,10 @@ void salCtrlDsp(s16* dest) {
 #endif
 
           mixStart = vp->singleOffset;
+          /* A stolen slot keeps the old voice's deferred break bit (hwInitSamplePlayback/
+           * salActivateVoice); retail's new-voice path (hw_dspctrl.c block_186) ignores
+           * changed[mix_start] & 0x20 and only s > mix_start honours it. */
+          newVoice = vp->startupBreak == 0;
 
           if (vp->smp_info.compType == 1) {
             u32 offset = (vp->smp_info.offset + 0xD) / 14;
@@ -743,7 +777,7 @@ void salCtrlDsp(s16* dest) {
           int finished = 0;
 
           for (u8 subframe = mixStart; subframe < SAL_SUBFRAMES; ++subframe) {
-            if ((vp->changed[subframe] & 0x20) != 0) {
+            if ((vp->changed[subframe] & 0x20) != 0 && !(newVoice && subframe == mixStart)) {
               adsrStartRelease(&vp->adsr, 10);
               vp->postBreak = 1;
             } else if (vp->postBreak == 0) {
@@ -1110,6 +1144,8 @@ int MusyxPortCopyVoices(PortMusyxVoice* out, int maxVoices) {
     out[count].rms = voiceRms[v];
     out[count].volL = vp->volL;
     out[count].volR = vp->volR;
+    out[count].srcPos = voiceResampler[v].srcPosHi;
+    out[count].loopLength = vp->smp_info.loopLength;
     ++count;
   }
   return count;

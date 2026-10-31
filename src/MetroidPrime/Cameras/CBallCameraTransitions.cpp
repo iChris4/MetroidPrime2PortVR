@@ -157,12 +157,20 @@ bool CBallCamera::CheckFailsafeToMorphBallState(CStateManager& mgr) {
 
 bool CBallCamera::TransitionToMorphBallState(CStateManager& mgr) {
   const CTransform4f playerXf = GetPlayer(mgr).GetTransform();
-  const CTransform4f firstPersonXf = GetCameraManager(mgr).FirstPersonCamera()->GetTransform();
+  CTransform4f firstPersonXf = GetCameraManager(mgr).FirstPersonCamera()->GetTransform();
+#ifdef TARGET_PC
+  if (GetControllerNumber() == 0) firstPersonXf = PortVr::VrBallCameraEntryTransform(firstPersonXf);
+#endif
   TeleportCamera(firstPersonXf, mgr);
   TeleportLookAtStuff(mgr);
 
-  const CVector3f lookPos =
+  CVector3f lookPos =
       GetCameraManager(mgr).FirstPersonCamera()->GetScanObjectIndicatorPosition(mgr);
+#ifdef TARGET_PC
+  if (GetControllerNumber() == 0 && PortVr::VrImmersive()) {
+    lookPos = firstPersonXf.GetTranslation() + 5.f * firstPersonXf.GetForward();
+  }
+#endif
   mToBallTransition->mLookPos = lookPos;
   mToBallTransition->mPlayerXf = playerXf;
   CVector3f eyePos = GetPlayer(mgr).GetEyePosition();

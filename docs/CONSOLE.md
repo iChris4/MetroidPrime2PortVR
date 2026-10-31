@@ -1,6 +1,7 @@
 # Debug console
 
-`MP2_CONSOLE=<port>` opens a TCP console on that port; `tools/drivers/console.py <port> <cmdfile>` drives
+`MP2_CONSOLE=<port>` opens a TCP console on that port (loopback only; `MP2_CONSOLE=1` takes the
+default 4780); `tools/drivers/console.py <port> <cmdfile>` drives
 it (see `docs/RUNNING.md`). Each line is one command, `a; b; c` runs several in one game tick, and
 every command answers `=> ok` or `=> err: <why>`. `help` prints the list below, taken from the
 dispatch table `kCommands` in `platform/port_console.cpp`; `tests/port_console_docs.py` (ctest
@@ -23,6 +24,7 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `refill [energy|ammo]` — energy to full / missiles, power bombs and beam ammo to capacity (custom actions' Refill presets)
 - `damage <id> <n> [kb] [w]` — hit an actor for n as a player shot (w = power, missile, cannonball, dark, light, annihilator, powerbomb, bomb, boostball, screwattack, darkburst, sunburst, sonicboom, supermissile; kb = knockback power)
 - `layer <n>` — activate a layer of the current area
+- `settled` — `busy 0|1` (a warp or layer request still being served), the free object ids and the update frame; `tools/statecheck.py` polls it after a `layer` instead of sleeping
 - `god <0|1>` — god mode (the F1 cheat)
 - `nodarkair <0|1>` — no Dark Aether air damage (the F1 cheat)
 - `combocost [0..30]`, `combomissiles [0..5]`, `beamammo [50..100]` — combo beam ammo cost, combo missile cost, Dark/Light ammo per capacity pickup (F1 Cheats, each with a Reset); no argument prints it
@@ -30,7 +32,8 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `mpforce <0|1>` — IsMultiplayer reports true (multiplayer-only arms)
 - `overlay <page>[/<sub>]|off` — open the F1 window on a page (name prefixes: `overlay video/qual`)
 - `gpuselftest` — run the GPU self-test next frame; PASS/FAIL lines go to the log
-- `state save|load <slot>` — the F5/F9 save states (load 0 = undo the last load)
+- `state save|load <slot> [hold]` — the F5/F9 save states (load 0 = undo the last load); `load ... hold` stops the simulation on the tick the room state is restored
+- `statedump <file>` — write every object (uid, class, hp, pos, AI state, room-script state) and the player as JSON lines; `tools/statecheck.py` compares dumps around a save/load round trip
 - `reloadmods` — read the mods folder again and rebuild the room (the F1 Mods page's Reload mods button)
 - `reloadroom` — rebuild the room from the disc, as leaving and coming back does, with Samus kept where she stands (the F1 Cheats page's Reload button)
 - `resume [status|save|load|clear]` — quick resume (savestates/resume.mp2ss): show, snapshot now, load, delete
@@ -73,7 +76,7 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `settings [<key> <value>|self-test]` — settings.cfg's entries; set one (and save), or check every key round-trips
 - `logfile <0|1>` — stdout and stderr also go to metroid_prime2_port.log (next launch)
 - `objs [filter]` — objects of the world: uid, editor id, class, area, position
-- `obj <id>` — one object (an id as `objs` prints it: u046e, or e<editor id>): health, fsm, messages
+- `obj <id>` — one object (an id as `objs` prints it: u046e, or e<editor id>): health, fsm, messages, door beams
 - `send <id> <msg> [from <id>] deliver a script message to an object (name or number), from a sender`
 - `covdump` — coverage build: write the gcov counters now (and zero them)
 - `hurt <id> <amount> [weapon] damage an object as a shot would (weapon 0 = power beam)`
@@ -87,8 +90,8 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `var <id> <name> [value]` — a module field a port registered (dghd.attack, dghd.flags, dghd.sweeptime); var player spawnmorph [n]
 - `scaninfo <id>` — the SCAN asset an actor's GetScannableObjectInfo answers
 - `orbit [id]` — lock-on state; with id: orbit position, ValidateOrbitTargetId
-- `hint <id> [type] [area n]` — an AI hint's type, area, active flag, radius; set type / area (coverage)
-- `place <id> <x y z>|player [d]` — move an actor to a point, or d (6) units in front of the player
+- `hint <id> [type] [area n] [radius <r>]` — an AI hint's type, area, active flag, radius; set type / area / radius (coverage)
+- `place <id> <x y z>|player [d] [yaw [pitch [roll]]]` — move an actor to a point, or d (6) units in front of the player; the x y z form also sets its rotation, yaw (then pitch, roll) in degrees
 - `finger down|move|up <id> <x> <y> | tap <x> <y> | drag <x0> <y0> <x1> <y1> [steps]` — push SDL touch events at window pixels, to test the touch overlay on a desktop build (MP1's `finger`)
 - `spawn <fourcc> [n] [d <dist>] [ancs <id>|u<id> [char [anim]]] [fsm <id>] [model <id>|u<id>] [inactive] [prop <pid> <v>]` — create script objects via their loader [rules <id>] knockback RULE (patterned default 393ca543; ffffffff = none) [conn <state> <msg> <id>] add a script connection (names as obj prints them) [wpsc <id>] projectile WPSC (CHOG's two; else prop ef485db9; CHOG default 681f3907)
 - `touch <mover id> <other id>` — call the mover's CollidedWith with the other actor's material list, the way the collision code does (no real collision needed)
@@ -102,6 +105,9 @@ hp, hp_max, visor, beam, freecam) for scripts.
   native Trilogy selector harness (opt-in). Normalized X right/Y up; release commits, cancel drops.
   `pad` simulates raw right-stick plus stick-click through custom menu bindings; `padrelease`
   retains the vector while releasing the click, `padoff` returns to neutral. See `docs/TRILOGY.md`.
+  `radial touch begin beam|visor <owner> | move|end <owner> <x> <y> | cancel <owner> | cancelall`
+  drives the selector's touch pointer for a menu owner, as a JNI touch does (touch coverage); a
+  start prints its token, and a move or end the session no longer owns is ignored.
 - `tp <x> <y> <z>` — teleport the player, keeping its facing
 - `ray <x> <y> <z> [len] [dx dy dz]` — static and render surfaces (beam stops/passes) and the world hit along the ray (default: down)
 - `face <yaw deg>` — turn the player where it stands (0 = +y, 90 = +x)

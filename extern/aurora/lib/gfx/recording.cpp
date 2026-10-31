@@ -969,7 +969,10 @@ void discard_dead_stores(RenderPass& pass, bool colorDead, bool depthDead) {
   auto& color = pass.colorAttachments[SceneColorAttachmentIndex];
   // Without a resolve target the attachment itself is what copies and presentation read.
   // Scan peeks read the original MSAA samples, not the averaged resolve target.
-  if (colorDead && pass.colorAttachmentCount > 0 && color.resolveView && !pass.scanPeek.has_value()) {
+  // Port: an index/mask copy (A8/R8/G8/B8) reads sample 0 of the original attachment too, where a
+  // multisampled pipeline exists (Core); a compat device reads the resolve, so the store stays dead.
+  const bool indexCopy = pass.resolveTarget && tex_copy_conv::index_copy_ms_supported(pass.resolveFormat);
+  if (colorDead && pass.colorAttachmentCount > 0 && color.resolveView && !pass.scanPeek.has_value() && !indexCopy) {
     color.storeOp = wgpu::StoreOp::Discard;
   }
   if (depthDead && pass.hasDepth && !pass_copies_depth(pass)) {
@@ -1731,6 +1734,32 @@ PipelineRef clear_multiview_pipeline_ref(const clear::PipelineConfig& config) no
   return pipeline_ref(multiviewConfig);
 }
 
+// Port: whether every draw of the pass is scissored inside the rect (a CustomDraw, or a draw before
+// the pass sets its scissor, is not known to be). The rest of the target still holds the pass's own clear.
+bool pass_draws_inside(const RenderPass& pass, int32_t left, int32_t top, int32_t right, int32_t bottom) {
+  bool hasScissor = false;
+  ClipRect scissor{};
+  for (const auto& cmd : pass.commands) {
+    switch (cmd.type) {
+    case CommandType::SetScissor:
+      scissor = cmd.data.setScissor;
+      hasScissor = true;
+      break;
+    case CommandType::Draw:
+      if (!hasScissor || scissor.x < left || scissor.y < top || scissor.x + scissor.width > right ||
+          scissor.y + scissor.height > bottom) {
+        return false;
+      }
+      break;
+    case CommandType::CustomDraw:
+      return false;
+    default:
+      break;
+    }
+  }
+  return true;
+}
+
 void resolve_pass_into(TextureHandle texture, ClipRect rect, bool clearColor, bool clearAlpha, bool clearDepth,
                        Vec4<float> clearColorValue, float clearDepthValue, GXTexFmt resolveFormat,
                        int probeFace, bool resolveMips, const ResolveHdr* hdr, bool opaqueAlpha) {
@@ -1780,7 +1809,7 @@ void resolve_pass_into(TextureHandle texture, ClipRect rect, bool clearColor, bo
   const auto right = std::clamp<int32_t>(rect.x + rect.width, left, targetWidth);
   const auto bottom = std::clamp<int32_t>(rect.y + rect.height, top, targetHeight);
   const ClipRect clearRect{.x = left, .y = top, .width = right - left, .height = bottom - top};
-  const bool fullTarget = left == 0 && top == 0 && right == targetWidth && bottom == targetHeight;
+  bool fullTarget = left == 0 && top == 0 && right == targetWidth && bottom == targetHeight;
   // Stereo replay: a copy from an EFB pass that replays per eye is also taken
   // from each eye, into the copy's stand-ins (stereo_shadow.hpp), so effects
   // that sample it (the thermal and X-ray visors) see each eye's own view. Set
@@ -1831,6 +1860,22 @@ void resolve_pass_into(TextureHandle texture, ClipRect rect, bool clearColor, bo
       }
     } else {
       stereo_shadow::invalidate(prevPass.resolveTarget.get());
+    }
+  }
+  // Port: a pass that only drew inside the copied rect, on a target it had cleared to the very values
+  // this copy clears, leaves the whole target uniformly cleared once the rect clears. The continuation
+  // then clears it with its load ops, instead of loading what the pass stored (a tiler's full-target
+  // store, load and depth store; the shadow copy of every combat-visor frame, issue #33).
+  if (!prevPass.stereo.enabled && !fullTarget && clearColor && (clearAlpha || !gx::efb_has_alpha(gx::g_gxState.pixelFmt)) && clearDepth && !scene_hdr_pass_active() &&
+      prevPass.colorAttachmentCount == 1 && !prevPass.hasStencil && prevPass.hasDepth &&
+      !prevPass.paletteConvs.size() && prevPass.depthLoadOp == wgpu::LoadOp::Undefined && prevPass.clearDepth &&
+      prevPass.clearDepthValue == clearDepthValue) {
+    const auto& prevColor = prevPass.colorAttachments[SceneColorAttachmentIndex];
+    if (prevColor.clear && prevColor.loadOp == wgpu::LoadOp::Undefined &&
+        prevColor.clearValue.x() == clearColorValue.x() && prevColor.clearValue.y() == clearColorValue.y() &&
+        prevColor.clearValue.z() == clearColorValue.z() && prevColor.clearValue.w() == clearColorValue.w() &&
+        pass_draws_inside(prevPass, left, top, right, bottom)) {
+      fullTarget = true;
     }
   }
   // The continuation's load op clears whatever the copy clears.
@@ -2259,9 +2304,6 @@ void split_pass_for_depth_snapshot() {
     return;
   }
   auto& prevPass = current_render_passes()[g_recorder.currentRenderPass];
-  if (prevPass.msaaSamples > 1) {
-    return; // depth_peek reads single-sampled depth only
-  }
   aurora::perf::pass_break(AURORA_PERF_BREAK_DEPTH_SNAPSHOT);
   prevPass.forceDepthSnapshot = true;
   prevPass.discardable = !prevPass.has_consumer() && !prevPass.has_content();

@@ -105,7 +105,9 @@ constexpr PromptAsset kAssets[] = {
     {0x6D482337, PAD_BUTTON_A},
     {0x71AA55E3, PAD_BUTTON_B}, // Trilogy only: Wii B, jump / Space Jump / Screw Attack
     {0x72A83A41, PROMPT_STICK},
-    {0x738A4798, PROMPT_CSTICK_UP}, {0x73E9B3B2, PROMPT_CSTICK_LEFT}, {0x83A73184, PAD_BUTTON_START},
+    {0x738A4798, PROMPT_CSTICK_UP}, {0x73E9B3B2, PROMPT_CSTICK_LEFT},
+    {0x7F409C85, PAD_BUTTON_A}, // the logbook's "A to scroll the text" prompt (#34)
+    {0x83A73184, PAD_BUTTON_START},
     {0x8D13D507, PROMPT_CSTICK_UP}, {0x8E28D58C, PROMPT_STICK}, {0x9016E5BF, PROMPT_CSTICK_RIGHT},
     {0x944EBD78, PROMPT_STICK}, {0x967A3516, PAD_TRIGGER_L},
     {0x9FFB4F4D, PROMPT_STICK}, // Trilogy only: Nunchuk stick frame (Dash)
@@ -123,10 +125,6 @@ constexpr PromptAsset kAssets[] = {
     {0xF6E8276F, PAD_TRIGGER_R}, {0xF7D62F50, PAD_BUTTON_UP}, {0xFF73F326, PROMPT_STICK},
     {0xFFFED384, PAD_BUTTON_LEFT},
 };
-
-// Echoes' "1" hint ring shares an id with the GameCube disc's Y art on Trilogy,
-// where it is the Z prompt.
-constexpr uint32_t kTrilogyZAsset = 0x3AA65ECD;
 
 const PromptAsset* FindAsset(uint32_t id) {
   const auto it = std::lower_bound(std::begin(kAssets), std::end(kAssets), id,
@@ -1071,10 +1069,7 @@ bool BindTexture(const void* owner, uint32_t id, uint32_t width, uint32_t height
   if (asset == nullptr) {
     return false;
   }
-  uint32_t prompt = asset->prompt;
-  if (id == kTrilogyZAsset && port::entry::IsTrilogy(port::entry::CurrentDiscVersion())) {
-    prompt = PAD_TRIGGER_Z;
-  }
+  const uint32_t prompt = asset->prompt;
   BoundPrompt& bound = sBound[owner];
   if (bound.registered) {
     aurora::texture::unregister_replacement(bound.handle);

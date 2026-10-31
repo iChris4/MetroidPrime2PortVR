@@ -108,7 +108,7 @@ endif()
 option(MP_ENABLE_OPENXR "Build OpenXR VR support (PrimedGun Echoes)" ${MP_ENABLE_OPENXR_DEFAULT})
 unset(MP_ENABLE_OPENXR_DEFAULT)
 # PrimedGun Echoes' release version: the launcher's title and About tab, and the game's --version.
-set(MP_PRIMEDGUN_VERSION "1.0.0-alpha.2")
+set(MP_PRIMEDGUN_VERSION "1.0.0-alpha.3")
 # PrimedGun Echoes' launcher (launcher/): a Qt 6 window beside the game. Needs Qt on
 # CMAKE_PREFIX_PATH (docs/PRIMEDGUN.md, "Launcher").
 option(MP_BUILD_LAUNCHER "Build the PrimedGun Echoes Qt launcher (PrimedGunEchoes.exe)" OFF)
@@ -291,19 +291,16 @@ mp_signed_char(mp_game)
 # Include order is deliberate: `include/` (the decompilation's own headers) is
 # searched *after* Aurora, because Echoes' `include/dolphin/` tree is the partial
 # SDK decompilation and must not shadow Aurora's complete, PC-aware SDK view.
-# `platform/include/dolphin` fills the SDK headers Aurora omits. `include/LZO`
-# is on the path project-wide because the bundled codec is included both as
-# `<lzo1x.h>` (upstream's own build does the same).
+# `platform/include/dolphin` fills the SDK headers Aurora omits.
 target_include_directories(mp_game PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/platform/include
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/aurora/include
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/musyx-port/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/LZO)
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # compat.h restores the SDK macros Aurora omits; it is force-included ahead of
 # every C++ game translation unit. It is C++-only (it pulls in the game's
 # CMemory/IAllocator headers), so it must not reach the few C translation units
-# in the list - the bundled LZO codec - which are compiled as C, exactly as the
+# in the list, which are compiled as C, exactly as the
 # matching build does.
 # clang-cl takes the GNU-style warning flags too; MWCC accepted the narrowing initializers.
 set(MP_MSVC_GAME_OPTIONS /W3
@@ -718,7 +715,7 @@ endif()
 
 if(AURORA_SDL3_TARGET)
     add_library(mp_port_audio OBJECT platform/ai_dma.cpp platform/port_controls.cpp
-        platform/port_save.cpp platform/port_save_convert.cpp platform/port_save_trilogy.cpp platform/port_save_trilogy_payload.cpp platform/port_savestate.cpp platform/port_beam_ammo.cpp platform/port_savestate_room.cpp platform/port_savestate_format.cpp platform/port_randomizer.cpp platform/port_rando_gen.cpp platform/port_rando_models.cpp platform/port_rando_world.cpp platform/port_rando_logic.cpp platform/port_logfile.cpp platform/port_breadcrumb.cpp
+        platform/port_save.cpp platform/port_save_convert.cpp platform/port_save_trilogy.cpp platform/port_save_trilogy_payload.cpp platform/port_savestate.cpp platform/port_beam_ammo.cpp platform/port_savestate_room.cpp platform/port_savestate_fields.cpp platform/port_entity_schema.cpp platform/port_statedump.cpp platform/port_savestate_format.cpp platform/port_randomizer.cpp platform/port_rando_gen.cpp platform/port_rando_models.cpp platform/port_rando_world.cpp platform/port_rando_logic.cpp platform/port_logfile.cpp platform/port_breadcrumb.cpp
         platform/port_crash.cpp platform/port_watchdog.cpp platform/port_memory_log.cpp platform/port_storage_report.cpp
         platform/port_pointer.cpp platform/port_pointer_menu.cpp
         platform/port_events.cpp platform/port_livesplit.cpp platform/port_harness.cpp platform/port_mouse.cpp
@@ -729,6 +726,7 @@ if(AURORA_SDL3_TARGET)
         platform/port_data_folder.cpp
         platform/port_json.cpp platform/port_ws.cpp platform/port_update_check.cpp
         platform/debug_ui/audio.cpp platform/debug_ui/card_data.cpp platform/debug_ui/cheats.cpp platform/debug_ui/controls.cpp platform/debug_ui/debug.cpp
+        platform/debug_ui/enhancements.cpp
         platform/debug_ui/game_sections.cpp platform/debug_ui/mods.cpp platform/debug_ui/performance.cpp platform/debug_ui/randomizer.cpp
         platform/debug_ui/savestates.cpp platform/debug_ui/search.cpp platform/debug_ui/settings.cpp
         platform/debug_ui/photo.cpp platform/debug_ui/tabs.cpp platform/debug_ui/ui_common.cpp platform/debug_ui/video.cpp
@@ -762,6 +760,11 @@ if(AURORA_SDL3_TARGET)
     endif()
     if(IOS OR (MP_TOUCH_OVERLAY_DESKTOP AND NOT ANDROID))
         target_compile_definitions(mp_port_audio PRIVATE PORT_TOUCH_OVERLAY)
+    endif()
+    # The entity schema table holds thousands of accessor lambdas, each its own COMDAT
+    # section on COFF: past the 65k sections an object holds without /bigobj.
+    if(MSVC)
+        set_source_files_properties(platform/port_entity_schema.cpp PROPERTIES COMPILE_OPTIONS /bigobj)
     endif()
     mp_signed_char(mp_port_audio)
     mp_websocket_tls(mp_port_audio)
@@ -895,6 +898,23 @@ if(AURORA_SDL3_TARGET)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/port_console_docs.py
                 ${CMAKE_CURRENT_SOURCE_DIR})
     set_tests_properties(port_console_docs PROPERTIES TIMEOUT 15 LABELS port)
+    # The generated entity field schema (tools/gen_entity_schema.py): it compiles the
+    # accessors against every entity header, as mp_port_audio does.
+    add_executable(port_entity_schema_tests tests/port_entity_schema.cpp platform/port_entity_schema.cpp)
+    target_include_directories(port_entity_schema_tests PRIVATE platform/include include
+        extern/aurora/include extern/musyx-port/include)
+    target_compile_definitions(port_entity_schema_tests PRIVATE TARGET_PC AURORA MUSY_TARGET=MUSY_TARGET_PC)
+    mp_signed_char(port_entity_schema_tests)
+    if(MSVC)
+        target_compile_options(port_entity_schema_tests PRIVATE /bigobj)
+    endif()
+    add_test(NAME port_entity_schema_tests COMMAND port_entity_schema_tests)
+    set_tests_properties(port_entity_schema_tests PROPERTIES TIMEOUT 30 LABELS port)
+    # The committed entity schema against the headers; skips (77) without clang-19.
+    add_test(NAME port_entity_schema_current
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_entity_schema.py --check)
+    set_tests_properties(port_entity_schema_current PROPERTIES TIMEOUT 300 LABELS port
+        SKIP_RETURN_CODE 77)
     # Every settings.cfg key reads back as written (platform/debug_ui/settings.cpp, kSettingKeys); the game
     # binary checks itself and exits before starting.
     add_test(NAME port_settings_roundtrip COMMAND metroid_prime2_port --settings-selftest)

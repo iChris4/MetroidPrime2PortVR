@@ -46,6 +46,7 @@
 #include <dolphin/vi.h>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <musyx/port_voices.h>
 
 #include <algorithm>
 #include <atomic>
@@ -60,11 +61,12 @@
 #include <vector>
 
 
+// platform/ai_dma.cpp: the streamed-audio (music, movie) stream's own gain.
+extern "C" void AIPortSetOutputGain(float gain);
+
 namespace PortOverlayState {
 
 bool sSkipCinematics = false;
-int sBootLogos = PortOverlay::kScreen_Skippable;
-int sWorldNameCard = PortOverlay::kScreen_Skippable;
 // `MP2_LOG_FILE`: whether stdout and stderr also go to a file (F1 > Testing, console `logfile`).
 // PortLogFile::Start reads it before Aurora comes up, so the row only reports the state the next
 // launch will take.
@@ -79,6 +81,8 @@ bool sMapInvertX = false;
 bool sMapInvertY = false;
 int sWalkSpeed = PortOverlay::kWalkSpeedDefault;
 int sScanSpeed = PortOverlay::kScanSpeedDefault;
+int sMusicBoost = PortOverlay::kVolumeBoostDefault;
+int sSfxBoost = PortOverlay::kVolumeBoostDefault;
 int sLanguage = 0;
 int sElevatorRide = PortOverlay::kElevatorRide_Original;
 int sPortalTransition = PortOverlay::kPortalTransition_Original;
@@ -100,8 +104,6 @@ bool sSpringBall = false;
 bool sSpringFlick = false;
 float sSpringFlickRate = PortOverlay::kSpringFlickRateDefault;
 bool sQuickResume = true;
-bool sSaveStateHotkeys = true;
-bool sSaveStateRoomState = true;
 bool sLockOnToggle = false;
 bool sStickyCharge = false;
 bool sAutoAim = true;
@@ -137,6 +139,9 @@ bool sHideVisorEffects = false;
 // `cinema_bars`, `secondary_crosshairs`: the game's own on both. `hud_opacity_*`: -1 follows Visor Opacity.
 bool sCinemaBars = true;
 bool sSecondaryCrosshairs = true;
+bool sDarkVisorFull = false;
+int sDarkVisorStatic = PortOverlay::kDarkVisorStaticMax;
+bool sInfiniteBeamAmmo = false; // Enhancements; saved, unlike the sInfiniteAmmo cheat
 int sHudOpacityEcho = PortOverlay::kHudOpacityVisor;
 int sHudOpacityDark = PortOverlay::kHudOpacityVisor;
 int sHudOpacityScan = PortOverlay::kHudOpacityVisor;
@@ -323,6 +328,8 @@ void ReadEnv() {
   sInfiniteAmmo = port::EnvFlag("MP2_INFINITE_AMMO") ? PortOverlay::kInfAmmoAll : 0;
   sNoDarkAetherDamage = port::EnvFlag("MP2_NO_DARK_AETHER_DAMAGE");
   PortOverlaySettings::LoadSettings();
+  // The volume boosts too: MP2_MUSIC_BOOST and MP2_SFX_BOOST are read only here.
+  ApplyVolumeBoosts();
 }
 
 // A setter's change is saved at once (a no-op when nothing differs from the file).
@@ -737,29 +744,16 @@ static int EnvScreenMode(const char* name, int value) {
   return EnvIntIn(name, value, kScreen_Show, kScreen_Off);
 }
 
+// The boot logos and the world name card end on A or Start; Original experience shows them as
+// retail. No setting: only the env overrides (the harness) pick another mode.
 int BootLogos() {
   ReadEnv();
-  return EnvScreenMode("MP2_BOOT_LOGOS", sBootLogos);
-}
-
-void SetBootLogos(int mode) {
-  ReadEnv();
-  sBootLogos = std::clamp(mode, kScreen_Show, kScreen_Off);
-  Persist();
+  return EnvScreenMode("MP2_BOOT_LOGOS", OriginalExperience() ? kScreen_Show : kScreen_Skippable);
 }
 
 int WorldNameCard() {
   ReadEnv();
-  if (OriginalExperience()) {
-    return kScreen_Show;
-  }
-  return EnvScreenMode("MP2_WORLD_NAME", sWorldNameCard);
-}
-
-void SetWorldNameCard(int mode) {
-  ReadEnv();
-  sWorldNameCard = std::clamp(mode, kScreen_Show, kScreen_Off);
-  Persist();
+  return EnvScreenMode("MP2_WORLD_NAME", OriginalExperience() ? kScreen_Show : kScreen_Skippable);
 }
 
 bool HideHelmet() {
@@ -786,6 +780,22 @@ bool SecondaryCrosshairs() {
     return true;
   }
   return EnvBool("MP2_SECONDARY_CROSSHAIRS", sSecondaryCrosshairs);
+}
+
+bool DarkVisorFullScreen() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return false;
+  }
+  return EnvBool("MP2_DARK_VISOR_FULL", sDarkVisorFull);
+}
+
+int DarkVisorStatic() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return kDarkVisorStaticMax;
+  }
+  return std::clamp(port::EnvInt("MP2_DARK_VISOR_STATIC", sDarkVisorStatic), 0, kDarkVisorStaticMax);
 }
 
 int HudOpacity(HudOpacityPart part) {
@@ -985,9 +995,18 @@ unsigned InfiniteAmmoKind(int itemType) {
   }
 }
 
+bool InfiniteBeamAmmo() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return false;
+  }
+  return EnvBool("MP2_INFINITE_BEAM_AMMO", sInfiniteBeamAmmo);
+}
+
 bool InfiniteAmmo(unsigned kinds) {
   ReadEnv();
-  return kinds != 0 && (sInfiniteAmmo & kinds) == kinds;
+  const unsigned on = sInfiniteAmmo | (InfiniteBeamAmmo() ? kInfAmmoDark | kInfAmmoLight : 0u);
+  return kinds != 0 && (on & kinds) == kinds;
 }
 
 void SetInfiniteAmmo(unsigned kinds, bool enabled) {
@@ -1112,14 +1131,16 @@ bool QuickResume() {
   return EnvBool("MP2_QUICK_RESUME", sQuickResume);
 }
 
+// No settings: the bindings always work (unbind them in Controls > Remap) and states keep the
+// room; the env overrides stay for the harness.
 bool SaveStateHotkeys() {
   ReadEnv();
-  return EnvBool("MP2_SAVESTATE_HOTKEYS", sSaveStateHotkeys);
+  return EnvBool("MP2_SAVESTATE_HOTKEYS", true);
 }
 
 bool SaveStateRoomState() {
   ReadEnv();
-  return EnvBool("MP2_SAVESTATE_ROOM_STATE", sSaveStateRoomState);
+  return EnvBool("MP2_SAVESTATE_ROOM_STATE", true);
 }
 
 void SetQuickResume(bool enabled) {
@@ -1844,6 +1865,25 @@ bool sLowPowerGpu = false;
 bool sLowPowerGpuAtStart = false;
 } // namespace PortOverlayState
 
+namespace PortOverlayState {
+
+void ApplyVolumeBoosts() {
+  const float music = static_cast< float >(EnvIntIn("MP2_MUSIC_BOOST", sMusicBoost,
+                                                   PortOverlay::kVolumeBoostMin,
+                                                   PortOverlay::kVolumeBoostMax)) /
+                      100.f;
+  const float sfx = static_cast< float >(EnvIntIn("MP2_SFX_BOOST", sSfxBoost,
+                                                 PortOverlay::kVolumeBoostMin,
+                                                 PortOverlay::kVolumeBoostMax)) /
+                    100.f;
+  // The MusyX voices scale one by one in the mix; the AI DMA stream (front-end music, movie audio)
+  // takes the sound effects boost as its stream's gain.
+  MusyxPortSetVolumeBoost(music, sfx);
+  AIPortSetOutputGain(sfx);
+}
+
+} // namespace PortOverlayState
+
 namespace PortOverlay {
 
 bool DynamicRes() {
@@ -1933,6 +1973,30 @@ int ScanSpeed() {
 void SetScanSpeed(int percent) {
   ReadEnv();
   sScanSpeed = std::clamp(percent, kScanSpeedMin, kScanSpeedMax);
+  Persist();
+}
+
+int MusicBoost() {
+  ReadEnv();
+  return EnvIntIn("MP2_MUSIC_BOOST", sMusicBoost, kVolumeBoostMin, kVolumeBoostMax);
+}
+
+void SetMusicBoost(int percent) {
+  ReadEnv();
+  sMusicBoost = std::clamp(percent, kVolumeBoostMin, kVolumeBoostMax);
+  ApplyVolumeBoosts();
+  Persist();
+}
+
+int SfxBoost() {
+  ReadEnv();
+  return EnvIntIn("MP2_SFX_BOOST", sSfxBoost, kVolumeBoostMin, kVolumeBoostMax);
+}
+
+void SetSfxBoost(int percent) {
+  ReadEnv();
+  sSfxBoost = std::clamp(percent, kVolumeBoostMin, kVolumeBoostMax);
+  ApplyVolumeBoosts();
   Persist();
 }
 

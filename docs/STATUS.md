@@ -3,6 +3,64 @@
 The Status section of AGENTS.md links here: this is the per-session detail, rewritten rather than
 appended, dated as in the heading there.
 
+## 2026-10-31: broad save-state sweep (every area)
+
+statecheck round trip in every slot of Temple Grounds (0-52), Great Temple, Agon, Torvus and Sanctuary:
+274 areas, one run each (`--world <id> --area <mrea> --headless --post-wait 30`, new-game card, direct
+boot, at d3dbe57b5). 266 pass with 0 strict diffs. Table and repro: `/tmp/opencode/reports/sweep-all.md`.
+
+- Load never restores the room (reproduced with one run alone): TG 62b0d67d (Landing Site), TG 9fb7503c
+  (0q_temple_hall), Agon 50017152 (0f_sand_hall). Fixed by sc/load-timeout (merged f556fa724): a load skips the opening cinematic the rebuilt
+  world replays, and a layer entry that streams nothing no longer waits for 256 free ids (Agon has 223).
+- `door_open 1 -> 0`: TG fb843824 (01_temple_hive_04), Agon 845c85a7 (00_mapstation_sand). Fixed by sc/door-open (merged 7d3475de5): the
+  restore keeps ticking (at most 120) while a door the save had open is still WaitingForArea, so the retail
+  path opens it and streams the area behind it; walking through 000B0022 after a load reaches the next room.
+- CScriptTriggerOrientated `active 0 -> 1`: Sanctuary df073157 (0j_cliff_hall_loop). Fixed by sc/trigger-active (merged): CScriptSwitch
+  `opened` is saved (kTagSwitch), so a SetToZero after the load no longer re-fires Open.
+- Rerun on 7d3475de5: all 6 formerly strict areas and 2 controls 0 strict. The sweep is clean apart from
+  the 2 ending areas.
+- TG game_end_part1/2 never reach gameplay with a direct boot (the ending script). Not a save-state result.
+
+The area list comes from `tools/world_areas.py`, not the `modules.tsv` spawns column (that one is cut short at `(+N more)`).
+
+## 2026-10-31: save-state sweep, sessions 2-3
+
+Merged into port (pushed at 1e14b5f63):
+- sc/restorehold: `src/MetroidPrime/main.cpp` fixed-tick loop counts ticks actually run and stops on
+  `PortOverlay::TickHold()` (Rezbit timer / ai_time drift after a restore).
+- kbres: knockback resistance saved after hp (optional trailing field; Dark Trooper).
+- ds2doors: an hp <= 0 restore marks actors/platforms dead (`PortRoomState::MarkDead`).
+- sc/quadraxis: FSM2 machines saved with sub-machine path + leaf node index; Quadraxis 3/3, 0 strict.
+- sc/dg-collider: `tools/statecheck.py` `step_ticks()` (console `step N` only queues; polls `frame`),
+  used by A1, C (`--post-wait`) and `--wait`. Quadraxis x10CC_ `cls:X -> none` in B is a lazy rebuild
+  in `x61DC_` on the first Think: harmless; use `--post-wait ~30`.
+- Ending slots 53→56, dg.kneecol/killknee route, `docs/SAVESTATE_SCHEMA.md` "what a save keeps",
+  RUNNING.md names `MP_SAVESTATE_FIELDS=0`.
+- Docs audits: GOTCHAS, TRILOGY, DECOMP_README, LANE_BRIEF, DECOMP_WORKFLOW, MODULES, SETTINGS,
+  env claims (settings.cpp header, QOL idle cursor, console `(env X set; wins if the key reads it)`),
+  CONSOLE.md + console help strings (state hold, crosshair gamecube, hint radius, place angles), MODS.md.
+
+Session 3 lanes merged: sc/ing3stage1 (reset a live FSM whose saved machine never started),
+sc/statecheck-setup (`--setup` chains with `;`), docs/mods-followup, sc/dg-pickups (not reproduced
+in 8 runs; debris drops documented in SAVESTATE_SCHEMA.md). GPL LZO replaced by an MIT decoder.
+
+sc/debris-pickup merged (a0fc2d185): a debris' dropped pickup is saved on the debris (`kTagDrop`);
+the restored debris drops again and that pickup takes the saved fields (or is removed). killknee
+route 3/3, 0 strict, pickups 3=3. Not saved: a drop kept by `mKeepGeneratedObject` after its debris
+is gone.
+
+Open: retail Puffer has no engaged state. `platform/debug_ui.cpp:296` has the old env claim but is unbuilt. Statecheck runs:
+copy the userdir, own --port/--display, `--build <tree>/build-port-link`.
+
+## 2026-10-31: behaviour audit 2 (A8) complete
+
+- Ledger `docs/AUDIT.md` A8-1..A8-28 all closed. Fixes merged: A8-17 morph-ball Render PC arm
+  (fix/a8-ballrender, reviewed vs asm 800C4404-800C4F40, review rework d00eab8b5), A8-24 snow forces,
+  A8-25 rain splash generator, docs RUNNING/GOTCHAS staleness.
+- User decisions: A8-16 keep the #30 multiplayer gate; A8-22 keep the once-per-system screen copy
+  (perf); A8-26 keep the confirming START press; A8-28 keep Remastered crosshair default.
+- Not seen on screen: morph-ball rain splash and spider glass (no raining area / magnet track reached).
+
 ## 2026-10-29: 0.6.3 released
 
 - Bumped `versionCode` 9 / `versionName` "0.6.3", metainfo 0.6.3 entry, notes

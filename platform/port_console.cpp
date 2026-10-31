@@ -24,6 +24,7 @@
 #include "port_pointer.h"
 #include "port_save.h"
 #include "port_savestate.h"
+#include "port_statedump.h"
 #include "port_env.h"
 #include "port_overlay_internal.h"
 #include "port_video.h"
@@ -904,6 +905,16 @@ void CmdLayer(CStateManager&, const Args& args, std::string&) {
   PortWarp::Layer(ArgToInt(args[1], 0));
 }
 
+// settled: whether a warp or layer request is still being served, and how many object ids are
+// taken. tools/statecheck.py polls it after a `layer` setup command instead of sleeping.
+void CmdSettled(CStateManager& mgr, const Args&, std::string& out) {
+  const bool busy = PortWarp::Pending() || mgr.PortLayerRequestPending();
+  char line[96];
+  std::snprintf(line, sizeof line, "busy %d free_ids %d frame %u\n", busy ? 1 : 0,
+                mgr.PortFreeObjectIds(), static_cast< unsigned >(mgr.GetUpdateFrameIdx()));
+  out += line;
+}
+
 // world <world> [area]: the MP1 console's `warp <world>`, under its own verb because this tree's
 // `warp` is the area warp the sweeps and the docs use. Both texts are a name or a hex asset id and
 // are resolved where the resource names live (PortWarpToWorld), so nothing here needs a table.
@@ -1182,6 +1193,13 @@ void CmdSfx(CStateManager&, const Args&, std::string& out) {
          std::to_string(live[1]) + "," + std::to_string(live[2]) + "," + std::to_string(live[3]) +
          "] poolFree=" + std::to_string(poolFree[0]) + "/" + std::to_string(poolFree[1]) +
          " musyxVoices=" + std::to_string(voiceCount) + "\n";
+  for (int i = 0; i < voiceCount; ++i) {
+    const PortMusyxVoice& v = voices[i];
+    out += "  voice smp=" + std::to_string(v.smpId) + " looped=" + std::to_string(v.looped) +
+           " len=" + std::to_string(v.length) + " loopLen=" + std::to_string(v.loopLength) +
+           " pos=" + std::to_string(v.srcPos) + " rms=" + std::to_string(v.rms) +
+           " vol=" + std::to_string(v.volL) + "/" + std::to_string(v.volR) + "\n";
+  }
 }
 
 // credits [1|2]: end the game into the credits (CGMSinglePlayer::EndGame's kRM_Credits1/2 route).
@@ -1207,6 +1225,8 @@ void CmdHintShow(CStateManager&, const Args&, std::string& out) {
 }
 
 // memo <0|1> <text...>: a HUD memo; 1 makes it a hint memo (the framed box with the button ring).
+// `{` and `}` in the text stand for `&` and `;`, so a tag (`{image=SI,1,1,F1FA8D68}`) gets past the
+// `;` that splits console commands.
 // memo pause <strg>: the boxed memo a paused HUDMemo opens (CMessageScreen), as for "Map data acquired".
 void CmdMemo(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() == 3 && args[1] == "pause") {
@@ -1241,6 +1261,9 @@ void CmdMemo(CStateManager& mgr, const Args& args, std::string& out) {
       wide += L' ';
     }
     wide.append(args[i].begin(), args[i].end());
+  }
+  for (wchar_t& c : wide) {
+    c = c == L'{' ? L'&' : (c == L'}' ? L';' : c);
   }
   CSamusHud::DisplayHudMemo(rstl::wstring(wide.c_str()),
                             CHUDMemoParms(hint ? 0.f : 5.f, true, false, hint, 1, true));
@@ -1656,14 +1679,17 @@ void CmdMapTap(CStateManager&, const Args&, std::string& out) {
 }
 
 // pointeraim [on|off|<x> <y>]: MP1's console command. on/off is the F1 Controls row
-// (`MP2_POINTER_AIM`); x, y place the pointer (-1..1 of the half view, x right, y down), which
-// holds only while pointer aim is free. Every form prints the state it ends in.
+// (`MP2_POINTER_AIM`); x, y place the pointer (-1..1 of the half view, x right, y down) and hold
+// it there, without turning the view, until `pointeraim 0 0` (free aim needs pointer aim on and
+// `MP2_MOUSE_AIM=1`). Every form prints the state it ends in.
 void CmdPointerAim(CStateManager&, const Args& args, std::string& out) {
   if (args.size() == 2 && (args[1] == "on" || args[1] == "off")) {
     PortOverlay::SetPointerAim(args[1] == "on");
   } else if (args.size() == 3) {
-    PortMouse::SetPointerAimPosition(static_cast< float >(std::atof(std::string(args[1]).c_str())),
-                                     static_cast< float >(std::atof(std::string(args[2]).c_str())));
+    const float px = static_cast< float >(std::atof(std::string(args[1]).c_str()));
+    const float py = static_cast< float >(std::atof(std::string(args[2]).c_str()));
+    PortMouse::SetPointerAimPosition(px, py);
+    PortMouse::SetPointerAimHold(px != 0.f || py != 0.f);
   } else if (args.size() != 1) {
     Fail("pointeraim [on|off|<x> <y>]   x, y in -1..1 of the half view");
     return;
@@ -1693,7 +1719,7 @@ void CmdCardBackup(CStateManager&, const Args& args, std::string& out) {
                  : "card backup before writes: off (MP2_CARD_BACKUP)\n";
 }
 
-// livesplit <0|1> | addr <host:port> | send <command> | status: the F1 Game > Speedrun rows
+// livesplit <0|1> | addr <host:port> | send <command> | status: the LiveSplit settings (no F1 rows)
 // (`MP2_LIVESPLIT`, `MP2_LIVESPLIT_ADDR`) - the LiveSplit Server client.
 void CmdLiveSplit(CStateManager&, const Args& args, std::string& out) {
   const std::string action = args.size() > 1 ? std::string(args[1]) : "status";
@@ -1798,7 +1824,7 @@ void CmdSettings(CStateManager&, const Args& args, std::string& out) {
       out += key + "=" + value;
       const std::string env = PortOverlaySettings::EnvName(key);
       if (const char* set = port::EnvString(env.c_str())) {
-        out += "  (env " + env + "=" + set + " wins)";
+        out += "  (env " + env + "=" + set + " set; wins if the key reads it)";
       }
       out += "\n";
     }
@@ -1984,7 +2010,7 @@ void CmdCrosshair(CStateManager&, const Args& args, std::string& out) {
     } else {
       const int percent = ArgToInt(args[1], -1);
       if (percent < PortOverlay::kCrosshairSizeMin || percent > PortOverlay::kCrosshairSizeMax) {
-        Fail("usage: crosshair [<25..100> | style classic|remastered | opacity <0..100> | color "
+        Fail("usage: crosshair [<25..100> | style classic|remastered|gamecube | opacity <0..100> | color "
              "<r> <g> <b> | color clear | aim <0|1>]");
         return;
       }
@@ -4743,23 +4769,42 @@ void CmdOverlay(CStateManager&, const Args& args, std::string& out) {
   out += args[1] == "off" ? std::string("overlay closed\n") : "overlay open on " + std::string(args[1]) + "\n";
 }
 
-// state save|load <slot>: the F5/F9 save states (slot 0 is the undo slot, load only).
+// state save|load <slot> [hold]: the F5/F9 save states (slot 0 is the undo slot, load only). `hold`
+// stops the simulation on the tick the load's room state is restored.
 void CmdState(CStateManager&, const Args& args, std::string& out) {
   const int slot = args.size() < 3 ? -1 : ArgToInt(args[2], -1);
   const bool save = args.size() >= 2 && args[1] == "save";
   const bool load = args.size() >= 2 && args[1] == "load";
   if ((!save && !load) || slot < (save ? 1 : PortSaveState::kUndoSlot) ||
       slot > PortSaveState::kSlotCount) {
-    Fail("usage: state save <1..8> | state load <0..8>");
+    Fail("usage: state save <1..8> | state load <0..8> [hold]");
     return;
   }
   if (save) {
     PortSaveState::RequestSave(slot);
   } else {
+    if (args.size() > 3 && args[3] == "hold") {
+      PortSaveState::HoldAfterLoad();
+    }
     PortSaveState::RequestLoad(slot);
   }
   out += std::string(save ? "save" : "load") + " of slot " + std::to_string(slot) +
          " requested (the log's [savestate] lines say how it went)\n";
+}
+
+// statedump <file>: every live object's state as JSON lines (tools/statecheck.py).
+void CmdStateDump(CStateManager& mgr, const Args& args, std::string& out) {
+  if (args.size() < 2) {
+    Fail("usage: statedump <file>");
+    return;
+  }
+  std::string error;
+  const int count = PortStateDump::Write(mgr, std::string(args[1]), error);
+  if (count < 0) {
+    Fail(error);
+    return;
+  }
+  out += std::to_string(count) + " objects written to " + std::string(args[1]) + "\n";
 }
 
 // reloadmods: read the mods folder again and rebuild the room (the F1 Mods page's button).
@@ -4905,6 +4950,8 @@ const CommandSpec kCommands[] = {
       "                            sunburst, sonicboom, supermissile; kb = knockback power)\n"},
     {"layer", CmdLayer,
       "layer <n>                   activate a layer of the current area\n"},
+    {"settled", CmdSettled,
+      "settled                     busy 0|1 (a warp/layer request in flight), free_ids, frame\n"},
     {"god", CmdGod,
       "god <0|1>                   god mode (the F1 cheat)\n"},
     {"nodarkair", CmdNoDarkAether,
@@ -4918,8 +4965,11 @@ const CommandSpec kCommands[] = {
       "overlay <page>[/<sub>]|off  open the F1 window on a page (name prefixes: `overlay video/qual`)\n"},
     {"gpuselftest", CmdGpuSelfTest,
       "gpuselftest                 run the GPU self-test next frame; PASS/FAIL lines go to the log\n"},
+    {"statedump", CmdStateDump,
+      "statedump <file>            every live object's state as JSON lines (tools/statecheck.py)\n"},
     {"state", CmdState,
-      "state save|load <slot>      the F5/F9 save states (load 0 = undo the last load)\n"},
+      "state save <1..8>|load <0..8> [hold]  the F5/F9 save states (load 0 = undo the last load),\n"
+      "                            hold stops the simulation once the load has restored\n"},
     {"reloadmods", CmdReloadMods,
       "reloadmods                  read the mods folder again and rebuild the room (F1 Mods)\n"},
     {"reloadroom", CmdReloadRoom,
@@ -4946,8 +4996,8 @@ const CommandSpec kCommands[] = {
     {"hudopacity", CmdHudOpacity,
       "hudopacity <echo|dark|scan> <visor|0..100>  that visor HUD's opacity, or Visor Opacity's\n"},
     {"crosshair", CmdCrosshair,
-      "crosshair [<25..100>]       aim crosshair size, `style classic|remastered`, opacity,\n"
-      "                            color <r> <g> <b>|clear, aim <0|1> (F1 HUD)\n"},
+      "crosshair [<25..100>]       aim crosshair size, `style classic|remastered|gamecube`,\n"
+      "                            opacity <0..100>, color <r> <g> <b>|clear, aim <0|1> (F1 HUD)\n"},
     {"uiscale", CmdUiScale,
       "uiscale <50..200>           the F1 window's size in percent, as the Render row does\n"},
     {"vsync", CmdVsync,
@@ -5059,9 +5109,11 @@ const CommandSpec kCommands[] = {
     {"orbit", CmdOrbit,
       "orbit [id]                  lock-on state; with id: orbit position, ValidateOrbitTargetId\n"},
     {"hint", CmdHint,
-      "hint <id> [type] [area n]   an AI hint's type, area, active flag, radius; set type / area (coverage)\n"},
+      "hint <id> [type] [area n] [radius <r>]  an AI hint's type, area, active flag and radius;\n"
+      "                            set type / area / radius (coverage)\n"},
     {"place", CmdPlace,
-      "place <id> <x y z>|player [d]  move an actor to a point, or d (6) units in front of the player\n"},
+      "place <id> <x y z>|player [d] [yaw [pitch [roll]]]  move an actor to a point, or d (6)\n"
+      "                            units in front of the player; x y z form: angles in degrees\n"},
     {"spawn", CmdSpawn,
       "spawn <fourcc> [n] [d <dist>] [ancs <id>|u<id> [char [anim]]] [fsm <id>] [model <id>|u<id>] [inactive] [prop <pid> <v>]  create script objects via their loader\n"
       "                            [rules <id>] knockback RULE (patterned default 393ca543; ffffffff = none)\n"
@@ -5391,9 +5443,15 @@ std::span<const Item> Items() {
     {"amberTranslator", "Amber Translator"},
     {"emeraldTranslator", "Emerald Translator"},
     {"cobaltTranslator", "Cobalt Translator"},
-    {"templeKey1", "Temple Key 1"},
-    {"templeKey2", "Temple Key 2"},
-    {"templeKey3", "Temple Key 3"},
+    {"templeKey1", "Sky Temple Key 1"},
+    {"templeKey2", "Sky Temple Key 2"},
+    {"templeKey3", "Sky Temple Key 3"},
+    {"templeKey4", "Sky Temple Key 4"},
+    {"templeKey5", "Sky Temple Key 5"},
+    {"templeKey6", "Sky Temple Key 6"},
+    {"templeKey7", "Sky Temple Key 7"},
+    {"templeKey8", "Sky Temple Key 8"},
+    {"templeKey9", "Sky Temple Key 9"},
     {"agonKey1", "Agon Key 1"},
     {"agonKey2", "Agon Key 2"},
     {"agonKey3", "Agon Key 3"},

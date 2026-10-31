@@ -14,8 +14,6 @@
 namespace PortOverlayState {
 
 extern bool sSkipCinematics;
-extern int sBootLogos;
-extern int sWorldNameCard;
 extern bool sLogFile;
 extern bool sFastMorph;
 extern bool sPointerMenus;
@@ -24,6 +22,8 @@ extern bool sMapInvertX;
 extern bool sMapInvertY;
 extern int sWalkSpeed;
 extern int sScanSpeed;
+extern int sMusicBoost;
+extern int sSfxBoost;
 extern int sLanguage;
 extern int sElevatorRide;
 extern int sPortalTransition;
@@ -45,8 +45,6 @@ extern bool sSpringBall;
 extern bool sSpringFlick;
 extern float sSpringFlickRate;
 extern bool sQuickResume;
-extern bool sSaveStateHotkeys;
-extern bool sSaveStateRoomState;
 extern bool sLockOnToggle;
 extern bool sStickyCharge;
 extern bool sRapidCharge;
@@ -76,6 +74,9 @@ extern bool sHideHelmet;
 extern bool sHideVisorEffects;
 extern bool sCinemaBars;
 extern bool sSecondaryCrosshairs;
+extern bool sDarkVisorFull;
+extern int sDarkVisorStatic;
+extern bool sInfiniteBeamAmmo;
 extern int sHudOpacityEcho;
 extern int sHudOpacityDark;
 extern int sHudOpacityScan;
@@ -107,6 +108,11 @@ extern int sUiTheme;
 extern bool sUiSounds;
 extern bool sDiscord;
 extern bool sUpdateCheck;
+
+// Hands both boosts (percent / 100, MP2_MUSIC_BOOST and MP2_SFX_BOOST included, so the effective
+// levels) to the mixers: the MusyX voices in hw_pc.c and the AI DMA stream's own gain. Called as a
+// value is read from the settings file, by the setters, and once by ReadEnv for the environment.
+void ApplyVolumeBoosts();
 
 } // namespace PortOverlayState
 

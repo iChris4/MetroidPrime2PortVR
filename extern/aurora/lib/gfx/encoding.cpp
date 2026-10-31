@@ -517,8 +517,39 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
     return;
   }
 
+  // Port: a continuation pass that draws nothing and loads (never clears) its targets leaves them as the
+  // pass before stored them, so beginning it only costs a full-target load and store (a tiler's main
+  // cost). Its copy reads the same single-sampled attachment, so skip the pass and keep the rest.
+  // Stereo passes may still clear or replay eye targets: retain their original path.
+  bool emptyLoadPass = passInfo.msaaSamples == 1 && !passInfo.stereo.enabled;
+  if (emptyLoadPass) {
+    for (const auto& command : passInfo.commands) {
+      if (command.type == CommandType::Draw || command.type == CommandType::CustomDraw) {
+        emptyLoadPass = false;
+        break;
+      }
+    }
+  }
+  if (emptyLoadPass) {
+    for (uint32_t i = 0; i < passInfo.colorAttachmentCount; ++i) {
+      const auto& source = passInfo.colorAttachments[i];
+      if (source.clear || source.loadOp == wgpu::LoadOp::Clear || source.storeOp != wgpu::StoreOp::Store ||
+          source.resolveView) {
+        emptyLoadPass = false;
+      }
+    }
+    if (passInfo.depthStencilView && passInfo.hasDepth &&
+        (passInfo.depthLoadOp == wgpu::LoadOp::Clear ||
+         (passInfo.depthLoadOp == wgpu::LoadOp::Undefined && passInfo.clearDepth))) {
+      emptyLoadPass = false;
+    }
+    if (passInfo.depthStencilView && passInfo.hasStencil && passInfo.stencilLoadOp == wgpu::LoadOp::Clear) {
+      emptyLoadPass = false;
+    }
+  }
+
   std::array<wgpu::RenderPassColorAttachment, MaxColorAttachments> attachments{};
-  for (uint32_t i = 0; i < passInfo.colorAttachmentCount; ++i) {
+  for (uint32_t i = 0; i < passInfo.colorAttachmentCount && !emptyLoadPass; ++i) {
     const auto& source = passInfo.colorAttachments[i];
     attachments[i] = {
         .view = source.view,
@@ -557,19 +588,20 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
   // Timed per pass index, so gputimes splits a frame's EFB passes (not by size: dynamic
   // resolution would intern a name per size).
   const auto profName = fmt::format("EFB pass {}", passIndex);
+  const bool renderMono = !emptyLoadPass && !(passInfo.stereo.enabled && passInfo.stereo.skipMono);
   const wgpu::RenderPassDescriptor renderPassDescriptor{
       .label = label.c_str(),
       .colorAttachmentCount = passInfo.colorAttachmentCount,
       .colorAttachments = attachments.data(),
       .depthStencilAttachment = depthStencilAttachmentPtr,
-      .occlusionQuerySet = overdraw::pass_begin(passIndex, passInfo.colorAttachments[SceneColorAttachmentIndex].size,
-                                                passInfo.msaaSamples),
-      .timestampWrites = webgpu::gpu_prof::pass_writes(profName),
+      .occlusionQuerySet = renderMono ? overdraw::pass_begin(passIndex, passInfo.colorAttachments[SceneColorAttachmentIndex].size,
+                                                passInfo.msaaSamples) : wgpu::QuerySet{},
+      .timestampWrites = renderMono ? webgpu::gpu_prof::pass_writes(profName) : nullptr,
   };
 
   // An immersive frame's final pass on a headset that owns the display: nothing
   // reads its mono image (stereo_frame.hpp StereoPassReplay::skipMono).
-  if (!(passInfo.stereo.enabled && passInfo.stereo.skipMono)) {
+  if (renderMono) {
     auto pass = cmd.BeginRenderPass(&renderPassDescriptor);
     render_pass(pass, frame, passInfo);
     pass.End();
@@ -613,9 +645,17 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
     const bool isDepth = isDepthCopy;
     // Depth copies read the depth buffer, which an HDR scene pass leaves as it is.
     const auto domain = isDepth ? tex_copy_conv::CopyDomain::Display : passInfo.resolveDomain;
+    // Port: an index/mask copy from a multisampled EFB reads sample 0 of the original attachment (kept
+    // stored by discard_dead_stores), not the averaged resolve: a blend of two ids is another id.
+    const bool indexMs = !isDepth && passInfo.msaaSamples > 1 && domain == tex_copy_conv::CopyDomain::Display &&
+                         is_index_copy_format(passInfo.resolveFormat) &&
+                         tex_copy_conv::index_copy_ms_supported(passInfo.resolveFormat) &&
+                         passInfo.colorAttachments[SceneColorAttachmentIndex].storeOp == wgpu::StoreOp::Store;
     const tex_copy_conv::ConvRequest convReq{
         .fmt = passInfo.resolveFormat,
-        .srcView = isDepth ? passInfo.copySourceDepthView : passInfo.copySourceView,
+        .srcView = isDepth ? passInfo.copySourceDepthView
+                 : indexMs ? passInfo.colorAttachments[SceneColorAttachmentIndex].view
+                           : passInfo.copySourceView,
         .uniformRange = passInfo.resolveUniformRange,
         .dst = passInfo.resolveTarget,
         // Port: 8-bit index/mask copies (A8/R8/G8/B8; scan visor ids, C8 lookups) hold values that
@@ -625,7 +665,7 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
                             : tex_copy_conv::SampleFilter::Nearest,
         .domain = domain,
         .toneRange = passInfo.resolveToneRange,
-        .srcSamples = isDepth ? passInfo.msaaSamples : 1u,
+        .srcSamples = (isDepth || indexMs) ? passInfo.msaaSamples : 1u,
     };
     // A raw copy only between equal formats in the same domain: an HDR display copy always
     // post-tones, and RGBA16F never goes to an 8-bit texture as is.
@@ -785,7 +825,8 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
           .srcView = source,
           .uniformRange = eyeUniform.size != 0 ? eyeUniform : passInfo.resolveUniformRange,
           .dst = passInfo.stereo.copyTargets[eye],
-          .sampleFilter = depthCopy ? tex_copy_conv::SampleFilter::Nearest : tex_copy_conv::SampleFilter::Linear,
+          .sampleFilter = (depthCopy || tex_copy_conv::index_copy_format(passInfo.resolveFormat))
+                              ? tex_copy_conv::SampleFilter::Nearest : tex_copy_conv::SampleFilter::Linear,
       };
       if (tex_copy_conv::needs_conversion(passInfo.resolveFormat)) {
         tex_copy_conv::run(cmd, eyeReq);
