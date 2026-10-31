@@ -9,6 +9,34 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Immersive cutscenes: no letterbox, dialogue on the virtual screen (2026-10-31)
+
+First feedback on the alpha, with cutscenes immersive ("Show cutscenes on cinema screen" off): the
+black bars stayed, and the dialogue was stretched over each eye's whole view, head-locked.
+- Bars: Echoes letterboxes twice, by drawing the bars (`CCameraFilterPass::DrawFilterShape`
+  `kFS_CinemaBars`) and by shrinking the 3D viewport to 360 of 448 lines
+  (`CCameraFilterPass::GetHeightScale`, read by `CStateManager::DrawWorld`'s viewport). Only the
+  desktop's F1 switch gated them. `PortVr::VrRemoveCinematicBars` (the "Remove cinematic bars" setting,
+  on by default) now skips the bars and keeps the viewport whole in the headset, as the Metroid Prime
+  fork does in `DrawFilterShape`; the setting's notes in both launchers say so.
+- Dialogue: `CScriptSubtitle` (U-Mos and other speakers; the A prompt is an image in the string) and
+  Echoes' `kFS_DialogBox` camera filter draw orthographically in the world pass, which the eyes get
+  identical over their whole image. Both now draw on `AURORA_STEREO_ROUTE_SCREEN_2D`, the virtual
+  screen hung ahead of the game (cinematic) camera, as the Metroid Prime fork routes its region title
+  card.
+Quest eye captures of the U-Mos scene (Main Energy Controller, `MP2_WORLD=863fcd72,
+08_temple_sungenerator`, console `tp 0.6 -86.1 15.2` enters its trigger `u04ca`): full-height world,
+no bars, the two dialogue lines and the A on the virtual screen below U-Mos. The scene only triggers
+on a card that has not seen it: the desk run used an empty card folder (the user's set aside and put
+back). Not checked: the dialog-box filter itself (no box shows in this scene), the cinema-screen mode.
+
+## First release, v1.0.0-alpha.1 (2026-10-30)
+
+Packaged from `58c53c52` (Release/PrimedGunEchoes-v1.0.0-alpha.1, Prime 1's beta.6 layout). Before it:
+upstream's in-game update check is off and F1 > System > Updates links this fork's releases (it asked
+Odrannnn/MetroidPrime2Port about upstream's version, so players would have been sent to the flat
+port), and the README describes PrimedGun Echoes.
+
 ## Screw Attack: the jump input keeps chaining screw jumps (2026-10-29)
 
 From the headset: after the Screw Attack started, the jump on the right stick (pushed up) made no

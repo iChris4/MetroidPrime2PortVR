@@ -3,6 +3,9 @@
 #ifdef TARGET_PC
 #include "MetroidPrime/PortEfbCopy.hpp"
 #include "port_overlay.h"
+#include "vr/vr_view.h"
+#include <aurora/gfx.h>
+#include <dolphin/gx/GXAurora.h>
 #endif
 #include "MetroidPrime/Cameras/CCameraFilterPass.hpp"
 
@@ -520,7 +523,9 @@ float CCameraFilterPass::GetWidthScale() const { return 1.f; }
 
 float CCameraFilterPass::GetHeightScale() const {
 #ifdef TARGET_PC
-  if (mShape == kFS_CinemaBars && !PortOverlay::CinemaBars()) {
+  // PortVr: the headset keeps the viewport whole too (PortVr::VrRemoveCinematicBars), or the
+  // world would shrink into a band of each eye.
+  if (mShape == kFS_CinemaBars && (!PortOverlay::CinemaBars() || PortVr::VrRemoveCinematicBars())) {
     return 1.f;
   }
 #endif
@@ -558,13 +563,28 @@ void CCameraFilterPass::DrawFilterShape(EFilterShape shape, const CColor& color,
     }
     break;
   case kFS_CinemaBars:
+#ifdef TARGET_PC
+    // PortVr: bars glued to the view are not drawn in the headset.
+    if (PortVr::VrRemoveCinematicBars()) {
+      break;
+    }
+#endif
     DrawWideScreen(color, tex, lod);
     break;
   case kFS_RandomStatic:
     DrawRandomStatic(color, 1.f, false);
     break;
   case kFS_DialogBox:
+#ifdef TARGET_PC
+    // PortVr: a cutscene's dialogue box is placed in the 2D picture, so each eye would stretch it
+    // over its whole view. The headset shows it on the virtual screen, under its text
+    // (CScriptSubtitle::Render).
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_SCREEN_2D);
     DrawDialogBox(color, tex, lod);
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+#else
+    DrawDialogBox(color, tex, lod);
+#endif
     break;
   case kFS_CinematicPlaceholderLabel:
     DrawCinematicPlaceholderLabel(color, tex, lod);

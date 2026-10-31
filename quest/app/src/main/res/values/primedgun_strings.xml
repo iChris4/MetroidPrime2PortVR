@@ -288,7 +288,7 @@
     <string name="primedgun_immersive_replay">Draw the world per eye</string>
     <string name="primedgun_immersive_replay_note">Off shows the flat game image on the virtual screen.</string>
     <string name="primedgun_remove_cinematic_bars">Remove cinematic bars</string>
-    <string name="primedgun_remove_cinematic_bars_note">Keeps the morph ball and visor transitions full size in the headset.</string>
+    <string name="primedgun_remove_cinematic_bars_note">Keeps the morph ball and visor transitions full size in the headset and leaves out the black bars of cutscenes.</string>
     <string name="primedgun_sky_at_infinity">Sky at infinity</string>
     <string name="primedgun_sky_at_infinity_note">Draws the sky with the head\'s rotation only, so planets and stars look far away.</string>
     <string name="primedgun_space_warp">Space warp</string>

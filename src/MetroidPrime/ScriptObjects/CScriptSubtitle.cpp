@@ -6,6 +6,10 @@
 #include "MetroidPrime/CStateManager.hpp"
 #include "MetroidPrime/ScriptLoader.hpp"
 #include "MetroidPrime/ScriptLoader/SLdrSubtitle.hpp"
+#ifdef TARGET_PC
+#include <aurora/gfx.h>
+#include <dolphin/gx/GXAurora.h>
+#endif
 
 CScriptSubtitle::CScriptSubtitle(TUniqueId uid, const rstl::string& name, const CEntityInfo& info,
                                  int positionX, int positionY, int extentX, int extentY,
@@ -82,6 +86,12 @@ void CScriptSubtitle::Render(const CStateManager& mgr) const {
   const_cast< CGuiTextSupport& >(mTextSupport)
       .SetGeometryColor(GetModelFlags().GetColorRef().WithAlphaModulatedBy(mFadeOpacity));
   if (mFadeOpacity > 0.f) {
+#ifdef TARGET_PC
+    // PortVr: the text (a cutscene's dialogue) is placed in the 2D picture, so each eye would
+    // stretch it over its whole view, head-locked. The headset shows it on the virtual screen, as
+    // the Metroid Prime VR fork does the region title card.
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_SCREEN_2D);
+#endif
     gpRender->SetViewportOrtho(false, -4096.f, 4096.f);
     gpRender->SetDepthReadWrite(false, false);
     switch (static_cast< signed char >(GetModelFlags().GetTrans())) {
@@ -104,6 +114,9 @@ void CScriptSubtitle::Render(const CStateManager& mgr) const {
         (static_cast< float >(viewport.mHeight) / 448.f) * (448.f - mPositionY));
     gpRender->SetModelMatrix(xf);
     mTextSupport.Render();
+#ifdef TARGET_PC
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
+#endif
   }
 }
 

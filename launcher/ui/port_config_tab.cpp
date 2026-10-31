@@ -74,7 +74,8 @@ void BuildPortConfigTab(TabContext& ctx, QTabWidget* tabs) {
       ->setToolTip(QObject::tr("Shades the edges of each eye in 2x2 (Low) or 4x4 (Medium, High) "
                                "pixel blocks. From Off to a level takes a restart."));
   ctx.Check(layout, QObject::tr("Remove cinematic bars"), "vr_remove_cinematic_bars",
-            QObject::tr("Keeps the morph ball and visor transitions full size in the headset."));
+            QObject::tr("Keeps the morph ball and visor transitions full size in the headset and leaves "
+                        "out the black bars of cutscenes."));
   ctx.Check(layout, QObject::tr("Sky at infinity"), "vr_sky_at_infinity",
             QObject::tr("Draws the sky with the head's rotation only, so planets and stars look far away."));
   ctx.Check(layout, QObject::tr("Space warp"), "vr_space_warp",
