@@ -126,7 +126,7 @@ Statuses:
 | Restart to menu | tabs.cpp:38-80 | "Restart to menu" (`RequestReset`), game_sections.cpp | SAME (f1-frame) |
 | Screenshot / Photo mode buttons | tabs.cpp:38-80 | photo.cpp | SAME |
 | Exit game + "Exit game?" modal | tabs.cpp:38-80 | game_sections.cpp:77-82 | SAME |
-| Unlock beam doors once opened | game_sections.cpp:85 | game_sections.cpp `DrawUnlocksSection`; `CScriptDamageableTrigger::PortActiveVulnerability` | DONE (build-verified, not play-tested): colour-locked doors (a lock whose vulnerability hits 1-3 of the 4 beams) take a per-object any-beam vulnerability. Persisted as `unlock_beam_doors`
+| Unlock beam doors once opened | game_sections.cpp:85 | cheats.cpp `DrawCheatsSection` (Debug > Cheats); `CScriptDoor::GetDamageVulnerability`, `CScriptDamageableTrigger::PortActiveVulnerability` | DONE (console-tested 2026-10-30: Agon light door u050f opens to a Power shot with it on, not with it off; `obj <door>` prints its beams): colour-locked doors (a door or lock whose vulnerability hits 1-3 of the 4 beams) take a per-object any-beam vulnerability. Persisted as `unlock_beam_doors`
 | Stack beams | game_sections.cpp:92 | game_sections.cpp; `CPlayerGun::PortFireStackedBeams`, `CGunWeapon::PortFireStackedProjectile` | DONE (build-verified, not play-tested): each shot also fires the other owned beams from their own locked weapon tokens. Persisted as `stack_beams`
 | 1.00 revision compatibility | game_sections.cpp:107-111 | — | SKIPPED, with evidence: the G2ME-vs-G2MP differences are script-graph rewrites in Temple Grounds areas 6 and 19, in the disc's MREA data, not in code. The only `VERSION_G2MP01` code differences are lighting and shadows (CActor.cpp, CScriptWater.cpp). A G2MP disc has no G2ME scripts to restore, and layer 8 cannot be dropped alone because layer-0 objects were rewired. A toggle would need G2ME MREA patches shipped with the port
 | Hard mode unlock | game_sections.cpp:138 | game_sections.cpp `DrawUnlocksSection` (called from the Cutscenes section until package 2 gives it a tab); hook `CScriptGuiScreen.cpp` `UpdateSaveSlots` | SAME (package 3) |
@@ -144,7 +144,7 @@ Statuses:
 | Item | MP1 | MP2 | Status |
 | --- | --- | --- | --- |
 | Sub-tabs: Options, Mouse, Controller, Touch & gyro, Remap | tabs.cpp:206-231 | tabs.cpp:21-46 | SAME |
-| Swap Scan / X-Ray visor buttons | controls.cpp:64 | "Swap the Scan and Echo visor buttons", controls.cpp:55 | SAME (adapted to Echoes' visor) |
+| Swap Scan / X-Ray visor buttons | controls.cpp:64 | — | REMOVED after v0.6.1 (Superseded 2026-10-29: this row said SAME; the option, the Weapon buttons toggle and the empty Mouse buttons section are gone from `controls.cpp`; rebinding is on the Remap page) |
 | Radial menus label | controls.cpp:70 "Radial beam and visor menus (Trilogy)" | controls.cpp:62 "Native Trilogy radial selectors" | DIFF: label |
 | Remastered movement | controls.cpp:241 | — | MP1-ONLY: Remastered control scheme |
 | Menus / Point and click / Swap map gestures | — | controls.cpp:100-107 | DIFF: MP2-only rows |

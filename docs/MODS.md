@@ -1,7 +1,7 @@
 # Mods folder
 
 Ported from MP1's first mods slice (MP1 `05cbf722a`): loose-file and PAK overrides plus a Mods list in
-F1 > Game. Texture-pack pipelines, suit colours and downloads are not part of it.
+F1 > Game. Suit colours and the HD texture pack were added later (sections below); downloads are not part of it.
 
 `mods` in the user path (`MP2_USER_PATH`, created on first start; `MP2_MODS` points elsewhere) holds one
 folder per mod, applied in name order so a later name wins; folders starting with `.` are skipped.

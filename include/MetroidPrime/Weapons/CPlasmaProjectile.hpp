@@ -45,6 +45,7 @@ public:
   bool IsFiring() const { return mFiring; }
 #ifdef TARGET_PC
   EExpansionState GetExpansionState() const { return mExpansionState; }
+  void SetMuzzleScale(const CVector3f& scale) { mMuzzleScale = scale; }
 #endif
 
 private:

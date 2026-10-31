@@ -31,7 +31,7 @@ into the executable (`MP_EMBED_RESOURCES`, MP1 `ce0bf885e`). Only the APK ships 
 |---|---|---|
 | `linux-build.yml` | PRs, manual (a push starts nothing) | Ubuntu 24.04, gcc-14; build, `ctest -L port`, Aurora `gx_fifo_tests` (`.github/actions/build-and-test`) |
 | `linux-release.yml` | manual | `almalinux:9` + gcc-toolset-14, x86_64 and aarch64; AppImage + tarball + split-off `.debug` (RelWithDebInfo, stripped binary, as MP1), artifacts `metroid_prime2_port-linux[-aarch64]`; fails if the binary needs glibc > 2.34 or GLIBCXX > 3.4.29 |
-| `tools/make_flatpak.sh` | manual, local | `build/flatpak/MetroidPrime2Port.flatpak` (app id `io.github.odrannnn.metroidprime2port`, `org.freedesktop.Platform` 24.08); `flatpak/*.yml` builds the committed `port` branch offline from pinned sources (Dawn, nod, SDL and the Aurora dependencies, `disable-submodules`); stops if the newest metainfo release differs from `versionName` |
+| `tools/make_flatpak.sh` | manual, local | `build/flatpak/MetroidPrime2Port.flatpak` (app id `io.github.odrannnn.metroidprime2port`, `org.freedesktop.Platform` 25.08); `flatpak/*.yml` builds the committed `port` branch offline from pinned sources (Dawn, nod, SDL and the Aurora dependencies, `disable-submodules`); stops if the newest metainfo release differs from `versionName` |
 | `windows.yml` | manual | clang-cl, x64 and arm64 (`windows-11-arm`); artifacts `metroid_prime2_port-windows[-arm64]` (`dist/`) |
 | `macos.yml` | manual | arm64, ad-hoc signed `Metroid Prime 2 Port.app` + `licenses/`, artifact `metroid_prime2_port-macos`; checks system-only dylibs, codesign and the packaged no-disc startup |
 | `ios.yml` | manual | unsigned `MetroidPrime2Port.ipa` (iphoneos, ad hoc signed inside; users sideload it), artifact `metroid_prime2_port-ios`; checks system-only libraries |
@@ -89,8 +89,21 @@ entry (newest first) in `packaging/io.github.odrannnn.metroidprime2port.metainfo
    `summary.tsv` `ok`, exit 0.
 4. Check each artefact's version and that none holds game data (`unzip -l`, `--appimage-extract`),
    then `git tag -a vX` and `git push origin vX`.
-5. `gh release create vX --notes-file …` with every asset passed explicitly (`--prerelease`
-   while the port is pre-1.0); confirm with `gh release view vX --json assets`.
+5. Release notes: copy the previous `docs/release-notes/<version>.md` (the user's approved text,
+   as published) and keep its shape exactly. Open with "This is an early release. Please report
+   what you hit and attach the log (F1 > System > Log).", then the short disc line (no extension
+   list, no "experimental" tags). Then **What changed**: bold one-line items with the issue numbers.
+   Then **Downloads**: the asset table, with no sideloading note on the iOS row. Then **Known
+   limitations**: only what is untested on real hardware. Leave out a title or intro paragraph, the
+   decomp/Aurora blurb, the "first game" link and any link to PrimeDecomp/echoes. Commit the
+   published text as `docs/release-notes/<version>.md`.
+6. `gh release create vX --latest --notes-file …` with every asset passed explicitly, as a normal
+   release, **not** `--prerelease`: the in-game update check (`platform/port_update_check.cpp`,
+   setting `update_check`, env `MP2_UPDATE_CHECK=0`) polls `/repos/<repo>/releases/latest`, which
+   GitHub's API answers only from non-pre-releases (it was a 404 while 0.6.0 and 0.6.1 were
+   pre-releases). Confirm with `gh release view vX --json assets,isPrerelease` and
+   `gh api repos/<repo>/releases/latest --jq .tag_name`. The Flatpak builds on
+   `org.freedesktop.Platform` 25.08 with a vendored SDL3 (3.4.10, pinned in `flatpak/*.yml`).
 
 The repository is public since 0.6.0. Real saves used as test fixtures (`tests/data/*.gci`,
 `tests/fixtures/trilogy/*.bin`) stay untracked: they carry the game's banner and icon.

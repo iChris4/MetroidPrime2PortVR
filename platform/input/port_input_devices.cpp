@@ -328,15 +328,15 @@ bool PadButtonBoundBesidesL(s32 native) {
 }
 
 // MP1's BindBeamChords: a shift plus a D-pad direction picks a beam, the direction the retail
-// C-stick picks them with (Power up, Dark left, Light right, Annihilator down), for the layouts
-// that take the C-stick away (the touch overlay's twin stick). A shift pairs with the D-pad inputs
+// C-stick picks them with (Power up, Light left, Dark right, Annihilator down), for the layouts
+// that take the C-stick away (twin stick, the pad's or the touch overlay's). A shift pairs with the D-pad inputs
 // of its own family: the keyboard's shift with the keyboard's D-pad keys, the pad's shift with the
 // pad's D-pad. MP1's shifts come from settings (key slots, mouse shift action, pad shift) that MP2
 // does not have, so only its twin-stick shifts exist: Left Shift unless a key takes it, and LB.
 // The overlay's own Beam button works inside PortTouch. As in MP1 the shifts also spring the ball
 // in morph ball (the Spring Ball action, RouteDirectActions -> PortTouch::RequestSpringBall).
 void BindBeamChords(Profile& p) {
-  if (!PortTouch::TwinStick()) return;
+  if (!PortTouch::TwinStick() && !PortMouse::StickEnabled()) return;
   std::vector<Input> keyShifts;
   std::vector<Input> padShifts;
   bool lshiftTaken = false;
@@ -346,14 +346,15 @@ void BindBeamChords(Profile& p) {
     }
   }
   if (!lshiftTaken) keyShifts.push_back(Make(Device::Key, SDL_SCANCODE_LSHIFT));
-  if (!PortTouch::ControlsEnabled() && !PadButtonBoundBesidesL(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
+  // Also with the touch overlay on: its buttons are touch inputs, so a pad played beside it keeps LB.
+  if (!PadButtonBoundBesidesL(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
     padShifts.push_back(NativeInput(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER));
   }
 
   // The engine's beam actions are MP1's names for MP2's slots, in the order RouteDirectActions
   // requests them: Power, Ice (Dark), Wave (Light), Plasma (Annihilator).
   static constexpr Action kDirs[4] = {Action::PadUp, Action::PadDown, Action::PadLeft, Action::PadRight};
-  static constexpr Action kBeams[4] = {Action::BeamPower, Action::BeamPlasma, Action::BeamIce, Action::BeamWave};
+  static constexpr Action kBeams[4] = {Action::BeamPower, Action::BeamPlasma, Action::BeamWave, Action::BeamIce};
   const std::vector<Binding> base = p.bindings;
   const uint16_t noBall = static_cast<uint16_t>(PortInput::kCtxAll & ~PortInput::kCtxMorphBall);
   for (int d = 0; d < 4; ++d) {
@@ -401,6 +402,7 @@ void BindPortControls(Profile& p) {
   Bind(p, Action::Screenshot, Make(Device::Key, SDL_SCANCODE_F12));
   // Photo mode toggles the free camera (PortFreeCam; stage 1 has no photo panel).
   Bind(p, Action::PhotoMode, Make(Device::Key, SDL_SCANCODE_F8));
+  Bind(p, Action::ToggleTexturePack, Make(Device::Key, SDL_SCANCODE_F7));
   // Save and load the selected save state slot (F1 > Game > Save states picks the slot).
   Bind(p, Action::SaveState, Make(Device::Key, SDL_SCANCODE_F5));
   Bind(p, Action::LoadState, Make(Device::Key, SDL_SCANCODE_F9));
@@ -446,7 +448,7 @@ uint32_t ReadMouseButtons(unsigned mouseHeld) {
   SDL_Window* window = SDL_GetMouseFocus();
   // A pointer screen (pause, map) reads the finger itself: the phone's touch-synthesized left
   // button would otherwise reach the game here as A the moment the finger lands.
-  const bool live = PortMouse::Enabled() && PortOverlay::MouseButtons() && !PortMouse::UiActive() && !PortOverlay::Visible() &&
+  const bool live = PortMouse::Enabled() && !PortMouse::UiActive() && !PortOverlay::Visible() &&
                     !(PortPointer::Enabled() && PortPointer::ScreenActive()) && window != nullptr &&
                     SDL_GetWindowRelativeMouseMode(window);
   return sGate.Poll(live, mouseHeld & PortInputMap::kMouseButtonMask);
@@ -562,37 +564,33 @@ s8 StickY(float down, float up) {
   return static_cast<s8>(std::clamp(static_cast<int>(y), -127, 127));
 }
 
-// The scan text is up (the scan freeze): it reads A while the lock stays held.
-bool ScanTextOpen(uint16_t contexts) {
-  return (contexts & PortInput::kCtxMenu) != 0 && (contexts & PortInput::kCtxScan) != 0;
-}
-
-// The scan text's Menu context comes and goes under the held lock: switching it
-// must not consume the lock's input, which the Menu rows also use.
-uint16_t QuietContexts(uint16_t before, uint16_t after) {
-  return ScanTextOpen(before) || ScanTextOpen(after) ? PortInput::kCtxMenu : 0;
-}
-
-// Player 0's state while the game is in play (PortTouch's PlayerInPlay), else null.
+// Player 0's state while the game is in play (PortTouch's PlayerInPlay), else null. The
+// title and file select are a CMFGame in the 'FRND' front-end world: that is a menu, not
+// play, so its contexts read the Menu rows (#2).
 CPlayerState* PlayerInPlay() {
-  if (gpGameState == nullptr || PortHarness::FlowState() != 1 /* CMFGame::kFS_InGame */) return nullptr;
+  if (gpGameState == nullptr || PortHarness::FlowState() != 1 /* CMFGame::kFS_InGame */ ||
+      gpGameState->GetGameMode().GetGameModeType() == 'FRND') {
+    return nullptr;
+  }
   return gpGameState->PlayerState(0).GetPtr();
 }
 
 // Menu (front end, pause screen, or anything that is not in play) or gameplay; the
 // scan visor adds scan to gameplay, and the Morph Ball (or morphing; CPlayer::Update
 // publishes it) adds Morph Ball, which the Morph Ball rows and the touch overlay's
-// Ball page need. MP1 also tells the map screen apart and adds menu while the scan
-// text soft-pauses the game: those read the CStateManager, which nothing outside
-// src/ holds in MP2.
+// Ball page need. The scan text (CStateManager::Update publishes the scan freeze) adds
+// scan text to gameplay and scan rather than switching to menu, so the held lock keeps
+// its gameplay binding (#11). MP1 also tells the map screen apart, which reads the
+// CStateManager.
 uint16_t GameContexts() {
   const CPlayerState* state = PlayerInPlay();
   if (state == nullptr || PortTouch::PauseScreenOpen()) return PortInput::kCtxMenu;
   uint16_t contexts = PortInput::kCtxGameplay;
-  if (state->GetCurrentVisor() == CPlayerState::kPV_Scan) contexts |= PortInput::kCtxScan;
-  // The front end's ('FRND') own Samus sits in the ball: that is not play.
-  if (PortTouch::Morphed() && gpGameState->GetGameMode().GetGameModeType() != 'FRND')
-    contexts |= PortInput::kCtxMorphBall;
+  if (state->GetCurrentVisor() == CPlayerState::kPV_Scan) {
+    contexts |= PortInput::kCtxScan;
+    if (PortTouch::ScanTextUp()) contexts |= PortInput::kCtxScanText;
+  }
+  if (PortTouch::Morphed()) contexts |= PortInput::kCtxMorphBall;
   return contexts;
 }
 
@@ -731,7 +729,7 @@ void RouteDirectActions(const PortInput::Output& out, double nowSec) {
 // ticks, so they work while the game is paused or the F1 overlay is open.
 bool IsPortAction(Action a) {
   return a == Action::PortMenu || a == Action::Screenshot || a == Action::PhotoMode || a == Action::GyroAim ||
-         a == Action::ResetAim;
+         a == Action::ResetAim || a == Action::ToggleTexturePack;
 }
 
 // Keys pressed since the last PollPortActions, added by an SDL event watch: a short
@@ -1110,8 +1108,9 @@ static bool MenuButtonsActive() { return PortOverlay::MenuStandardButtons() && !
 // those rows cover, and keyboard and mouse bindings for everywhere stop applying
 // there on an input a Menu row uses (bindings the user scoped to menus or the map,
 // Start/Z, the sticks and touch are left alone). Menu rows apply only in menus and
-// the map, and never on Start's or Z's input. With it off, the rows do
-// nothing. Only the game's poll applies this, so a remap page lists the bindings
+// the map, and never on Start's or Z's input. The scan text reads Menu A too, in place
+// of what its input and A do in gameplay; the other gameplay rows (the held lock)
+// still apply there (#11). With it off, the rows do nothing. Only the game's poll applies this, so a remap page lists the bindings
 // as saved.
 static void ApplyMenuButtons(Profile& p) {
   const auto isMenu = [](const Binding& b) { return FindMenuAction(b.action, true) != nullptr; };
@@ -1124,6 +1123,7 @@ static void ApplyMenuButtons(Profile& p) {
     if (isMenu(b)) {
       b.contexts &= kMenus;
       if (b.contexts == 0) b.contexts = kMenus;
+      if (b.action == Action::MenuA) b.contexts |= PortInput::kCtxScanText;
       continue;
     }
     if (b.count != 1 || (b.contexts & kMenus) == 0) continue;
@@ -1132,6 +1132,7 @@ static void ApplyMenuButtons(Profile& p) {
     } else if (IsPadFamily(b.inputs[0]) && FindMenuAction(b.action, false) != nullptr &&
                b.contexts == PortInput::kCtxAll) {
       b.blocked |= kMenus;
+      if (b.action == Action::PadA) b.blocked |= PortInput::kCtxScanText;
     }
   }
   std::erase_if(p.bindings, [&](const Binding& b) {
@@ -1145,6 +1146,9 @@ static void ApplyMenuButtons(Profile& p) {
         return FindMenuAction(b.action, true) != nullptr && b.count == 1 && !IsPadFamily(b.inputs[0]);
       },
       kMenus, true);
+  PortInput::BlockRowInputs(
+      p, [](const Binding& b) { return b.action == Action::MenuA && b.count == 1; }, PortInput::kCtxScanText,
+      true);
 }
 
 // A single pad input as the native button the prompts look up, or invalid.
@@ -1257,6 +1261,40 @@ PADStatus Synthesize(const PortInput::Output& out) {
   return s;
 }
 
+// Twin stick aims with the right stick, so the R trigger's free look (a stand-still mode) only
+// gets in the way, most of all with Fire moved onto RT (issue #12): out of the Morph Ball, where R
+// is the Spider Ball, the controller's R trigger stops pressing R and pulling the R analog. Free
+// look on any other input (the presets' right stick click, a key) stays.
+static void ApplyTwinStickFreeAim(Profile& p, uint16_t contexts) {
+  if (!PortMouse::StickEnabled() || (contexts & PortInput::kCtxMorphBall) != 0) return;
+  const auto rTrigger = [](const Input& in) {
+    if (in.device == Device::PadAxis) return in.code == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
+    return in.device == Device::PadButton &&
+           (in.code == PAD_RAW_BUTTON_TRIGGER_RIGHT || in.code == PAD_RAW_BUTTON_TRIGGER_RIGHT_CLICK);
+  };
+  for (Binding& b : p.bindings) {
+    if (b.action != Action::PadR && b.action != Action::RAnalog) continue;
+    if (std::any_of(b.inputs.begin(), b.inputs.begin() + b.count, rTrigger)) b.blocked |= PortInput::kCtxGameplay;
+  }
+}
+
+// A keyboard-family binding on a C-stick direction is held (MP1's KeyboardPadHeld().cStick), for
+// PortMouse::StickOwnsCStick.
+static bool KeyboardCStickHeld(const Profile& p, const PortInput::RawState& raw, uint16_t contexts) {
+  for (const Binding& b : p.bindings) {
+    if (b.action != Action::CUp && b.action != Action::CDown && b.action != Action::CLeft &&
+        b.action != Action::CRight) {
+      continue;
+    }
+    if (b.count == 0 || (b.contexts & contexts) == 0 || (b.blocked & contexts) != 0) continue;
+    if (std::all_of(b.inputs.begin(), b.inputs.begin() + b.count,
+                    [&](const Input& in) { return IsKeyboardFamily(in) && raw.Value(in) > 0.f; })) {
+      return true;
+    }
+  }
+  return false;
+}
+
 SPoll Poll(unsigned mouseHeld, bool focused) {
   static Profile sProfile;
   static PortInput::Runtime sRuntime;
@@ -1266,6 +1304,8 @@ SPoll Poll(unsigned mouseHeld, bool focused) {
   BuildProfile(next);
   ApplyMenuButtons(next);
   PortInput::ApplyBallButtons(next);
+  const uint16_t contexts = GameContexts();
+  ApplyTwinStickFreeAim(next, contexts);
   if (!sInit || next != sProfile) {
     UpdatePromptBindings(next);
     sProfile = std::move(next);
@@ -1278,9 +1318,9 @@ SPoll Poll(unsigned mouseHeld, bool focused) {
   // MP1 steps its clock by the game's tick period; MP2's loop has none to read, so wall time.
   const double nowMs =
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
-  const uint16_t contexts = GameContexts();
   const PortInput::Output& out =
-      sRuntime.Poll(raw, contexts, nowMs, QuietContexts(sRuntime.ActiveContexts(), contexts));
+      sRuntime.Poll(raw, contexts, nowMs, 0);
+  PortMouse::SetKeyboardCStickHeld(KeyboardCStickHeld(sProfile, raw, contexts));
   SPoll r;
   sConsumeRadialPoll = false;
   if (PortInputRemap::Capturing()) {
@@ -1368,8 +1408,7 @@ void PollPortActions() {
   // F1 is the Port menu's default binding and has no other handler.
   raw.keys.reset(SDL_SCANCODE_F12);
   const uint16_t contexts = GameContexts();
-  const PortInput::Output& out = sRuntime.Poll(raw, contexts, static_cast<double>(SDL_GetTicksNS()) / 1e6,
-                                               QuietContexts(sRuntime.ActiveContexts(), contexts));
+  const PortInput::Output& out = sRuntime.Poll(raw, contexts, static_cast<double>(SDL_GetTicksNS()) / 1e6, 0);
   // The F1 Controls page is recording an input: a bound PortMenu would close it.
   if (PortInputRemap::Capturing()) {
     SetGyroButton(false);
@@ -1399,6 +1438,9 @@ void PollPortActions() {
   if (out.Pressed(Action::Screenshot)) aurora::request_screenshot();
   if (out.Pressed(Action::PhotoMode)) {
     PortPhoto::RequestToggle();
+  }
+  if (out.Pressed(Action::ToggleTexturePack)) {
+    PortDebug::ToggleTexturePack();
   }
 }
 

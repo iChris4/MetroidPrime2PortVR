@@ -478,7 +478,13 @@ void CActor::Render(const CStateManager& mgr) const {
         RenderInternal(mgr);
       } else {
         const float timeSince = CGraphics::GetSecondsMod900() - mTime;
+#ifdef TARGET_PC
+        // CTimeProvider holds a `const float&`; a temporary would dangle past this line (#21).
+        const float localTime = CMath::FastFmod(timeSince, 900.f);
+        CTimeProvider tp(localTime);
+#else
         CTimeProvider tp(CMath::FastFmod(timeSince, 900.f));
+#endif
         RenderInternal(mgr);
       }
       if (mPointGeneratorParticles) {

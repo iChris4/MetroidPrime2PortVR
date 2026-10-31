@@ -1059,12 +1059,12 @@ void CGraphics::EndScene() {
   CGX::SetZMode(true, GX_LEQUAL, false);
   CGX::SetVtxDescv(skPosColorTexDirect);
 #ifdef TARGET_PC
-  // Port: the 96 one-pixel triangles flushed the hardware's pipeline before the copy. They sit at
-  // the middle of the screen, in whatever TEV state the frame's last draw left (the minimap's Samus
-  // marker colours them), and at the TV's resolution they cover no pixel centre: at any higher one
-  // they show as the "stray pixel" in the middle of the picture, one per eye in the headset.
-  // Nothing on the PC needs the flush.
-#else
+  // Port (issue #7): retail pads the GP pipeline before the copy with 96 one-unit triangles at
+  // the screen centre. At 1x they cover no pixel centre; at render_scale > 1 they cover one,
+  // coloured by whatever TEV and texture state is left over: the green dot (Dolphin's "Dot in
+  // IR>1"). The padding does nothing on the PC, so skip it.
+  if (false) {
+#endif
   CGX::Begin(GX_TRIANGLES, GX_VTXFMT0, 288);
   for (int i = 0; i < 96; ++i) {
     GXPosition3f32(0.f, 1.f, 1.f);
@@ -1078,6 +1078,8 @@ void CGraphics::EndScene() {
     GXTexCoord2f32(0.f, 0.f);
   }
   CGX::End();
+#ifdef TARGET_PC
+  }
 #endif
   CGX::SetZMode(true, GX_LEQUAL, true);
 

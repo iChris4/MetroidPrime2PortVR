@@ -90,6 +90,15 @@ bool CMoviePlayer::DrawVideo() const {
   int xMargin;
   int yMargin;
   PortGetMargins(width, height, xMargin, yMargin);
+  if (xMargin < 0 || yMargin < 0) {
+    // Port: a movie narrower than the (widened) view leaves the scene it plays over showing in
+    // the bars; retail's 4:3 view had none. Fill the view with black first (the movie covers
+    // its own part), as the credits' and completion movies' bars already are.
+    CCameraFilterPass::DrawFilter(CCameraFilterPass::kFT_Blend, CCameraFilterPass::kFS_Fullscreen,
+                                  CColor::Black(), nullptr, 1.f);
+    gpRender->SetDepthReadWrite(false, false);
+    gpRender->SetViewportOrtho(false, -4096.f, 4096.f);
+  }
 #else
   const int xMargin = (movieWidth - width) / 2;
   const int yMargin = (movieHeight - height) / 2;

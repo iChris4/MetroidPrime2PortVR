@@ -9,7 +9,7 @@
 # which is a domain the maintainer controls, as Flathub requires.
 app-id: io.github.odrannnn.metroidprime2port
 runtime: org.freedesktop.Platform
-runtime-version: '24.08'
+runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
 command: metroid_prime2_port
 
@@ -26,6 +26,9 @@ finish-args:
   - --socket=x11
   # The disc image lives wherever the user keeps it; it is read-only to us.
   - --filesystem=home:ro
+  # Audio: SDL talks to PulseAudio or PipeWire's pulse server; without the socket
+  # it fails to open a device ("Host is down") and the game is silent.
+  - --socket=pulseaudio
   # The update check (api.github.com) and Archipelago servers.
   - --share=network
   # Discord Rich Presence (off by default): the native and Flatpak Discord
@@ -52,6 +55,9 @@ modules:
       # means Aurora vendors it through FetchContent, which is still a download;
       # the tree has no SDL3 in it. The Android OpenSSL source is the one that
       # does not apply here, because that file is inside if(ANDROID).
+      # The 25.08 SDK ships SDL3 3.2, which Aurora's auto provider would pick; the
+      # port needs 3.4 (SDL_SavePNG), so take the pinned source below instead.
+      - -DAURORA_SDL3_PROVIDER=vendor
       - -DFETCHCONTENT_SOURCE_DIR_DAWN_PREBUILT=/run/build/metroid-prime2-port/dawn_prebuilt
       - -DFETCHCONTENT_SOURCE_DIR_NOD_PREBUILT=/run/build/metroid-prime2-port/nod_prebuilt
       - -DFETCHCONTENT_SOURCE_DIR_SDL=/run/build/metroid-prime2-port/sdl-src

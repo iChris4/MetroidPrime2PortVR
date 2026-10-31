@@ -140,6 +140,11 @@ private:
   bool mResetPending : 1;
   bool mHasReset : 1;
   bool mHorizontal : 1;
+#ifdef TARGET_PC
+  // Beam doors (F1 > Debug > Cheats): the colour lock taking any beam, built on first use. Only the
+  // loaded vulnerability can be a colour lock (locking reflects, ResetDoor makes a blue door).
+  mutable rstl::optional_object< CDamageVulnerability > mPortAnyBeamVulnerability;
+#endif
 };
 CHECK_SIZEOF(CScriptDoor, 0x4b0)
 

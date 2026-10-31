@@ -480,7 +480,7 @@ void CScriptDebris::AcceptScriptMsg(CStateManager& mgr, const CScriptMsg& msg) {
       const rstl::vector< SConnection >& connections = GetConnectionList();
       for (int i = 0; i < connections.size(); ++i) {
         const SConnection& connection = connections[i];
-        if (connection.state != kSS_Generate || connection.msg != kSM_Activate) {
+        if (connection.state != kSS_GeneratorConnection || connection.msg != kSM_Activate) {
           continue;
         }
 

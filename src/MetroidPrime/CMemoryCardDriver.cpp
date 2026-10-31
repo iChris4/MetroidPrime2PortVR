@@ -15,6 +15,7 @@
 
 #ifdef TARGET_PC
 #include "Kyoto/Basics/CBasics.hpp"
+#include "MetroidPrime/Player/CPlayerState.hpp"
 #endif
 
 static const char* const skSaveFileName = "MetroidPrime2";
@@ -708,6 +709,11 @@ void SGameFileSlot::InitializeFromGameState() {
     CBitStreamWriter writer(stream);
     gpGameState->PutTo(writer);
   }
+#ifdef TARGET_PC
+  // Port: Dark/Light ammo above 250 (Beam ammo per expansion) goes to the sidecar, keyed by the bytes.
+  gpGameState->GetPlayerState()->PortRememberBeamAmmo(mSaveBuffer.data(), mSaveBuffer.capacity(),
+                                                      true);
+#endif
   mFileInfo = CGameState::LoadGameFileState(mSaveBuffer.data());
 }
 

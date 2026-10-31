@@ -548,9 +548,8 @@ TUniqueId CSandworm::ScanCoverPoints(CStateManager& mgr) {
     return best;
   }
 
-  // No 'CONN' links: scan the state manager's object list. Retail reads the list pointer at
-  // mgr+0x838, which has no port equivalent; the all-objects list is a superset.
-  CObjectList& list = mgr.ObjectListById(kOL_All);
+  // No 'CONN' links: scan the AiWaypoint list (retail reads it at mgr+0x838).
+  CObjectList& list = mgr.ObjectListById(kOL_AiWaypoint);
   for (int idx = list.GetFirstObjectIndex(); idx != -1; idx = list.GetNextObjectIndex(idx)) {
     const CScriptCoverPoint* cp = TCastToPtr< CScriptCoverPoint >(list[idx]);
     if (!TestCoverPoint(cp)) {

@@ -2577,9 +2577,11 @@ void CPlayer::UpdateFrozenState(const CFinalInput& input, CStateManager& mgr) {
 
 void CPlayer::ProcessInput(const CFinalInput& input, CStateManager& mgr) {
 #ifdef TARGET_PC
-  // Twin-stick aim reads the C-stick here and applies it in Think (see UpdateMouseAim).
-  mPortLookX = input.GetAnalogRightX();
-  mPortLookY = input.GetAnalogRightY();
+  // Twin-stick aim reads the C-stick here and applies it in Think (see UpdateMouseAim), unless a
+  // key on it is picking a beam (PortMouse::StickOwnsCStick).
+  const bool stickAims = PortMouse::StickOwnsCStick();
+  mPortLookX = stickAims ? input.GetAnalogRightX() : 0.f;
+  mPortLookY = stickAims ? input.GetAnalogRightY() : 0.f;
 #endif
   static_cast< CControlHintManager* >(mControlHintManager.get())
       ->ProcessInput(input, mControlMapper, mgr);
@@ -3378,6 +3380,15 @@ void CPlayer::Render(const CStateManager& mgr) const {
       } else {
         mBallTransitionBeamModel->Touch(mgr, 0);
       }
+#ifdef TARGET_PC
+      // Port: the free and photo cameras' body holds its cannon; single player only places it
+      // during morph transitions, so put it on the gun locator here.
+      if (PortFreeCam::ShowPlayer() && !mgr.IsMultiplayer()) {
+        mBallTransitionBeamModel->Render(
+            mgr, GetTransform() * GetModelData()->GetScaledLocatorTransform(rstl::string_l(kGunLocator)),
+            GetActorLights(), mPlayerDrawFlags.UseShaderSet(mTransitionBeamShader));
+      } else
+#endif
       mBallTransitionBeamModel->Render(mgr, mGunWorldXf, GetActorLights(),
                                        mPlayerDrawFlags.UseShaderSet(mTransitionBeamShader));
     }
@@ -3821,6 +3832,9 @@ void CPlayer::UpdateScanningState(const CFinalInput& input, CStateManager& mgr, 
 
               if (allScanned) {
                 mPlayerState->StartTransitionToVisor(CPlayerState::kPV_Combat);
+#ifdef TARGET_PC
+                if (mgr.IsMultiplayer())
+#endif
                 mPlayerState->ReInitializePowerUp(CPlayerState::kIT_ScanVisor, 0);
                 CPlayerState::CPowerUp& virus = mPlayerState->PowerUp(CPlayerState::kIT_ScanVirus);
                 virus.mTimeLeft = -1.f;
@@ -4760,7 +4774,14 @@ void CPlayer::UpdateDarkAetherDamage(float dt, CStateManager& mgr) {
     }
   }
 
+#ifdef TARGET_PC
+  // Port: the No Dark Aether damage cheat (F1 > Cheats) treats the air as the Light Suit does: no
+  // damage, tint or particles. Safe zones above still heal.
+  if (!mgr.GetIsDarkWorld() || mPlayerState->HasPowerUp(CPlayerState::kIT_LightSuit) ||
+      PortOverlay::NoDarkAetherDamage()) {
+#else
   if (!mgr.GetIsDarkWorld() || mPlayerState->HasPowerUp(CPlayerState::kIT_LightSuit)) {
+#endif
     mDarkWorldDamageExposureTime = 0.f;
     mDarkAetherDamageFlashTime = 0.f;
     if (mDarkAetherParticles.get()) {

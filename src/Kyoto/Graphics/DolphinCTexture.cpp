@@ -511,6 +511,33 @@ void CTexture::InitBitmapBuffers(ETexelFormat fmt, short width, short height, in
   CountMemory();
 }
 
+#ifdef TARGET_PC
+bool CTexture::PortGrowRows(int extraRows) {
+  if (extraRows <= 0 || (extraRows & 7) != 0 || mNumMips != 1 || mTexelFormat != kTF_C4 ||
+      (mHeight & 7) != 0 || (mWidth & 7) != 0 || !mBitmapReloader.null()) {
+    return false;
+  }
+  const uchar* oldBuf = static_cast< const uchar* >(mARAMToken.GetMRAMSafe());
+  const short newHeight = short(mHeight + extraRows);
+  const uint newSize = GXGetTexBufferSize(mWidth, newHeight, mNativeCIFormat, false, 0);
+  if (oldBuf == nullptr || newSize < mMemoryAllocated) {
+    return false;
+  }
+  // The new bitmap lives at a fresh address, so Aurora never confuses it with the old one; the old
+  // one is freed only after the drain, as every free of texture data is (UnloadBitmapData).
+  uchar* newBuf = static_cast< uchar* >(CMemory::Alloc(newSize, IAllocator::kHI_RoundUpLen));
+  for (uint i = 0; i < newSize; ++i) {
+    newBuf[i] = i < mMemoryAllocated ? oldBuf[i] : 0;
+  }
+  GXDrawDone();
+  UncountMemory();
+  mARAMToken = CARAMToken(newBuf, newSize, 1);
+  mHeight = newHeight;
+  mMemoryAllocated = newSize;
+  return true;
+}
+#endif
+
 void CTexture::UnLock() {
   mLocked = false;
   mCanLoadObj = true;

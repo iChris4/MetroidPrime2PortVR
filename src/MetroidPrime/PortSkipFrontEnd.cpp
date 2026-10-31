@@ -34,12 +34,14 @@
 #include "MetroidPrime/Player/CGMSinglePlayer.hpp"
 #include "MetroidPrime/Player/CGameState.hpp"
 #include "MetroidPrime/Player/CPlayerState.hpp"
+#include "MetroidPrime/Player/CWorldState.hpp"
 
 #include "Kyoto/CResFactory.hpp"
 
 #include "MetroidPrime/CIOWinManager.hpp"
 
 #include "port_harness.h"
+#include "port_savestate.h"
 #include "port_warp.h"
 
 #include <stdio.h>
@@ -349,7 +351,20 @@ bool StartGame() {
 
   gpMain->SetRestartMode(CMain::kRM_Default);
   // MP2_WORLD="<world>,<area>": start in the destination rather than the save's world.
-  PortWarp::DirectBoot();
+  if (!PortWarp::DirectBoot()) {
+    // A pending quick resume names the room to start in: the card's own area (a new game's Landing
+    // Site, with its intro) is never loaded. The resume's load still runs over it once the game is
+    // up, for the position, the room state and the cinematic.
+    uint32_t resumeWorld = 0;
+    uint32_t resumeArea = 0;
+    if (PortSaveState::ResumeBootArea(resumeWorld, resumeArea)) {
+      gpMain->EnsureWorldPakReady(resumeWorld);
+      gpGameState->SetCurrentWorldId(resumeWorld);
+      gpGameState->CurrentWorldState().SetDesiredAreaAssetId(resumeArea);
+      fprintf(stderr, "[skip] quick resume: starting in world %08x area %08x\n", resumeWorld,
+              resumeArea);
+    }
+  }
   fprintf(stderr, "[skip] the save is the running state at %.1f s: world %08x, desired area %08x\n",
           PortHarness::Seconds(), gpGameState->CurrentWorldAssetId(),
           gpGameState->CurrentWorldState().GetDesiredAreaAssetId());

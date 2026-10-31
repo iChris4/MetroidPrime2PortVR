@@ -29,6 +29,7 @@ namespace {
 PortMouse::AimState sAim;
 bool sEnabled = false;
 bool sStickEnabled = false;
+bool sKeyboardCStickHeld = false;
 // The Java UI thread can flip this through a layout change while the game thread reads it in
 // UpdateAim, so it is atomic unlike the mouse's and the stick's flags.
 std::atomic<bool> sTouchEnabled{false};
@@ -267,6 +268,13 @@ bool StickEnabled() {
   ReadEnv();
   return sStickEnabled && !VrOwnsAim();
 }
+
+bool StickOwnsCStick() {
+  ReadEnv();
+  return sStickEnabled && !(sEnabled && sKeyboardCStickHeld);
+}
+
+void SetKeyboardCStickHeld(bool held) { sKeyboardCStickHeld = held; }
 
 void SetStickEnabled(bool enabled) {
   ReadEnv();

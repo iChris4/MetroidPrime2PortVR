@@ -456,14 +456,14 @@ How each piece maps onto Echoes [I unless marked]:
 | Release discovery, marker file, the prompt and its skip knobs | Same logic, over `port::entry::CurrentGameCode()`. Skipped under `MP2_CONSOLE` and `MP2_NO_DISC_DIALOG`. | Done: `PortSave::OtherReleaseSaves/RestoreToOffer/MarkRestoreOffered` |
 | Hook at boot in `DolphinCMemoryCardSys.cpp` | Same file exists here; `OfferRestoreFromOtherRelease()` at the end of `CMemoryCardSys::Initialize`, under `TARGET_PC` | Done |
 | Import path (`CopyFiles` → converter) | `port::save::Import()` (`port_save.cpp:443`). It backs up what it replaces (`replaced-<stamp>.gci`), and now converts G2ME <-> G2MP through `PortSave::Convert::Gci` instead of refusing (other codes are still refused). | Done |
-| `gen_save_layouts.py` tables | `tools/savw_diff.py` already extracts every per-world list and size the converter needs. Emit them as a generated table rather than printing them. | Data measured; generator not written |
+| `gen_save_layouts.py` tables | `tools/savw_diff.py` already extracts every per-world list and size the converter needs. `tools/savw_diff.py --emit-inc` emits it as `platform/port_save_convert_tables.inc`. | Done |
 | `MapIds` / `Remap` (ID remap, dropped counts) | Rebuild each bit list by stable ID: relay, door and unmappable `TEditorId`s, cinematic IDs, scan asset IDs, and layer names per area (§4). Report the dropped bits, as Prime 1 does. | Done: `Convert::Report` |
 | `ReadSlot` / `WriteSlot`, `ReadSystem` / `WriteSystem` | The `CGameState::PutTo` and `CPersistentOptions` bitstreams of §2. They are the same on G2ME and G2MP. | Layout from source; not checked on data |
 | `MakeHeader` / `PutComment` / `CardCrc` | Rewrite the `SSaveHeader` signature with the **target release's console value** (§3 table), then the two copy CRCs and the header-block CRC. The comment and banner are the same on both GC releases. | Done (header block kept; CRC and generation keep the source file's byte order) |
 | `ReadUsaContainer` / `ReadPalContainer` | One GCI reader covers both GC releases, because the container is the same (§1). | Exists (`Inspect()`) |
 | `ReadWii` / `WriteWii` (`save.bin`) | Trilogy R3ME/R3MP: container ported as `port_save_trilogy.cpp` (plaintext NAND file, no AES; the AES one is the SD `data.bin`). Payload conversion: `port_save_trilogy_payload.cpp` (G2ME). | Partial: G2MP and signature-less (empty card) imports refused |
 
-The first slice worth building is G2ME ↔ G2MP only: both directions are a remap by ID (§4), and the offer, marker and backup flow carries over unchanged.
+The first slice was G2ME ↔ G2MP only (built; see the converter status below): both directions are a remap by ID (§4), and the offer, marker and backup flow carried over unchanged.
 
 ## Converter status and test (2026-10-27)
 

@@ -4,6 +4,12 @@
 // MP1's "Export as" Wii Trilogy (save.bin) choice and the Trilogy mirror; MP1's raw-image Dolphin
 // cards have no counterpart here. The file dialogs answer on another thread, so a pick waits in
 // sPicks until the next frame.
+//
+// Android has no folder picker (SDL3's SDL_ShowOpenFolderDialog fails there), so "Export..." asks
+// for one file at a time: the card's files are queued and SDL_ShowSaveFileDialog opens once per
+// file with its name suggested (the Prime 1 port's approach). The Trilogy is a source save.bin
+// picked with the open dialog, then the result saved through the save dialog. The content:// URI a
+// save dialog returns is written with SDL_IOFromFile, which handles it.
 #include "port_utf8_path.h"
 #include "port_mobile.h"
 #include "debug_ui_internal.h"
@@ -14,6 +20,9 @@
 #include "port_save.h"
 
 #include <SDL3/SDL.h>
+#if defined(__ANDROID__)
+#include <jni.h>
+#endif
 #include <SDL3/SDL_timer.h>
 #include <imgui.h>
 
@@ -28,13 +37,17 @@ namespace {
 
 namespace fs = std::filesystem;
 
-enum Pick { kPick_Import, kPick_Export, kPick_Emulator, kPick_Trilogy };
+enum Pick { kPick_Import, kPick_Export, kPick_Emulator, kPick_Trilogy, kPick_ExportFile };
 // The overlay's "Export as" choice: 0 the card's files as they are, 1 the Wii Trilogy's save.bin.
 int sExportChoice = 0;
 std::mutex sPickMutex;
 std::vector< std::pair< Pick, std::string > > sPicks;
 bool sDialogOpen = false;
 std::string sStatus;
+#if defined(__ANDROID__)
+// Files still to be saved one by one (main thread only).
+std::vector< PortSave::ExportFile > sExportQueue;
+#endif
 
 SDL_Window* FirstWindow() {
   int count = 0;
@@ -44,10 +57,54 @@ SDL_Window* FirstWindow() {
   return window;
 }
 
+#if defined(__ANDROID__)
+// SDL's Android save picker ignores its initial-location argument, so the suggested name goes to
+// SDLActivity.setNextSaveDialogSuggestedFilename first.
+void SetNextAndroidSaveDialogFilename(const char* filename) {
+  JNIEnv* env = static_cast< JNIEnv* >(SDL_GetAndroidJNIEnv());
+  jobject activity = env != nullptr ? static_cast< jobject >(SDL_GetAndroidActivity()) : nullptr;
+  if (activity == nullptr) {
+    return;
+  }
+  jclass cls = env->GetObjectClass(activity);
+  jmethodID method = nullptr;
+  if (cls != nullptr && !env->ExceptionCheck()) {
+    method = env->GetStaticMethodID(cls, "setNextSaveDialogSuggestedFilename", "(Ljava/lang/String;)V");
+  }
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    method = nullptr;
+  }
+  jstring name = method != nullptr ? env->NewStringUTF(filename != nullptr ? filename : "") : nullptr;
+  if (name != nullptr) {
+    env->CallStaticVoidMethod(cls, method, name);
+    if (env->ExceptionCheck()) {
+      env->ExceptionClear();
+    }
+    env->DeleteLocalRef(name);
+  }
+  if (cls != nullptr) {
+    env->DeleteLocalRef(cls);
+  }
+  env->DeleteLocalRef(activity);
+}
+#endif
+
+// A failed dialog (files == nullptr) is queued as an empty path with SDL's error in sPickError, so
+// it shows in sStatus instead of vanishing; a cancel (files[0] == nullptr) is an empty path alone.
+std::string sPickError;
+
 void OnPick(void* userdata, const char* const* files, int) {
   std::lock_guard< std::mutex > lock(sPickMutex);
+  const Pick pick = static_cast< Pick >(reinterpret_cast< intptr_t >(userdata));
   if (files != nullptr && files[0] != nullptr) {
-    sPicks.emplace_back(static_cast< Pick >(reinterpret_cast< intptr_t >(userdata)), files[0]);
+    sPicks.emplace_back(pick, files[0]);
+  } else {
+    if (files == nullptr) {
+      const char* error = SDL_GetError();
+      sPickError = error != nullptr && error[0] != '\0' ? error : "the system dialog failed";
+    }
+    sPicks.emplace_back(pick, std::string());
   }
   sDialogOpen = false;
 }
@@ -61,6 +118,15 @@ void OpenDialog(Pick pick) {
   } else if (pick == kPick_Trilogy) {
     static const SDL_DialogFileFilter bin[] = {{"Trilogy save (save.bin)", "bin"}, {"All files", "*"}};
     SDL_ShowOpenFileDialog(OnPick, userdata, FirstWindow(), bin, 2, nullptr, false);
+  } else if (pick == kPick_ExportFile) {
+#if defined(__ANDROID__)
+    static std::string name;
+    name = sExportQueue.empty() ? std::string() : sExportQueue.front().name;
+    SetNextAndroidSaveDialogFilename(name.c_str());
+    SDL_ShowSaveFileDialog(OnPick, userdata, FirstWindow(), nullptr, 0, name.empty() ? nullptr : name.c_str());
+#else
+    sDialogOpen = false;
+#endif
   } else {
     // A folder: the card's files keep their names, so they import back as they are; the emulator
     // pick is its user folder.
@@ -95,7 +161,7 @@ std::vector< fs::path > DolphinSaves(const fs::path& card) {
   return out;
 }
 
-void OpenFolder(const std::string& path) {
+[[maybe_unused]] void OpenFolder(const std::string& path) {
   // "Card A" has a space, which a URL can't carry as is.
   std::string url = !path.empty() && path.front() == '/' ? "file://" : "file:///";
   for (const char c : path) {
@@ -112,6 +178,56 @@ void TakePicks() {
   }
   for (const auto& [pick, path] : picks) {
     std::string message;
+    if (path.empty()) {
+      // Cancelled or failed; the rest of an Android export queue goes with it.
+#if defined(__ANDROID__)
+      sExportQueue.clear();
+#endif
+      std::lock_guard< std::mutex > lock(sPickMutex);
+      if (!sPickError.empty()) {
+        sStatus = "The file dialog failed: " + sPickError;
+        sPickError.clear();
+      }
+      continue;
+    }
+#if defined(__ANDROID__)
+    if (pick == kPick_Trilogy) {
+      size_t size = 0;
+      void* data = SDL_LoadFile(path.c_str(), &size);
+      if (data == nullptr) {
+        sStatus = std::string("Export failed: could not read the save.bin: ") + SDL_GetError();
+        continue;
+      }
+      const uint8_t* raw = static_cast< const uint8_t* >(data);
+      const std::vector< uint8_t > base(raw, raw + size);
+      SDL_free(data);
+      if (PortSave::ExportBytes(true, base, sExportQueue, message)) {
+        OpenDialog(kPick_ExportFile);
+      } else {
+        sStatus = "Export failed: " + message;
+      }
+      continue;
+    }
+    if (pick == kPick_ExportFile) {
+      if (!sExportQueue.empty()) {
+        const PortSave::ExportFile& file = sExportQueue.front();
+        SDL_IOStream* out = SDL_IOFromFile(path.c_str(), "wb");
+        bool ok = out != nullptr && (file.bytes.empty() || SDL_WriteIO(out, file.bytes.data(), file.bytes.size()) == file.bytes.size());
+        if (out != nullptr) {
+          ok = SDL_CloseIO(out) && ok;
+        }
+        sStatus = ok ? "Exported: " + file.name + (file.note.empty() ? "" : " (" + file.note + ")")
+                     : "Export failed: could not save " + file.name + ": " + SDL_GetError();
+        sExportQueue.erase(sExportQueue.begin());
+        if (ok && !sExportQueue.empty()) {
+          OpenDialog(kPick_ExportFile);
+        } else {
+          sExportQueue.clear();
+        }
+      }
+      continue;
+    }
+#endif
     if (pick == kPick_Emulator) {
       PortSave::SetEmulatorFolder(path);
       PortOverlaySettings::MarkDirty();
@@ -302,6 +418,22 @@ void DrawCardTransfer() {
            "and save once first: that file's Echoes game is replaced. A Wii's signed data.bin "
            "can't be made here.");
   const bool trilogy = sExportChoice == 1;
+#if defined(__ANDROID__)
+  if (ImGui::Button(trilogy ? "Export into save.bin..." : "Export...")) {
+    std::string message;
+    if (trilogy) {
+      OpenDialog(kPick_Trilogy);
+    } else if (PortSave::ExportBytes(false, {}, sExportQueue, message)) {
+      OpenDialog(kPick_ExportFile);
+    } else {
+      sStatus = "Export failed: " + message;
+    }
+  }
+  ItemHelp(trilogy ? "Pick the Trilogy save.bin to start from, then choose where to save the updated "
+                     "copy; the file you picked is left as it is."
+                   : "Saves the card's save file (one at a time if there are several) wherever you "
+                     "choose, with its own name so it can be imported again.");
+#else
   if (ImGui::Button(trilogy ? "Export into save.bin..." : "Export to folder...")) {
     OpenDialog(trilogy ? kPick_Trilogy : kPick_Export);
   }
@@ -322,11 +454,14 @@ void DrawCardTransfer() {
                      "data/save.bin); the old one is kept as save.bin.bak."
                    : "Close the emulator first. Writes the save into its card folder for this release; a file "
                      "of the same name there gets a numbered copy, not replaced.");
+#endif
   ImGui::EndDisabled();
+#if !defined(__ANDROID__)
   ImGui::SameLine();
   if (ImGui::Button("Open card folder")) {
     OpenFolder(folder);
   }
+#endif
   if (inGame) {
     ImGui::TextColored(ThemeWarnColor(), "Return to the title screen to import.");
   }

@@ -96,6 +96,7 @@ std::atomic< bool > sDeviceXbox{false};
 // What the UI thread asks of the game; BeginFrame applies it on the game thread.
 std::atomic< int > sWheelState{0};
 std::atomic< bool > sMorphed{false};
+std::atomic< bool > sScanTextUp{false};
 std::atomic<bool> sRadialTouchForeground{true};
 std::atomic< int > sPendingVisor{-1};
 std::atomic< int > sPendingBeam{-1};
@@ -713,6 +714,8 @@ void SetAimSpeedY(float pxPerDp) { SetNumber(&Settings::aimSpeedY, pxPerDp, 0.5f
 
 void SetMorphed(bool morphed) { sMorphed.store(morphed, std::memory_order_release); }
 bool Morphed() { return sMorphed.load(std::memory_order_acquire); }
+void SetScanTextUp(bool up) { sScanTextUp.store(up, std::memory_order_release); }
+bool ScanTextUp() { return sScanTextUp.load(std::memory_order_acquire); }
 
 void RequestEdit() {
   PortRadial::CancelAllTouches();

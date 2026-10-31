@@ -95,6 +95,9 @@ CIOWin::EMessageReturn CMFGameLoader::OnMessage(const CArchitectureMessage& mess
     const CFinalInput& input = parm.GetUserInput();
     if (input.ControllerNumber() == 0 && input.PStart() && !transition.IsNull() &&
         transition->IsIntroText() && !mStateManager.IsNull() &&
+#ifdef TARGET_PC
+        !PortOverlay::SkipCinematics() && // with it on, the confirmed skip below handles START
+#endif
         mStateManager->IsFullyInitialized()) {
       transition->CheckIntroTextSeen();
     }
@@ -104,11 +107,17 @@ CIOWin::EMessageReturn CMFGameLoader::OnMessage(const CArchitectureMessage& mess
         PortOverlay::WorldNameCard() == PortOverlay::kScreen_Skippable) {
       transition->PortSkipText();
     }
-    // Port: with skippable cutscenes on, A or Start also ends the intro text, seen or not.
+    // Port: with skippable cutscenes on, A or Start also ends the intro text, seen or not; the
+    // first press only arms the "Skip [A]" prompt, a second while it shows skips.
     if (input.ControllerNumber() == 0 && (input.PA() || input.PStart()) && !transition.IsNull() &&
         transition->IsIntroText() && PortOverlay::SkipCinematics() && !mStateManager.IsNull() &&
         mStateManager->IsFullyInitialized()) {
-      transition->PortSkipIntroText();
+      if (PortOverlay::SkipConfirmArmed()) {
+        PortOverlay::SkipConfirmDisarm();
+        transition->PortSkipIntroText();
+      } else {
+        PortOverlay::SkipConfirmArm();
+      }
     }
 #endif
   } else if (type == kAM_TimerTick) {

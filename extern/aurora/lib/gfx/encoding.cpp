@@ -750,12 +750,12 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
     if (peekEye >= 0 && peekEye < static_cast<int32_t>(AURORA_STEREO_EYE_COUNT) && passInfo.stereo.enabled &&
         passInfo.stereo.eyes[peekEye].peekColor) {
       const auto& eyePass = passInfo.stereo.eyes[peekEye];
-      scan_peek::encode(cmd, eyePass.peekColor, eyePass.peekDepth, 1, peek, eyePass.peekLayer);
+      scan_peek::encode(cmd, eyePass.peekColor, eyePass.peekDepth, 1, peek, {}, eyePass.peekLayer);
     } else {
       scan_peek::Request monoPeek = peek;
       monoPeek.eye = -1;
       scan_peek::encode(cmd, passInfo.copySourceTexture, passInfo.copySourceDepthTexture, passInfo.msaaSamples,
-                        monoPeek);
+                        monoPeek, passInfo.colorAttachments[SceneColorAttachmentIndex].view);
     }
   }
 

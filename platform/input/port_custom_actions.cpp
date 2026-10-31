@@ -38,6 +38,7 @@ namespace {
 enum class PresetId : int {
   Setting,
   Invulnerable,
+  InfiniteAmmo,
   FreeCamera,
   FreezeGame,
   ShowSamus,
@@ -59,6 +60,8 @@ constexpr Preset kPresets[] = {
     {"setting", "Settings", "Change a setting", "Turn one of the port's settings on, off or the other way",
      false, ArgKind::Setting, true},
     {"invulnerable", "Cheats", "God mode", "Samus takes no damage, until turned off again", true,
+     ArgKind::None, true},
+    {"infinite_ammo", "Cheats", "Infinite ammo", "Fire with empty ammo; the HUD shows infinity, real counts and pickups are kept, until turned off again", true,
      ArgKind::None, true},
     {"free_camera", "Cheats", "Free camera", "Fly the view away from Samus to look around", true, ArgKind::None,
      true},
@@ -92,10 +95,12 @@ static_assert(std::size(kPresets) == size_t(PresetId::Count));
 constexpr BoolSetting kBoolSettings[] = {
     {"skip_cinematics", "Skip cinematics", "Game", &PortOverlay::SkipCinematics,
      &PortOverlay::SetSkipCinematics},
-    {"unlock_beam_doors", "Beam doors stay unlocked", "Game", &PortOverlay::UnlockBeamDoors,
+    {"unlock_beam_doors", "Unlock beam doors", "Debug", &PortOverlay::UnlockBeamDoors,
      &PortOverlay::SetUnlockBeamDoors},
     {"stack_beams", "Stack beams", "Game", &PortOverlay::StackBeams,
      &PortOverlay::SetStackBeams},
+    {"stack_beams_skip_dark", "Leave out Dark Beam", "Game", &PortOverlay::StackBeamsSkipDark,
+     &PortOverlay::SetStackBeamsSkipDark},
     {"unlock_hard_mode", "Unlock Hard mode", "Game", &PortOverlay::UnlockHardMode,
      &PortOverlay::SetUnlockHardMode},
     {"unlock_galleries", "Unlock galleries", "Game", &PortOverlay::UnlockGalleries,
@@ -582,6 +587,8 @@ std::string AutoName(const PortInput::CustomActionDef& def) {
   }
   case PresetId::Invulnerable:
     return ModalName("God mode", def.mode);
+  case PresetId::InfiniteAmmo:
+    return ModalName("Infinite ammo", def.mode);
   case PresetId::FreeCamera:
     return ModalName("Free camera", def.mode);
   case PresetId::FreezeGame:
@@ -656,6 +663,11 @@ std::string Run(const PortInput::CustomActionDef& def) {
     const bool on = Next(ModeOf(def.mode), PortOverlay::GodMode());
     PortOverlay::SetGodMode(on);
     return "God mode " + OnOff(on);
+  }
+  case PresetId::InfiniteAmmo: {
+    const bool on = Next(ModeOf(def.mode), PortOverlay::InfiniteAmmo(PortOverlay::kInfAmmoAll));
+    PortOverlay::SetInfiniteAmmo(PortOverlay::kInfAmmoAll, on);
+    return "Infinite ammo " + OnOff(on);
   }
   case PresetId::FreeCamera:
   case PresetId::FreezeGame:

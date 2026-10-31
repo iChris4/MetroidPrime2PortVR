@@ -10,6 +10,7 @@
 #include "port_input_bindings.h"
 #include "port_debug.h"
 #include "port_overlay.h"
+#include "port_photo.h"
 #include "port_pointer.h"
 #include "port_textures.h"
 #include "port_touch.h"
@@ -218,9 +219,15 @@ Java_org_metroidprime2_port_TouchControlsView_nativeDebugOverlayVisible(JNIEnv*,
   return PortTouch::OverlayVisible() ? JNI_TRUE : JNI_FALSE;
 }
 
+// Photo mode without the F1 window: every finger flies the camera, so none is a scroll.
+JNIEXPORT jboolean JNICALL
+Java_org_metroidprime2_port_TouchControlsView_nativePhotoTouch(JNIEnv*, jclass) {
+  return PortPhoto::Active() && !PortOverlay::Visible() ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT void JNICALL
 Java_org_metroidprime2_port_TouchControlsView_nativeToggleDebugOverlay(JNIEnv*, jclass) {
-  PortOverlay::Toggle();
+  PortOverlay::RequestToggle();
 }
 
 JNIEXPORT void JNICALL

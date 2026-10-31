@@ -1025,7 +1025,12 @@ void CIngSpaceJumpGuardian::UpdateLight(float dt, CStateManager& mgr) {
     const CColor color = CColor::Lerp(CColor::Black(), mData.lightColor, mLightIntensity);
     const CVector3f position = GetLctrTransform(mHeadSeg).GetTranslation();
     CLight lightData = CLight::BuildPoint(position, color);
+#ifdef TARGET_PC
+    // Retail 0x2238-0x2258 (fn_34_216C): constant 0, 1 / [0x81C], 0 (the linear term).
+    lightData.SetAttenuation(0.f, 1.f / mData.lightAttenuation, 0.f);
+#else
     lightData.SetAttenuation(1.f / mData.lightAttenuation, 0.f, 0.f);
+#endif
     light->SetLight(lightData);
   }
 }

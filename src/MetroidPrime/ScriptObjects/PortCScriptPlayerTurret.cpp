@@ -725,22 +725,25 @@ void CScriptPlayerTurret::LoadHullActors(CStateManager& mgr) {
   CAnimData* animData = base != nullptr && base->GetModelData() != nullptr
                            ? base->AnimationData()
                            : nullptr;
+  // Without a base actor or its animation data the guest skips the lookups and the flags copy
+  // (0x16E8/0x16F8 branch to 0x1A04).
   if (animData != nullptr) {
+    // 0x1634: the five animation ids (0x19C..0x1AC) come from the base actor's animation
+    // database: the getup (twice), the step, the death and the locomotion animation. Only the two
+    // getup lookups pass a parameter (the guest's FromEnum(0) at 0x1670 and FromEnum(1) at
+    // 0x1704); the other three pass eight empty ones (the guest's eight NoParameter calls at
+    // 0x175C..0x18B4).
+    mAnimId1 = animData->FindBestAnimation(
+        BuildAnimParmData(pas::kAS_Getup, CPASAnimParm::FromEnum(0)));
+    mAnimId2 = animData->FindBestAnimation(
+        BuildAnimParmData(pas::kAS_Getup, CPASAnimParm::FromEnum(1)));
+    mUnknown1A4 = animData->FindBestAnimation(BuildAnimParmData(pas::kAS_Step));
+    mUnknown1A8 = animData->FindBestAnimation(BuildAnimParmData(pas::kAS_Death));
+    mUnknown1AC = animData->FindBestAnimation(BuildAnimParmData(pas::kAS_Locomotion));
     // 0x1918: the base actor's model flags (the guest's 0xFC..0x104) become the turret's saved
     // copy (0x1D4..0x1DC), which the stop message hands back.
     mModelFlags = base->GetModelFlags();
   }
-  // 0x1634: the five animation ids (0x19C..0x1AC) come from the base actor's animation
-  // database: the getup (twice), the step, the death and the locomotion animation. Only the two
-  // getup lookups pass a parameter (the guest's FromEnum(0) at 0x1670 and FromEnum(1) at 0x1704);
-  // the other three pass eight empty ones (the guest's eight NoParameter calls at 0x175C..0x18B4).
-  mAnimId1 = animData->FindBestAnimation(
-      BuildAnimParmData(pas::kAS_Getup, CPASAnimParm::FromEnum(0)));
-  mAnimId2 = animData->FindBestAnimation(
-      BuildAnimParmData(pas::kAS_Getup, CPASAnimParm::FromEnum(1)));
-  mUnknown1A4 = animData->FindBestAnimation(BuildAnimParmData(pas::kAS_Step));
-  mUnknown1A8 = animData->FindBestAnimation(BuildAnimParmData(pas::kAS_Death));
-  mUnknown1AC = animData->FindBestAnimation(BuildAnimParmData(pas::kAS_Locomotion));
   // 0x1930: the top actor is the turret's "AttachedCollisionObject" connection.
   mTopActorId = FindConnectedObject(mgr, kSS_AttachedCollisionObject, kSM_Attach);
 }

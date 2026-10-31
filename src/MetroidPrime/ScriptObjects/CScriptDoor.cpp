@@ -2,6 +2,8 @@
 
 #ifdef TARGET_PC
 #include <cstdio>
+
+#include "port_overlay.h"
 #endif
 
 #include "Kyoto/Animation/CPASAnimParmData.hpp"
@@ -676,6 +678,15 @@ void CScriptDoor::Render(const CStateManager& mgr) const {}
 CHealthInfo* CScriptDoor::HealthInfo() { return &mCurrentHealth; }
 
 const CDamageVulnerability* CScriptDoor::GetDamageVulnerability() const {
+#ifdef TARGET_PC
+  // Echoes keeps a beam door's colour on the door itself, not on a damageable trigger.
+  if (PortOverlay::UnlockBeamDoors() && mCurrentVulnerability.PortIsColorLock()) {
+    if (!mPortAnyBeamVulnerability) {
+      mPortAnyBeamVulnerability = mCurrentVulnerability.PortAnyBeam();
+    }
+    return &*mPortAnyBeamVulnerability;
+  }
+#endif
   return &mCurrentVulnerability;
 }
 

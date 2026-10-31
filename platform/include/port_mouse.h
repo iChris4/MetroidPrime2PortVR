@@ -230,6 +230,12 @@ void SetEnabled(bool enabled);
 // through the same state as the mouse. Works with or without mouse aim.
 bool StickEnabled();
 void SetStickEnabled(bool enabled);
+// Twin stick takes the C-stick for aim, so the game's C-stick beam picks ignore it (issue #15).
+// Under mouse aim a keyboard key held on a C-stick direction (the mouse-and-keyboard preset's
+// 1-4) gives it back for that poll: the key picks a beam and does not aim, as in MP1.
+// PortInputDevices sets the key state each poll.
+bool StickOwnsCStick();
+void SetKeyboardCStickHeld(bool held);
 float StickAimRate();
 void SetStickAimRate(float pixelsPerSecond);
 // Separate vertical speed: with the split on, the stick's up and down use StickAimRateY instead.

@@ -117,6 +117,16 @@ std::string SharedCardBase(std::string* why = nullptr);
 // with no counterpart in the other release are dropped.
 std::string FindEmulatorTrilogy(); // Dolphin's save.bin for this region, or empty
 bool ExportTrilogy(const std::string& saveBin, std::string& message);
+// A file to hand to a save dialog (Android: the content:// URI it returns can only be written
+// through SDL_IOFromFile). The card's own files, or with `trilogy` the one save.bin: `trilogyBase`
+// (the picked save.bin's bytes) with the card's newest slot written into it.
+struct ExportFile {
+  std::string name;
+  std::vector<uint8_t> bytes;
+  std::string note;
+};
+bool ExportBytes(bool trilogy, const std::vector<uint8_t>& trilogyBase, std::vector<ExportFile>& out,
+                 std::string& message);
 void SetMirrorTrilogy(bool mirror);
 bool MirrorTrilogy();
 std::string TrilogyShareBin(); // the mirrored save.bin, empty when mirroring is off

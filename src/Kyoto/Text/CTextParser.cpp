@@ -32,9 +32,34 @@ const PortWiiPrompt kPortWiiPrompts[] = {
     {0xE2F4B915, 0xB4EDE4B6, 0.6f, 0.85f},  // - (visors) -> D-pad
 };
 
+// The Wii's Z both scans/grapples and holds the Spider Ball; the GC disc says L for the first
+// and R for the second. Set while ParseText reads a string about the Spider Ball.
+const uint kPortWiiZ = 0x60ACB985;
+const PortWiiPrompt kPortSpiderBallPrompt = {kPortWiiZ, 0xD89B9F7C, 1.0f, 1.0f}; // Z -> R
+bool sPortSpiderBallText = false;
+
+bool PortTextContains(const wchar_t* str, int len, const char* needle) {
+  for (int i = 0; len == -1 ? str[i] != 0 : i < len; ++i) {
+    int j = 0;
+    while (needle[j] && (len == -1 || i + j < len) && str[i + j] == static_cast< wchar_t >(needle[j]))
+      ++j;
+    if (!needle[j])
+      return true;
+  }
+  return false;
+}
+
+// Every Trilogy string that draws Z for the Spider Ball names it one of these two ways, and no
+// scan, grapple, lock-on or hack string does.
+bool PortIsSpiderBallText(const wchar_t* str, int len) {
+  return PortTextContains(str, len, "Spider Ball") || PortTextContains(str, len, "Morph Ball mode");
+}
+
 const PortWiiPrompt* PortFindWiiPrompt(CAssetId id) {
   if (!port::entry::IsTrilogy(port::entry::CurrentDiscVersion()))
     return nullptr;
+  if (sPortSpiderBallText && static_cast< uint >(id) == kPortWiiZ)
+    return &kPortSpiderBallPrompt;
   for (const PortWiiPrompt& prompt : kPortWiiPrompts) {
     if (prompt.wiiId == static_cast< uint >(id))
       return &prompt;
@@ -58,6 +83,11 @@ CTextParser::CTextParser(IObjectStore& store) : mObjectStore(store) {}
 
 void CTextParser::ParseText(CTextExecuteBuffer& buffer, const wchar_t* str, int len,
                             const rstl::vector< rstl::pair< CAssetId, CAssetId > >* textureMap) {
+#ifdef TARGET_PC
+  const bool portWasSpiderBallText = sPortSpiderBallText;
+  sPortSpiderBallText = port::entry::IsTrilogy(port::entry::CurrentDiscVersion()) &&
+                        PortIsSpiderBallText(str, len);
+#endif
   int begin = 0;
   int end = 0;
   while (str[end] && (len == -1 || end < len)) {
@@ -85,6 +115,9 @@ void CTextParser::ParseText(CTextExecuteBuffer& buffer, const wchar_t* str, int 
   if (end > begin) {
     buffer.AddString(str + begin, end - begin);
   }
+#ifdef TARGET_PC
+  sPortSpiderBallText = portWasSpiderBallText;
+#endif
 }
 
 CAssetId CTextParser::GetAssetIdFromString(

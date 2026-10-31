@@ -15,6 +15,11 @@
 #include "rstl/algorithm.hpp"
 #include "rstl/math.hpp"
 
+#ifdef TARGET_PC
+#include "port_beam_ammo.h"
+#include "port_overlay.h"
+#endif
+
 struct ScanIdLess {
   bool operator()(const CPlayerState::SPersistentState::SScanState& scan, CAssetId id) const {
     return scan.mAssetId < id;
@@ -91,6 +96,50 @@ static const CPlayerState::EItemType kItems_803a74bc[11] = {
 };
 
 int CPlayerState::GetPowerUpMaxValue(EItemType type) { return kPowerUpMax[type]; }
+
+#ifdef TARGET_PC
+int CPlayerState::PortPowerUpMaxValue(EItemType type) {
+  if (type == kIT_DarkAmmo || type == kIT_LightAmmo) {
+    return kPowerUpMax[type] * PortOverlay::BeamAmmoPerExpansion() / PortOverlay::kBeamAmmoPerExpansionDefault;
+  }
+  return kPowerUpMax[type];
+}
+
+void CPlayerState::PortRememberBeamAmmo(const void* data, unsigned long size, bool persist) const {
+  const CPowerUp& dark = mPowerups[kIT_DarkAmmo];
+  const CPowerUp& light = mPowerups[kIT_LightAmmo];
+  const int vanilla = kPowerUpMax[kIT_DarkAmmo];
+  if (dark.mAmount <= vanilla && dark.mCapacity <= vanilla && light.mAmount <= vanilla &&
+      light.mCapacity <= vanilla) {
+    return; // fits the retail save; nothing to keep
+  }
+  PortBeamAmmo::Amounts amounts;
+  amounts.darkAmount = dark.mAmount;
+  amounts.darkCapacity = dark.mCapacity;
+  amounts.lightAmount = light.mAmount;
+  amounts.lightCapacity = light.mCapacity;
+  PortBeamAmmo::Remember(data, size, amounts, persist);
+}
+
+void CPlayerState::PortApplyBeamAmmo(const void* data, unsigned long size) {
+  PortBeamAmmo::Amounts amounts;
+  if (!PortBeamAmmo::Find(data, size, amounts)) {
+    return;
+  }
+  const int max = PortPowerUpMaxValue(kIT_DarkAmmo);
+  const int values[2][2] = {{amounts.darkAmount, amounts.darkCapacity},
+                            {amounts.lightAmount, amounts.lightCapacity}};
+  const EItemType types[2] = {kIT_DarkAmmo, kIT_LightAmmo};
+  for (int i = 0; i < 2; ++i) {
+    CPowerUp& powerup = mPowerups[types[i]];
+    // Only ever raise: the loaded (clamped) values are the floor, and the slider's current maximum
+    // is the ceiling.
+    const int capacity = rstl::min_val(rstl::max_val(values[i][1], powerup.mCapacity), max);
+    powerup.mCapacity = capacity;
+    powerup.mAmount = rstl::min_val(rstl::max_val(values[i][0], powerup.mAmount), capacity);
+  }
+}
+#endif
 
 uint CPlayerState::GetBitCount(uint val) {
   int bits = 0;
@@ -231,8 +280,17 @@ void CPlayerState::PutTo(CBitStreamWriter& stream) {
   for (int i = 0; i < mPowerups.capacity(); ++i) {
     if (kShouldPersist[i]) {
       int bitCount = GetBitCount(kPowerUpMax[i]);
+#ifdef TARGET_PC
+      // Port: the save keeps retail's bit widths, so Dark/Light above 250 (Beam ammo per expansion)
+      // is written clamped; the real values go to the sidecar (PortRememberBeamAmmo).
+      stream.WriteBits(powup[i].mAmount < kPowerUpMax[i] ? powup[i].mAmount : kPowerUpMax[i],
+                       bitCount);
+      stream.WriteBits(powup[i].mCapacity < kPowerUpMax[i] ? powup[i].mCapacity : kPowerUpMax[i],
+                       bitCount);
+#else
       stream.WriteBits(powup[i].mAmount, bitCount);
       stream.WriteBits(powup[i].mCapacity, bitCount);
+#endif
     }
   }
 
@@ -261,7 +319,11 @@ void CPlayerState::AddPowerUp(CPlayerState::EItemType type, int delta) {
   if (type < 0 || kIT_Max - 1 < type) {
     return;
   }
+#ifdef TARGET_PC
+  int maxCapacity = PortPowerUpMaxValue(type);
+#else
   int maxCapacity = kPowerUpMax[type];
+#endif
   CPowerUp& powerup = mPowerups[type];
   int newCapacity = delta + powerup.mCapacity;
   if (newCapacity < 0) {
@@ -395,6 +457,23 @@ CPlayerState::EPowerUpFieldToQuery CPlayerState::GetPowerUpFieldToQuery(EItemTyp
     }
     break;
   }
+#ifdef TARGET_PC
+  // Port: the infinite ammo cheat takes the game's own unlimited-ammo path, so every gate that
+  // asks for ammo (beams, combos, missiles, seekers, power bombs) passes at a real count of 0.
+  // The disabled / death ball minimums above already won. Real counts are never changed.
+  switch (itemType) {
+  case kIT_Missile:
+  case kIT_DarkAmmo:
+  case kIT_LightAmmo:
+  case kIT_Powerbomb:
+    if (PortOverlay::InfiniteAmmo(PortOverlay::InfiniteAmmoKind(itemType))) {
+      return kFQ_Maximum;
+    }
+    break;
+  default:
+    break;
+  }
+#endif
   return kFQ_Actual;
 }
 
@@ -622,7 +701,16 @@ int CPlayerState::GetItemPercentageRatio() const {
   return (CalculateItemCollectionRate() * 100) / GetTotalPickupCount();
 }
 
-int CPlayerState::GetMissileCostForAltAttack() const { return kMissileCosts[int(mCurrentBeam)]; }
+int CPlayerState::GetMissileCostForAltAttack() const {
+#ifdef TARGET_PC
+  // Port: the Combo missile cost option (F1 > Cheats) caps the retail cost.
+  const int cost = kMissileCosts[int(mCurrentBeam)];
+  const int option = PortOverlay::ComboMissileCost();
+  return cost < option ? cost : option;
+#else
+  return kMissileCosts[int(mCurrentBeam)];
+#endif
+}
 
 float CPlayerState::GetMissileComboChargeFactor() { return 1.8f; }
 
@@ -660,6 +748,13 @@ void CPlayerState::IncrementChargeBeamFactor(float delta) {
 
 void CPlayerState::DecrementAmmoAndDisplayAlertIfOut(CStateManager& mgr,
                                                      CPlayerState::EItemType type, int quantity) {
+#ifdef TARGET_PC
+  // Port: the infinite ammo cheat (F1 > Cheats, per counter). Every shot (beams, charge combos,
+  // missiles, power bombs) spends its ammo here; pickups and scripts still change it.
+  if (PortOverlay::InfiniteAmmo(PortOverlay::InfiniteAmmoKind(type))) {
+    return;
+  }
+#endif
   int oldAmount = GetItemAmount(type);
   DecrPickUp(type, quantity);
   if (oldAmount > 0 && GetItemAmount(type) == 0) {

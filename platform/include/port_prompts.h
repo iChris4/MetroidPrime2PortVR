@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 // Binding-aware button prompt icons.
 //
@@ -25,6 +27,17 @@ const char* ActiveDevice();
 // pad left plugged in does not shake while the game is played on keyboard/mouse;
 // nothing in Echoes asks yet.
 bool KeyboardActive();
+
+// What the game's A button is called on the device in use ("A", "Cross", "Enter"...), for text
+// prompts such as the cinematic skip confirm.
+const char* ConfirmLabel();
+
+// The generated icon for the game's A button on the device in use, or empty when there is none
+// (no bindings folder, or a key without an icon): cheap enough to ask every frame.
+std::string ConfirmIconStem();
+
+// The icon `stem` names as top-down RGBA8, for an ImGui texture. False when it is missing.
+bool LoadIcon(const std::string& stem, std::vector< uint8_t >& rgba, uint32_t& width, uint32_t& height);
 
 // Call once after Aurora is up, with the same texture root the replacements
 // came from (null or empty disables the module).

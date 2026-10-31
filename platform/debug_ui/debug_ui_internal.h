@@ -31,6 +31,8 @@ namespace PortDebug {
 // port_overlay.cpp: the runtime state the pages show.
 extern bool sVisible;
 extern bool sGodMode; // never saved: a cheat must not persist, so it is not a setting
+extern bool sNoDarkAetherDamage; // never saved, as sGodMode
+extern unsigned sInfiniteAmmo; // PortOverlay::kInfAmmo bits; never saved, as sGodMode
 extern uint32_t sWorldId;
 extern int sAreaId;
 extern float sFps;
@@ -155,11 +157,11 @@ void DrawCutscenesSection();
 void DrawGameAudio();
 void DrawSpeedrunSection();
 void DrawTexturesSection(); // the Mods page's texture pack section
-#if defined(__ANDROID__)
 std::string TexturePackStatus();
+#if defined(__ANDROID__)
 void PickTexturePack();
-void SetTexturePackStatus(std::string status);
 #endif
+void SetTexturePackStatus(std::string status);
 void DrawOverlaySection();
 void DrawSettingsSection();
 void DrawMemoryCard();

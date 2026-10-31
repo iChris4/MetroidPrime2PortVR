@@ -51,6 +51,8 @@ for binding examples, lifecycle rules, harness commands and desktop-only limitat
   (`platform/include/port_config_reset.h`, test `port_config_reset_tests`). Saves, save states and
   the card are not touched.
 - `MP2_GODMODE=1` starts with Cheats > God mode on (not saved).
+- `MP2_NO_DARK_AETHER_DAMAGE=1` starts with Cheats > No Dark Aether damage on (not saved): the air does not hurt, as with the Light Suit; light crystals still heal.
+- `MP2_INFINITE_AMMO=1` starts with every Cheats > Infinite ammo box ticked (not saved): you can fire at zero, the HUD shows ∞, real counts and pickups are kept.
 
 ## Keys
 
@@ -71,7 +73,7 @@ Game page:
 - `original_experience`: Cutscenes > Original experience (default off); env
   `MP2_ORIGINAL_EXPERIENCE`, console `original`. While on, the port's gameplay and cutscene tweaks read
   as retail and their rows are greyed: skippable cutscenes, world name on load, walk speed, hint
-  delay, scan speed, elevator ride, portal transition, fast morph, spring ball, toggle lock-on, sticky charge, remastered
+  delay, scan speed, elevator ride, portal transition, rotating rooms, fast morph, spring ball, toggle lock-on, sticky charge, remastered
   charge, auto-aim (on). Your saved values are kept and return when it is switched off. Mods, input,
   video and audio settings are not affected.
 - `skip_cinematics`: Cutscenes > Skippable cutscenes.
@@ -89,6 +91,25 @@ Game page:
 - `elevator_ride`: Cutscenes > Elevator ride (0 original, 1 fast, 2 skip); env `MP2_ELEVATOR_RIDE`
   (`original|fast|skip`). Fast runs the world-transition ride at double speed; Skip ends it as soon as
   the next world has loaded (the load itself still takes its time). Text transitions are unchanged.
+- `rotating_rooms`: Cutscenes > Rotating rooms (0 original, 1 fast); env `MP2_ROTATING_ROOMS`
+  (`original|fast`), console `rooms`. Fast runs the energy controller rooms' bomb-slot cutscene (the
+  room turning) at the game's own double speed: while a cinematic camera is active and a timed,
+  one-shot CScriptActorRotate of 5 s or more plays (any such room, no list), `CStateManager::Update`
+  doubles dt and the camera's dt. Other cutscenes and gameplay are unchanged.
+- `combo_beam_cost`: Debug > Cheats > Combo beam ammo cost (0 to 30, default 30 = retail); env
+  `MP2_COMBO_BEAM_COST`, console `combocost`. The beam ammo a combo (super missile) takes; a Reset button
+  restores 30. Ignored with Original experience.
+- `combo_missile_cost`: Debug > Cheats > Combo missile cost (0 to 5, default 5 = retail); env
+  `MP2_COMBO_MISSILE_COST`, console `combomissiles`. The missiles a combo takes (0 lets one fire with none).
+- `beam_ammo_per_expansion`: Debug > Cheats > Beam ammo per expansion (50 to 100, default 50 = retail); env
+  `MP2_BEAM_AMMO_PER_EXPANSION`, console `beamammo`. What a Dark/Light ammo capacity pickup (expansion,
+  Dark/Light Beam, Annihilator; a pickup that adds capacity) grants is multiplied by this / 50, and
+  the cap for each is 250 * this / 50 (500 at 100). Ammo drops add no capacity and are unchanged.
+  The save file keeps the retail format: it stores the amounts clamped to 250, and the real amounts
+  live in the sidecar `beam_ammo.sidecar` next to the card (see PortSave `AmmoSidecar`), applied
+  on load only when its record's hash matches the save's bytes. Without the sidecar (or after a
+  copy through another tool) the save loads at the clamped 250. Lowering the slider mid-session
+  only lowers the cap: amounts above the new cap are clamped the next time ammo is added.
 - `portal_transition`: Cutscenes > Portal transition (0 original, 1 fast, 2 skip); env
   `MP2_PORTAL_TRANSITION` (`original|fast|skip`), console `portal`. The ride through a light/dark world
   portal (`CPortalTransition`, run by `CMFGame` kFS_PortalTransition for a dock, or by `CWorldTransManager`
@@ -108,12 +129,18 @@ Game page:
   loaded save. Needs the in-game hint system on. Show current hint (Cutscenes button; console
   `hintshow`) shows the hint the game would show next: a hint already on screen comes back,
   otherwise the waiting hint due soonest shows now.
-- `unlock_hard_mode`, `unlock_galleries`, `unlock_beam_doors`, `stack_beams`: Unlocks > Hard mode
-  (offered when starting a file, as after finishing the game), Image galleries (all of them), Unlock
-  beam doors (colour-locked doors open to any of the four beams; missile locks stay), Stack beams
-  (each shot also fires the other beams you own, at no extra ammo cost); env
-  `MP2_UNLOCK_HARD_MODE`, `MP2_UNLOCK_GALLERIES`, `MP2_UNLOCK_BEAM_DOORS`, `MP2_STACK_BEAMS`. Not
-  written into the save, and Original experience greys them.
+- `unlock_hard_mode`, `unlock_galleries`, `stack_beams`: Unlocks > Hard mode (offered when
+  starting a file, as after finishing the game), Image galleries (all of them), Stack beams (each
+  shot also fires the other beams you own, at no extra ammo cost); env `MP2_UNLOCK_HARD_MODE`,
+  `MP2_UNLOCK_GALLERIES`, `MP2_STACK_BEAMS`. Not written into the save, and Original experience
+  greys them.
+- `unlock_beam_doors`: Debug > Cheats > Unlock beam doors; env `MP2_UNLOCK_BEAM_DOORS`.
+  Colour-locked doors (the door's own vulnerability, or a damageable-trigger lock) open to any of
+  the four beams; missile locks stay. Saved, not written into the save file; Original experience
+  greys it.
+- `stack_beams_skip_dark`: Unlocks > Leave out Dark Beam (#27): stacked shots skip the Dark Beam
+  unless it is in hand, so they don't drain light beacons and crystals; env
+  `MP2_STACK_BEAMS_SKIP_DARK`.
 - `livesplit`, `livesplit_address`, `livesplit_split_upgrades`: Speedrun > LiveSplit, Server
   (host:port), Split on upgrades; the address's env is `MP2_LIVESPLIT_ADDR`.
 - `mods`, `mods_disabled`: Mods > Load mods and one checkbox per mod folder (`mods_disabled` holds
@@ -125,6 +152,12 @@ Game page:
 
 Controls > Options:
 
+- Quick setup > Use mouse & keyboard: one click turns on mouse aim (`mouse_aim`, with
+  `twin_stick`) and applies the Mouse & keyboard keyboard layout (Remap > Presets...),
+  replacing your own keyboard bindings.
+- Quick setup > Use twin-stick controller: one click turns on Twin Stick Aim (`twin_stick`) and
+  applies the Remastered layout to all controllers (Remap > Presets...), replacing your own
+  controller bindings; greyed out with a GameCube adapter.
 - `lockon_toggle`: Buttons > Toggle Lock-On; env `MP2_LOCK_ON_TOGGLE`.
 - `sticky_charge`, `rapid_charge`: Buttons > Sticky Charge, Remastered charge (rapid fire).
 - `auto_aim`: Aiming > Auto-aim.
@@ -148,11 +181,14 @@ Controls > Options:
 - `prompt_glyphs`: Options > On-screen prompts > Button glyphs (Auto follows the last-used device;
   Xbox, PlayStation, Switch, GameCube or Keyboard forces the set in the F1 UI and the game's
   prompts; env `MP2_PROMPT_GLYPHS` 0-5, and `MP2_TEXTURE_DEVICE` still wins).
-- `swap_visors`: Options > Buttons > Swap the Scan and Echo visor buttons (exchanges the D-pad
-  left/right visors, and 6/8 on the keyboard; env `MP2_SWAP_VISORS`).
 - `minimap_tap`: Options > Menus > Tap minimap for map (a tap or click on the HUD minimap opens the
   map screen; default on; env `MP2_MINIMAP_TAP`; console `minimap`, `maptap`).
 - `fast_morph`, `spring_ball`: Morph ball > Fast Morph, Spring Ball (one row; C-stick up, the Spring Ball binding on the Remap page, touch swipe up, or a gyro flick).
+- `map_invert_x`, `map_invert_y`: Map > Invert map rotate X, Invert map rotate Y (off by
+  default; env `MP2_MAP_INVERT_X`, `MP2_MAP_INVERT_Y`). They flip which way the map turns on
+  the rotate inputs, left/right and up/down: the game turns the map opposite to the stick,
+  so both on gives camera-style rotation. The pointer and touch map gestures are not
+  flipped, as in Prime 1.
 
 Controls > Mouse settings:
 
@@ -162,7 +198,6 @@ Controls > Mouse settings:
 - `mouse_sensitivity_split`, `mouse_sensitivity_y`: Mouse aim > Separate vertical speed, Vertical
   sensitivity (same units); env `MP2_MOUSE_SENS_SPLIT`, `MP2_MOUSE_SENS_Y`.
 - `mouse_dpi`: Mouse aim > Mouse DPI (100..64000, default 800), only for the cm/360 readout.
-- `mouse_buttons`: Mouse aim > Weapon buttons.
 - `aim_crosshair`, `crosshair_size`: Mouse aim > Crosshair, Size.
 
 Controls > Controller settings:
@@ -178,6 +213,13 @@ Controls > Remap:
   GameCube, Remastered, Modern or Southpaw to all controllers, replacing your own bindings
   there; a selected kind or model keeps its own on top. Reset... removes a device's own
   bindings (after a confirmation), bringing back the Classic and GameCube layouts.
+- My presets... (beside Presets...): "Save current as..." keeps your bindings as a preset of your own. One list; a
+  preset covers every device it was saved with: keyboard & mouse, touch (when it has bindings) and, with a
+  controller connected, the controller (its bindings, custom actions, button/axis mapping), plus twin stick and
+  mouse aim. One click applies every part it has (replacing your own bindings for those devices), x deletes it;
+  saving over a name replaces it. One file per device part,
+  `control_presets/<keyboard|pad|touch>-<name>.toml` in the user folder: `controls.toml` text with `#! key = value`
+  header lines, so it can be shared.
 - Morph Ball rows (issue #167: Bomb, Power Bomb, Boost Ball, Spider Ball, Unmorph;
   `ball_bomb`, `ball_power_bomb`, `ball_boost`, `ball_spider`, `ball_unmorph` in
   controls.toml) press A, Y, B, R and X only in Morph Ball, so the ball's controls are
@@ -347,7 +389,9 @@ Video > Compatibility (read once, when the GPU starts: a change applies after a 
 System and Debug:
 
 - `overlay_windowed`, `ui_theme`, `ui_scale`: System > Overlay > Overlay as a floating window
-  (desktop), Menu theme, UI scale.
+  (desktop), Menu theme (`auto`, `prime`, `plain`, `echoes`), UI scale.
+- `texture_pack`: Game > Textures > Use the texture pack (off keeps the folder but shows the game's own
+  textures); the Texture pack binding (F7, Controls > Remap > Port) flips it in game.
 - `emulator_folder`, `share_emulator_card`, `mirror_trilogy_save` (desktop only): System > Memory
   card > Installed emulators (which Dolphin or PrimeHack install to use; empty = Auto, the first
   one found), Share memory card with emulator (the port and the emulator use the same saves: never

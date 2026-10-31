@@ -278,10 +278,11 @@ void CSandworm::ReleaseGrabbedPlayer(CStateManager& mgr) {
   CPlayer* player = mgr.Player(0);
   if (player->GetAttachedActorId() == GetUniqueId()) {
     player->DetachActorFromPlayer();
-    player->EnableLeaveMorphBall(true);
-    player->AddMaterial(kMT_Solid, mgr);
-    player->GetMorphBall()->SetBoostEnabled(true);
   }
+  // Retail (0x6180..) runs these whether or not the player was attached to the worm.
+  player->EnableLeaveMorphBall(true);
+  player->AddMaterial(kMT_Solid, mgr);
+  player->GetMorphBall()->SetBoostEnabled(true);
   x15AC_toss.x58_flags &= ~0x80;
   x15AC_toss.x58_flags |= 0x40;
 }
@@ -370,7 +371,8 @@ void CSandworm::ApplyChargeDamage(CStateManager& mgr) {
     dir.Normalize();
   }
   CVector3f impulse = dir * x14D8_charge.x14_impulseH + CVector3f::Up() * x14D8_charge.x18_impulseV;
-  if (PlayerMorphed(mgr)) {
+  // fn_56_7EE4 0x8110 tests only the transition state (player+0x38C), not +0x390.
+  if (mgr.Player(0)->GetMorphballTransitionState() == CPlayer::kMS_Morphed) {
     impulse = impulse * 0.4f;
   }
   KnockPlayer(mgr, impulse);
@@ -391,7 +393,9 @@ void CSandworm::LaunchSpitProjectile(CStateManager& mgr, const CVector3f& target
 
 // @ fn_56_8AAC
 void CSandworm::FireSpit(CStateManager& mgr) {
-  const CVector3f target = PlayerPos(mgr);
+  // lbl_56_bss_54 (0, 0, 1.5) is added to the player position (asm 0x8B0C-0x8B68); nothing
+  // downstream (fn_56_6B64, LaunchSpitProjectile) adds it again.
+  const CVector3f target = PlayerPos(mgr) + CVector3f(0.f, 0.f, 1.5f);
   const CVector3f spitPos = x1528_spit.x28_xf.GetTranslation();
   const float limit = 0.017453292f * x1528_spit.x5c_;
   CVector3f aim = target;
@@ -584,7 +588,8 @@ bool CSandworm::InSpitRange(CStateManager& mgr, const CTriggerData& data) const 
 
 // @ fn_56_73BC
 bool CSandworm::MeleeAttackRange(CStateManager& mgr, const CTriggerData& data) const {
-  if (PlayerMorphed(mgr)) {
+  // fn_56_73BC 0x73CC tests only the transition state (player+0x38C).
+  if (mgr.Player(0)->GetMorphballTransitionState() == CPlayer::kMS_Morphed) {
     return false;
   }
   return InMeleeRange(mgr);

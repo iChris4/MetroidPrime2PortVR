@@ -173,6 +173,15 @@ void CPakFile::DataLoad() {
   if (mWorldPak) {
     const uint size = (mResTableCount * sizeof(CResInfo) + 31) & ~31;
     mpARAMHeader = CARAMManager::Alloc(size);
+#ifdef TARGET_PC
+    // Port: mods patch resources into the aram: PAKs, which can then fill ARAM. Keep the table in
+    // MRAM (sub_80323554 won't stash it) rather than DMA to an invalid alloc, as Prime 1 does.
+    if (mpARAMHeader == CARAMManager::GetInvalidAlloc()) {
+      mHeaderData = rstl::vector< uchar >();
+      UpdateFakeStaticSize();
+      return;
+    }
+#endif
     const uint handle =
         CARAMManager::DMAToARAM(mResInfoBuckets.data(), const_cast< void* >(mpARAMHeader), size,
                                 CARAMManager::kDMAPrio_One);
@@ -356,6 +365,12 @@ void CPakFile::EnsureWorldPakReady() {
 
 void CPakFile::sub_80323554() {
   if (mWorldPak) {
+#ifdef TARGET_PC
+    // Port: the table never reached ARAM (DataLoad), so it stays in MRAM.
+    if (mpARAMHeader == CARAMManager::GetInvalidAlloc()) {
+      return;
+    }
+#endif
     mStashedInARAM = true;
     mDepList = rstl::vector< CAssetId >();
     mResInfoBuckets = rstl::vector< CResInfo >();

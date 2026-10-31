@@ -92,7 +92,12 @@ inline SLdrMediumIng::SLdrMediumIng()
   doubleDashChance = 25.0f;
   lightColor = CColor(1.0f, 1.0f, 1.0f, 1.0f);
   lightAttenuation = 2.0f;
+#ifdef TARGET_PC
+  // fn_41_1124: li r0,-1 / stw r0,0x6fc(r31) at 0x127C: no sound by default
+  ingSpotSound = -1;
+#else
   ingSpotSound = 0;
+#endif
   unknown_0x0e3d3708 = 50.0f;
 }
 

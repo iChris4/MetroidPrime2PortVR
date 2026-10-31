@@ -140,6 +140,8 @@ public:
   // The end of Draw for the map screen's frame and compass alone, laid on the held screen before
   // the 3D map.
   void PortVrDrawFrame(float alpha) const;
+  // How much wider than authored the map screen's window is drawn (its frame's spread panel).
+  float PortMapScreenWindowWiden() const;
 #endif
   void Update(float dt, CStateManager& mgr);
   void Draw(const CStateManager& mgr, const CTransform4f& xf, float alpha) const;

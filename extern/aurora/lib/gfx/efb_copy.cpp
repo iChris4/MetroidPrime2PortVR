@@ -193,13 +193,16 @@ void complete_map(size_t slotIdx, wgpu::MapAsyncStatus status, wgpu::StringView 
     if (slot.state != SlotState::MapPending) {
       return;
     }
-    slot.state = SlotState::Available;
     if (status != wgpu::MapAsyncStatus::Success) {
+      slot.state = SlotState::Available;
       if (status != wgpu::MapAsyncStatus::CallbackCancelled && status != wgpu::MapAsyncStatus::Aborted) {
         Log.warn("EFB copy read-back mapping failed: {}", message);
       }
       return;
     }
+    // Port: the slot stays MapPending until it is unmapped below. Freeing it here let encode()
+    // pick it and after_submit() MapAsync the still-mapped buffer ("is already mapped", fatal;
+    // issue #29, after the Dark Alpha Splinter's death cutscene).
     slot.mapped = true;
     data = static_cast<const uint8_t*>(slot.buffer.GetConstMappedRange(0, static_cast<size_t>(slot.bytes)));
   }
@@ -214,6 +217,7 @@ void complete_map(size_t slotIdx, wgpu::MapAsyncStatus status, wgpu::StringView 
     slot.buffer.Unmap();
     slot.mapped = false;
   }
+  slot.state = SlotState::Available;
 }
 } // namespace
 

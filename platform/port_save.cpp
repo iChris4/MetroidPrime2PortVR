@@ -1011,15 +1011,13 @@ bool MirrorTrilogy() {
 
 std::string FindEmulatorTrilogy() { return FindTrilogyBin(IsPal()); }
 
-bool ExportTrilogy(const std::string& saveBin, std::string& message) {
+// The card's newest slot written into a copy of `base` (a save.bin the Trilogy made); `note` says
+// which slot went where. Shared by ExportTrilogy and the Android save picker (ExportBytes).
+static bool TrilogyBytes(const std::vector<uint8_t>& base, std::vector<uint8_t>& out,
+                         std::string& note, std::string& message) {
   const std::vector<std::string> files = GameFilesNewest();
   if (files.empty()) {
     message = "the card has no save file to export";
-    return false;
-  }
-  std::vector<uint8_t> base;
-  if (!ReadAll(saveBin, base, message)) {
-    message += " (start the Trilogy once so that it makes its save)";
     return false;
   }
   if (!Trilogy::Validate(base.data(), base.size(), message)) {
@@ -1066,8 +1064,28 @@ bool ExportTrilogy(const std::string& saveBin, std::string& message) {
   payload.summary.playTime = s.playTime;
   payload.summary.tanks = s.energyTanks;
   payload.summary.mlvl = s.worldId;
-  std::vector<uint8_t> out;
   if (!Trilogy::Write(base, target, payload, out, message)) {
+    return false;
+  }
+  note = "slot " + std::to_string(slot + 1) + " of " + best.path + " in Trilogy file " +
+         std::to_string(target + 1);
+  return true;
+}
+
+bool ExportTrilogy(const std::string& saveBin, std::string& message) {
+  const std::vector<std::string> files = GameFilesNewest();
+  if (files.empty()) {
+    message = "the card has no save file to export";
+    return false;
+  }
+  std::vector<uint8_t> base;
+  if (!ReadAll(saveBin, base, message)) {
+    message += " (start the Trilogy once so that it makes its save)";
+    return false;
+  }
+  std::vector<uint8_t> out;
+  std::string note;
+  if (!TrilogyBytes(base, out, note, message)) {
     return false;
   }
   const std::string backup = saveBin + ".bak";
@@ -1080,8 +1098,7 @@ bool ExportTrilogy(const std::string& saveBin, std::string& message) {
   if (!WriteAll(saveBin, out, message)) {
     return false;
   }
-  message = "slot " + std::to_string(slot + 1) + " of " + best.path + " written into Trilogy file " +
-            std::to_string(target + 1) + " of " + saveBin + "; the previous save is kept as " +
+  message = note + " written into " + saveBin + "; the previous save is kept as " +
             PortUtf8::ToUtf8(PortUtf8::FromUtf8(backup).filename());
   return true;
 }
@@ -1194,6 +1211,38 @@ bool SyncTrilogyShare(bool pull) {
       std::fprintf(stderr, "[save] Trilogy mirror: cannot set a card file's time: %s\n", ec.message().c_str());
       sFailedBin = binTime;
     }
+  }
+  return true;
+}
+
+} // namespace PortSave
+
+namespace PortSave {
+
+bool ExportBytes(bool trilogy, const std::vector<uint8_t>& trilogyBase,
+                 std::vector<ExportFile>& out, std::string& message) {
+  out.clear();
+  if (trilogy) {
+    ExportFile file;
+    file.name = "save.bin";
+    if (!TrilogyBytes(trilogyBase, file.bytes, file.note, message)) {
+      return false;
+    }
+    out.push_back(std::move(file));
+    return true;
+  }
+  const std::vector<std::string> files = Files();
+  if (files.empty()) {
+    message = "the card has no save file";
+    return false;
+  }
+  for (const std::string& path : files) {
+    ExportFile file;
+    file.name = BaseName(path);
+    if (!ReadAll(path, file.bytes, message)) {
+      return false;
+    }
+    out.push_back(std::move(file));
   }
   return true;
 }

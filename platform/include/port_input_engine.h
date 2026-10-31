@@ -93,6 +93,9 @@ enum Context : uint16_t {
   kCtxMap = 1 << 2,
   kCtxMenu = 1 << 3,
   kCtxScan = 1 << 4,
+  // The scan text (the scan freeze), on top of gameplay and scan. Port-internal: no remap
+  // page lists it; with separate menu buttons only Menu A applies there (issue #11).
+  kCtxScanText = 1 << 5,
   kCtxLayer1 = 1 << 8,
   kCtxLayer2 = 1 << 9,
   kCtxLayer3 = 1 << 10,
@@ -138,13 +141,13 @@ enum class ActionKind : uint8_t {
   X(LookX, Delta, "look_x", "Mouse look X")                                                        \
   X(LookY, Delta, "look_y", "Mouse look Y")                                                        \
   X(BeamPower, Digital, "beam_power", "Power Beam")                                                \
-  X(BeamWave, Digital, "beam_wave", "Wave Beam")                                                   \
-  X(BeamIce, Digital, "beam_ice", "Ice Beam")                                                      \
-  X(BeamPlasma, Digital, "beam_plasma", "Plasma Beam")                                             \
+  X(BeamWave, Digital, "beam_wave", "Light Beam")                                                  \
+  X(BeamIce, Digital, "beam_ice", "Dark Beam")                                                     \
+  X(BeamPlasma, Digital, "beam_plasma", "Annihilator Beam")                                        \
   X(VisorCombat, Digital, "visor_combat", "Combat Visor")                                          \
   X(VisorScan, Digital, "visor_scan", "Scan Visor")                                                \
-  X(VisorThermal, Digital, "visor_thermal", "Thermal Visor")                                       \
-  X(VisorXray, Digital, "visor_xray", "X-Ray Visor")                                               \
+  X(VisorThermal, Digital, "visor_thermal", "Dark Visor")                                          \
+  X(VisorXray, Digital, "visor_xray", "Echo Visor")                                                \
   X(BeamNext, Digital, "beam_next", "Next beam")                                                   \
   X(BeamPrev, Digital, "beam_prev", "Previous beam")                                               \
   X(VisorNext, Digital, "visor_next", "Next visor")                                                \
@@ -180,7 +183,8 @@ enum class ActionKind : uint8_t {
   X(BallSpider, Digital, "ball_spider", "Spider Ball")                                             \
   X(BallUnmorph, Digital, "ball_unmorph", "Unmorph")                                                 \
   X(BeamMenu, Digital, "beam_menu", "Beam menu (hold)")                                            \
-  X(VisorMenu, Digital, "visor_menu", "Visor menu (hold)")
+  X(VisorMenu, Digital, "visor_menu", "Visor menu (hold)")                                        \
+  X(ToggleTexturePack, Digital, "toggle_texture_pack", "Texture pack") // appended: IDs persist
 
 enum class Action : uint16_t {
 #define PORT_INPUT_ACTION_ENUM(id, kind, key, label) id,

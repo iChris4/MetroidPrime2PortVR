@@ -160,6 +160,7 @@
 #include "port_harness.h"
 #include "port_entry.h"
 #include "port_hold_toggle.h"
+#include "port_touch.h"
 #include "port_pointer.h"
 #include "port_mouse.h"
 #include "port_livesplit.h"
@@ -824,7 +825,10 @@ float PortPresentedWorldTime(float time) {
 
 void CStateManager::PreRender(uint playerIndex) {
   #ifdef TARGET_PC
-  CTimeProvider timeProvider(PortPresentedWorldTime(mCurTimeMod900));
+  // A named local: CTimeProvider keeps a `const float&`, so a temporary would dangle once this
+  // declaration ends and every material UV animation would read a dead stack slot (issue #21).
+  const float presentedTime = PortPresentedWorldTime(mCurTimeMod900);
+  CTimeProvider timeProvider(presentedTime);
 #else
   CTimeProvider timeProvider(mCurTimeMod900);
 #endif
@@ -1329,7 +1333,9 @@ void CStateManager::DrawWorld(const CInGameGuiManagerSet& gui) {
 
   const CPlayerState::EPlayerVisor visor = mPlayerState->GetActiveVisor(*this);
   #ifdef TARGET_PC
-  CTimeProvider timeProvider(PortPresentedWorldTime(mCurTimeMod900));
+  // Named for the reason PreRender gives: CTimeProvider holds a reference (issue #21).
+  const float presentedTime = PortPresentedWorldTime(mCurTimeMod900);
+  CTimeProvider timeProvider(presentedTime);
 #else
   CTimeProvider timeProvider(mCurTimeMod900);
 #endif
@@ -4339,7 +4345,14 @@ void CStateManager::Update(float inputDt, CArchitectureQueue& queue) {
     if ((camera->GetFlags() & 0x200) != 0) {
       dt *= camera->GetSlowMotionScale();
     }
-    if (gpMain->IsMaxSpeed()) {
+    if (gpMain->IsMaxSpeed()
+#ifdef TARGET_PC
+        // Port: Rotating rooms = Fast runs the energy controller rooms' cutscene at the
+        // game's own double speed.
+        || (PortOverlay::RotatingRooms() == PortOverlay::kRotatingRooms_Fast &&
+            PortOverlay::RotatingSequenceActive(mUpdateFrameIdx))
+#endif
+    ) {
       dt *= 2.f;
       cameraDt *= 2.f;
     }
@@ -4376,6 +4389,8 @@ void CStateManager::Update(float inputDt, CArchitectureQueue& queue) {
                            mPortSpawnAtArea == kInvalidAreaId &&
                            mPortWarpQueuedArea == kInvalidAreaId &&
                            !mCameraManagers[0]->IsInCinematicCamera());
+  // The input contexts read the scan text's freeze from here (issue #11).
+  PortTouch::SetScanTextUp(mGameState == kGS_SoftPaused);
   if (mPortDropAreasAtFrame != 0 && mUpdateFrameIdx >= mPortDropAreasAtFrame) {
     mPortDropAreasAtFrame = 0;
     if (CWorld* dropWorld = World(); dropWorld != nullptr) {
@@ -4490,6 +4505,20 @@ void CStateManager::Update(float inputDt, CArchitectureQueue& queue) {
       }
     }
 
+#ifdef TARGET_PC
+    // Hacker Mode (scan virus) is a multiplayer power-up: in the campaign it would force the Scan
+    // visor and block the morph ball, so drop it where it cannot belong.
+    if (!IsMultiplayer() && mPlayerStates[0] != nullptr) {
+      CPlayerState::CPowerUp& virus = mPlayerStates[0]->PowerUp(CPlayerState::kIT_ScanVirus);
+      if (virus.mAmount != 0 || virus.mCapacity != 0 || virus.mTimeLeft != 0.f) {
+        virus.mTimeLeft = 0.f;
+        virus.mAmount = 0;
+        virus.mCapacity = 0;
+        mPlayerStates[0]->StartTransitionToVisor(CPlayerState::kPV_Combat);
+      }
+    }
+#endif
+
     for (int item = 0; item < CPlayerState::kIT_Max; ++item) {
       for (uint player = 0; player < mNumPlayers; ++player) {
         const CPlayerState::EItemType type = static_cast< CPlayerState::EItemType >(item);
@@ -4514,6 +4543,10 @@ void CStateManager::Update(float inputDt, CArchitectureQueue& queue) {
             }
             if (item == CPlayerState::kIT_ScanVirus) {
               mPlayerStates[player]->StartTransitionToVisor(CPlayerState::kPV_Combat);
+#ifdef TARGET_PC
+              // A virus carried out of a multiplayer map must not take the campaign's Scan Visor.
+              if (IsMultiplayer())
+#endif
               mPlayerStates[player]->ReInitializePowerUp(CPlayerState::kIT_ScanVisor, 0);
             }
             DisplayAlertAboutOutOfAmmo(*mPlayers[player], type);
@@ -5885,6 +5918,15 @@ void CStateManager::PortWarpToLayer(TAreaId aid, int layer) {
   mPortLayerRetries = 0;
   std::fprintf(stderr, "[layer] area %d layer %d: phase %d after the load request\n", aid.Value(),
                layer, static_cast< int >(area->GetLayerPhase(id)));
+}
+
+bool CStateManager::PortLayerFlagOn(TAreaId aid, int layer) const {
+  if (mCurrentWorldLayerState.IsNull() || aid.Value() < 0 ||
+      aid.Value() >= static_cast< int >(mCurrentWorldLayerState->GetAreaLayers().size()) ||
+      layer < 0 || layer >= mCurrentWorldLayerState->GetLayerCount(aid)) {
+    return false;
+  }
+  return mCurrentWorldLayerState->IsLayerActive(aid, TLayerId(layer));
 }
 
 void CStateManager::PortLayerTick() {

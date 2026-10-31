@@ -206,7 +206,7 @@ void CDigitalGuardianKneeArmor::SetArmored(CStateManager& mgr, bool armored) {
     if (x198_ != CSfxHandle()) {
       CSfxManager::RemoveEmitter(x198_);
       x198_ = CSfxHandle();
+      RemoveMaterial(kMT_Target, kMT_SeekerTarget, mgr); // only with a live emitter (asm 0xCF4C beq)
     }
-    RemoveMaterial(kMT_Target, kMT_SeekerTarget, mgr);
   }
 }

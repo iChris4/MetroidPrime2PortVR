@@ -260,9 +260,9 @@ bool Supported();
 EStatus Status();
 // The last error (no Discord running, application not found), or empty.
 std::string LastError();
-// The port's Discord application, the Prime 1 port's (it has the logo art); `MP2_DISCORD_APP`
-// replaces it for a run. Set the port's own application there once one is registered.
-constexpr const char* kDefaultAppId = "1557127540030701690";
+// The port's Discord application (it has the `logo` art); `MP2_DISCORD_APP`
+// replaces it for a run.
+constexpr const char* kDefaultAppId = "1565787222886588527";
 std::string ApplicationId();
 // Connects while enabled, reconnecting every few seconds; clears the presence and disconnects
 // when not. The game's tick and the F1 row both call it.

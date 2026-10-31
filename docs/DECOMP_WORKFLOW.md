@@ -18,11 +18,12 @@ pointer to this file plus their slice, not a restatement of it.
   - m2c pseudo-C over the whole REL; REA `batch_decompile`.
   - `tools/upstream_hollow.py [--dol]` - upstream bodies that are skeletons of retail or reach stubs (needs the matching build; `docs/module-analysis/upstream_hollow.md`).
 - One orchestrator (the port session) runs every family and reviews every lane patch; there are
-  no per-family orchestrator sessions. Lanes run only on MiniMax free
-  (`opencode-go/minimax-m3.1-flash-free`, passed explicitly). At most three `claude` (Opus) lanes
-  may run at a time, for hard tasks (audits, subtle asm, cross-file work). Never DeepSeek, `haiku` or
-  `sonnet`. A lane that fails twice gets a narrower brief, or the
-  orchestrator does the piece itself.
+  no per-family orchestrator sessions. Lane models: up to three `sonnet` lanes (reviews included)
+  plus one DeepSeek worker (`opencode-go/deepseek-v4.1-flash`). (Superseded 2026-10-29: this
+  bullet said MiniMax free only, at most three Opus lanes, never DeepSeek/`haiku`/`sonnet`; MiniMax
+  M3.1 Flash is deprecated and the lane set changed 2026-10-24. The "MiniMax"/"Opus" wording
+  further down this file is likewise historical.) A lane that fails twice gets a narrower brief, or
+  the orchestrator does the piece itself.
 - An accessor or field a lane needs in a shared header (one other families include) is asked for
   in the report, not added on the branch: the orchestrator commits it to `port` once and the lane
   merges `port`. (Two lanes adding the same accessor is the usual batch-merge conflict.)

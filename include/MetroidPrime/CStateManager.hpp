@@ -217,6 +217,8 @@ public:
   // restore waits for each layer before it applies that area's objects, so the objects a layer
   // spawns exist by then.
   bool PortLayerRequestPending() const { return mPortLayerArea != kInvalidAreaId; }
+  // True when the world layer state (the memory card stream, or a save state's) has the layer on.
+  bool PortLayerFlagOn(TAreaId aid, int layer) const;
   // Drives a layer request to completion: ActivateLayerDynamic can only run once the layer's data
   // has streamed in (GetLayerPhase reports kLP_Ready), which takes frames.
   void PortLayerTick();

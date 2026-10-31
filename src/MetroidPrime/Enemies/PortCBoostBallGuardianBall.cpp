@@ -826,6 +826,7 @@ void CBoostBallGuardianBall::PlaySound(int sound, bool start) {
     }
   } else if (sound == 3) {
     CSfxManager::SfxStop(mRollingSfx);
+    mRollingSfx.Clear(); // 0x12B64: the handle is zeroed after the stop
   }
 }
 

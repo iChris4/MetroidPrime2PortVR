@@ -70,6 +70,7 @@
 #include <math.h>
 #ifdef TARGET_PC
 #include "MetroidPrime/PortEfbCopy.hpp"
+#include "port_mouse.h"
 #include "port_overlay.h"
 #include "port_power_charge_release.h"
 #include "port_presentation_rules.h"
@@ -180,6 +181,10 @@ void CPlayerGun::PortFireStackedBeams(float dt, CStateManager& mgr, const CTrans
     CGunWeapon* beam = mSelectableBeams[i];
     if (beam == nullptr || beam == mCurrentBeam ||
         !playerState.HasPowerUp(CPlayerState::EItemType(i))) {
+      continue;
+    }
+    if (i == CPlayerState::kIT_DarkBeam && PortOverlay::StackBeamsSkipDark()) {
+      beam->PortUnlockStackTokens();
       continue;
     }
     beam->PortLockStackTokens();
@@ -1026,7 +1031,15 @@ bool CPlayerGun::GetBeamAmmoTypeAndCosts(bool combo, CStateManager& mgr,
     return true;
   }
   if (combo) {
+#ifdef TARGET_PC
+    // Port: the Combo beam ammo cost option (F1 > Cheats) caps the retail cost.
     cost = skComboAmmoCosts[mCurrentBeamId];
+    if (cost > PortOverlay::ComboBeamCost()) {
+      cost = PortOverlay::ComboBeamCost();
+    }
+#else
+    cost = skComboAmmoCosts[mCurrentBeamId];
+#endif
   } else if (mChargePhase >= kCP_Charging && mChargePhase <= kCP_Charged) {
     cost = skChargedAmmoCosts[mCurrentBeamId];
   }
@@ -2473,7 +2486,12 @@ void CPlayerGun::FireSecondary(float dt, CStateManager& mgr, TUniqueId target, u
     playerState.DecrementAmmoAndDisplayAlertIfOut(mgr, CPlayerState::kIT_Missile, 1);
   } else {
     bool canFire = true;
+#ifdef TARGET_PC
+    // Port: a combo needs only its own missile cost (the Combo missile cost option can be 0).
+    if (missiles < (mComboFiring ? playerState.GetMissileCostForAltAttack() : 1)) {
+#else
     if (missiles < 1) {
+#endif
       canFire = false;
     } else if (mComboFiring &&
                !GetBeamAmmoTypeAndCosts(mComboFiring, mgr, ammoTypeA, ammoTypeB, ammoCost)) {
@@ -2872,7 +2890,14 @@ void CPlayerGun::HandleBeamChange(const CFinalInput& input, CStateManager& mgr) 
   CPlayerState* state = player->GetPlayerState();
   float maxInput = 0.f;
   int beam = -1;
+#ifdef TARGET_PC
+  // The disc picks beams with the C-stick, which twin stick aims with (issue #15); beams then
+  // come from the port's direct picks (LB + D-pad, the radial, keys), through PortTouch.
+  const bool stickPicks = !PortMouse::StickOwnsCStick();
+  for (int i = 0; stickPicks && i < 4; ++i) {
+#else
   for (int i = 0; i < 4; ++i) {
+#endif
     if (state->HasPowerUp(beamItems[i])) {
       const float value = player->GetControlMapper().GetAnalogInput(beamCommands[i], input);
       if (value > 0.65f && value > maxInput) {

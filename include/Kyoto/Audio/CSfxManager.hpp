@@ -231,6 +231,10 @@ public:
   static bool IsPlaying(CSfxHandle handle);
   static bool IsQueued(CSfxHandle handle);
   static void SetMuted(bool muted);
+#ifdef TARGET_PC
+  // Console `sfx`: current channel, mMuted, mDoUpdate and live sound count per channel.
+  static void PortDebugState(int& channel, bool& muted, bool& doUpdate, int liveCounts[4], int poolFree[2] = nullptr);
+#endif
   static void SetChannel(ESfxChannels channel);
   static ESfxChannels GetChannel();
   static void KillAll(ESfxChannels channel);

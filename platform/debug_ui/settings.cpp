@@ -199,6 +199,7 @@ const SettingKey kSettingKeys[] = {
     BoolKey< &sUnlockGalleries >("unlock_galleries"),
     BoolKey< &sUnlockBeamDoors >("unlock_beam_doors"),
     BoolKey< &sStackBeams >("stack_beams"),
+    BoolKey< &sStackBeamsSkipDark >("stack_beams_skip_dark"),
     IntKey< &sBootLogos, PortOverlay::kScreen_Show, PortOverlay::kScreen_Off >(
         "boot_logos", "0", "2"),
     IntKey< &sWorldNameCard, PortOverlay::kScreen_Show, PortOverlay::kScreen_Off >(
@@ -206,17 +207,25 @@ const SettingKey kSettingKeys[] = {
     BoolKey< &sFastMorph >("fast_morph"),
     BoolKey< &sPointerMenus >("pointer_menus"),
     BoolKey< &sMapSwapFingers >("map_swap_fingers"),
+    BoolKey< &sMapInvertX >("map_invert_x"),
+    BoolKey< &sMapInvertY >("map_invert_y"),
     IntKey< &sWalkSpeed, PortOverlay::kWalkSpeedMin, PortOverlay::kWalkSpeedMax >("walk_speed", "50",
                                                                                   "200"),
     IntKey< &sScanSpeed, PortOverlay::kScanSpeedMin, PortOverlay::kScanSpeedMax >("scan_speed", "50",
                                                                                   "400"),
     IntKey< &sElevatorRide, PortOverlay::kElevatorRide_Original, PortOverlay::kElevatorRide_Skip >(
         "elevator_ride", "0", "2"),
+    IntKey< &sRotatingRooms, PortOverlay::kRotatingRooms_Original, PortOverlay::kRotatingRooms_Fast >(
+        "rotating_rooms", "0", "1"),
+    IntKey< &sComboBeamCost, 0, PortOverlay::kComboBeamCostMax >("combo_beam_cost", "0", "30"),
+    IntKey< &sComboMissileCost, 0, PortOverlay::kComboMissileCostMax >("combo_missile_cost", "0",
+                                                                       "5"),
+    IntKey< &sBeamAmmoPerExpansion, PortOverlay::kBeamAmmoPerExpansionMin,
+            PortOverlay::kBeamAmmoPerExpansionMax >("beam_ammo_per_expansion", "50", "100"),
     IntKey< &sPortalTransition, PortOverlay::kPortalTransition_Original,
             PortOverlay::kPortalTransition_Skip >("portal_transition", "0", "2"),
     IntKey< &sPromptGlyphs, PortOverlay::kPromptGlyphs_Auto, PortOverlay::kPromptGlyphs_Keyboard >(
         "prompt_glyphs", "0", "5"),
-    BoolKey< &sSwapVisors >("swap_visors"),
     BoolKey< &sMinimapTap >("minimap_tap"),
     BoolKey< &sIgtTimer >("igt_timer"),
     IntKey< &sLanguage, 0, PortOverlay::kLanguageMax >("language", "0", "6"),
@@ -283,7 +292,6 @@ const SettingKey kSettingKeys[] = {
     BoolKey< &sLockOnFreeAim >("lock_on_free_aim"),
     BoolKey< &sResetAimBoth >("reset_aim_both"),
     BoolKey< &sMenuStandardButtons >("menu_standard_buttons"),
-    BoolKey< &sMouseButtons >("mouse_buttons"),
     // The emulator whose card the port shares (System > Memory card); normalised on the way in.
     {"emulator_folder", [](const std::string& value) { PortSave::SetEmulatorFolder(value); },
      [](std::ostream& out) { out << PortSave::EmulatorFolder(); }, true, "/tmp/mp2-emu-a",
@@ -291,6 +299,8 @@ const SettingKey kSettingKeys[] = {
     {"share_emulator_card",
      [](const std::string& value) { PortSave::SetShareEmulatorCard(ParseBool(value)); },
      [](std::ostream& out) { WriteBool(out, PortSave::ShareEmulatorCard()); }, false, "1", "0"},
+    {"texture_pack", [](const std::string& value) { PortTextures::SetUserPackEnabled(ParseBool(value)); },
+     [](std::ostream& out) { WriteBool(out, PortTextures::UserPackEnabled()); }, false, "0", "1"},
     {"mirror_trilogy_save",
      [](const std::string& value) { PortSave::SetMirrorTrilogy(ParseBool(value)); },
      [](std::ostream& out) { WriteBool(out, PortSave::MirrorTrilogy()); }, false, "1", "0"},
@@ -442,9 +452,14 @@ const SettingKey kSettingKeys[] = {
     BoolKey< &sOverlayWindowed >("overlay_windowed"),
     {"ui_theme",
      [](const std::string& value) {
-       sUiTheme = value == "prime" ? 1 : value == "plain" ? 2 : 0;
+       sUiTheme = value == "prime" ? 1 : value == "plain" ? 2 : value == "echoes" ? 3 : 0;
      },
-     [](std::ostream& out) { out << (sUiTheme == 1 ? "prime" : sUiTheme == 2 ? "plain" : "auto"); },
+     [](std::ostream& out) {
+       out << (sUiTheme == 1   ? "prime"
+               : sUiTheme == 2 ? "plain"
+               : sUiTheme == 3 ? "echoes"
+                               : "auto");
+     },
      false, "plain", "auto"},
     BoolKey< &sAimCrosshair >("aim_crosshair"),
     IntKey< &sCrosshairStyle, PortOverlay::kCrosshairStyle_Classic,

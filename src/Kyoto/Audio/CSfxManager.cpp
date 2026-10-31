@@ -265,8 +265,12 @@ void CSfxManager::Initialize() {
 }
 
 void CSfxManager::Shutdown() {
+#ifndef TARGET_PC
+  // The table is loaded once at boot (CMain::FillInAssetIDs); nothing reloads it after a quit to
+  // title, so deleting it here left TranslateSFXID returning invalid for every id (silent SFX).
   delete mpTranslationTable;
   mpTranslationTable = nullptr;
+#endif
   StopAndRemoveAllEmitters();
   mAuxEffectManager.Shutdown();
   for (rstl::reserved_vector< CAuxEffect, 10 >::iterator it = mAuxEffects.begin();
@@ -1015,6 +1019,34 @@ CSfxManager::CSfxWrapper* CSfxManager::AllocateCSfxWrapper(const CSfxWrapper& so
   }
   return result;
 }
+
+#ifdef TARGET_PC
+void CSfxManager::PortDebugState(int& channel, bool& muted, bool& doUpdate, int liveCounts[4],
+                                  int poolFree[2]) {
+  channel = int(mCurrentChannel);
+  muted = mMuted;
+  doUpdate = mDoUpdate;
+  for (int c = 0; c < 4; ++c) {
+    liveCounts[c] = 0;
+    for (int i = 0; i < mChannels[c].mSounds.size(); ++i) {
+      if (mChannels[c].mSounds[i] != nullptr) {
+        ++liveCounts[c];
+      }
+    }
+  }
+  if (poolFree != nullptr) {
+    // Slots a new sound can take: reusable wrappers plus never-used capacity.
+    poolFree[0] = int(mWrapperPool.capacity() - mWrapperPool.size());
+    for (int i = 0; i < mWrapperPool.size(); ++i) {
+      poolFree[0] += mWrapperPool[i].Available() ? 1 : 0;
+    }
+    poolFree[1] = int(mEmitterWrapperPool.capacity() - mEmitterWrapperPool.size());
+    for (int i = 0; i < mEmitterWrapperPool.size(); ++i) {
+      poolFree[1] += mEmitterWrapperPool[i].Available() ? 1 : 0;
+    }
+  }
+}
+#endif
 
 void CSfxManager::SetMuted(bool muted) {
   CSfxChannel& channel = mChannels[mCurrentChannel];

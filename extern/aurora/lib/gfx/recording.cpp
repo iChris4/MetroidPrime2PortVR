@@ -960,14 +960,16 @@ void stereo_seal_pass(FramePacket& frame, uint32_t passIndex) {
 // (mobile) GPU a full-resolution store. colorDead and depthDead say no later pass loads the
 // contents (the next one clears them, or none follows). Call before the pass is enqueued.
 bool pass_copies_depth(const RenderPass& pass) {
-  return pass.snapshotDepthDst || (pass.resolveTarget && gx::is_depth_format(pass.resolveFormat)) ||
+  return pass.scanPeek.has_value() || pass.snapshotDepthDst ||
+         (pass.resolveTarget && gx::is_depth_format(pass.resolveFormat)) ||
          (pass.captureDepthSnapshot && depth_peek::enabled());
 }
 
 void discard_dead_stores(RenderPass& pass, bool colorDead, bool depthDead) {
   auto& color = pass.colorAttachments[SceneColorAttachmentIndex];
   // Without a resolve target the attachment itself is what copies and presentation read.
-  if (colorDead && pass.colorAttachmentCount > 0 && color.resolveView) {
+  // Scan peeks read the original MSAA samples, not the averaged resolve target.
+  if (colorDead && pass.colorAttachmentCount > 0 && color.resolveView && !pass.scanPeek.has_value()) {
     color.storeOp = wgpu::StoreOp::Discard;
   }
   if (depthDead && pass.hasDepth && !pass_copies_depth(pass)) {

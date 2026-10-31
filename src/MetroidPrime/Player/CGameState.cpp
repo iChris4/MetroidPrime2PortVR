@@ -648,6 +648,9 @@ void CGameState::WriteBackupBuf() {
   CMemoryStreamOut stream(buffer.data(), 0xa38);
   CBitStreamWriter out(stream);
   PutTo(out);
+#ifdef TARGET_PC
+  GetPlayerState()->PortRememberBeamAmmo(buffer.data(), 0xa38, false);
+#endif
 }
 
 void CGameState::RecordCheckpoint() {
@@ -655,6 +658,10 @@ void CGameState::RecordCheckpoint() {
   CMemoryStreamOut stream(mCheckpointGameState.data(), 0xa38);
   CBitStreamWriter out(stream);
   PutTo(out);
+#ifdef TARGET_PC
+  // Port: Dark/Light ammo above 250 (Beam ammo per expansion) is kept beside the bytes.
+  GetPlayerState()->PortRememberBeamAmmo(mCheckpointGameState.data(), 0xa38, false);
+#endif
 }
 
 void CGameState::ClearCheckpoint() { mCheckpointGameState.clear(); }
@@ -674,6 +681,9 @@ void CGameState::RecordCompressedGameState(int slot, CGameState& state) {
   CMemoryStreamOut stream(mCompressedGameStates[slot].data(), 0xa38);
   CBitStreamWriter out(stream);
   state.PutTo(out);
+#ifdef TARGET_PC
+  state.GetPlayerState()->PortRememberBeamAmmo(mCompressedGameStates[slot].data(), 0xa38, false);
+#endif
 }
 
 void CGameState::ClearCompressedGameState(int slot) {

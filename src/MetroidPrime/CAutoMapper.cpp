@@ -75,6 +75,9 @@ float sPortVrHologramDepthRatio = 1.f;
 #include <math.h>
 #include <utility>
 
+// Half-width of the map screen's window, as a fraction of the frame's authored half-width.
+static const float kPortMapWindowHalf = 0.83f;
+
 // Port: pointer input for the map screens. The gestures of a frame are queued here and applied
 // by ProcessMapRotateInput / ProcessMapZoomInput / ProcessMapPanInput with the stick input.
 namespace {
@@ -1108,6 +1111,23 @@ void CAutoMapper::ProcessMapRotateInput(const CFinalInput& input, const CStateMa
     dirSlot = 3;
   }
 
+#ifdef TARGET_PC
+  // Port: Controls > Options > Map can flip either rotate axis (#225), as in Prime 1. Slots are
+  // 0 up, 1 down, 2 left, 3 right, the same layout as Prime 1's CAutoMapper.
+  if (PortOverlay::MapInvertX()) {
+    if (dirSlot == 2)
+      dirSlot = 3;
+    else if (dirSlot == 3)
+      dirSlot = 2;
+  }
+  if (PortOverlay::MapInvertY()) {
+    if (dirSlot == 0)
+      dirSlot = 1;
+    else if (dirSlot == 1)
+      dirSlot = 0;
+  }
+#endif
+
   left = 0.f;
   right = 0.f;
   down = 0.f;
@@ -2030,7 +2050,7 @@ void CAutoMapper::Update(float dt, CStateManager& mgr) {
 
 #ifdef TARGET_PC
     mFrmeInitialized->GetFrameCamera()->SetSpreadable(true);
-    mFrmeInitialized->SetSpreadPanel(-0.83f, 0.83f, nullptr, 0.f, 0.f);
+    mFrmeInitialized->SetSpreadPanel(-kPortMapWindowHalf, kPortMapWindowHalf, nullptr, 0.f, 0.f);
     mFrmeInitialized->SetSpreadPanelSide(mFrmeInitialized->FindWidget("model_lable"), -1.f);
     mFrmeInitialized->SetSpreadPanelSide(mFrmeInitialized->FindWidget("textpane_label"), -1.f);
     mFrmeInitialized->SetSpreadPanelSide(mFrmeInitialized->FindWidget("textpane_right"), 1.f);
@@ -2709,6 +2729,24 @@ static int MapReferenceWidth() {
 // plane aspect wider than the authored one (the old spread factor) squeezed it horizontally by
 // that factor on a wide screen.
 static int MapScreenWidth() { return MapReferenceWidth(); }
+
+// The map screen frame's spread panel moves the window's edges (at this fraction of the authored
+// half-width) out with the screen edge. The map is depth-tested against the HUD's automapper mask,
+// which keeps the authored size, so on a wide screen the map was cut to the authored box inside the
+// spread window (issue #23); CInGameGuiManager widens the mask by this factor.
+float CAutoMapper::PortMapScreenWindowWiden() const {
+  if (mFrmeInitialized == nullptr) {
+    return 1.f;
+  }
+  const CGuiCamera* camera = mFrmeInitialized->GetFrameCamera();
+  const float hw = camera != nullptr ? camera->GetSpreadHalfWidth() : 0.f;
+  if (hw <= 0.f || !camera->IsPerspective() || camera->GetSpreadScreenHalfWidth() <= 0.f) {
+    return 1.f;
+  }
+  const float moved = camera->GetSpreadSliceOffset(2.f * camera->GetSpreadScreenHalfWidth()) / hw;
+  const float widen = (kPortMapWindowHalf + moved) / kPortMapWindowHalf;
+  return widen > 0.f ? widen : 1.f;
+}
 #endif
 
 CVector2i CAutoMapper::GetMiniMapViewportSize() {

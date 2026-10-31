@@ -29,6 +29,13 @@ dumps come out flipped). The icon is inset to match the game's own art: the
 32x32 buttons are opaque only from about (6,5) to (27,26), so the glyph is
 22px (a full-bleed icon reads as a solid square), and the 64x32 art is a
 centred 28px square.
+
+Each bindings icon is written at SCALE times the size of the texture it
+replaces (the names keep the game slot's size); the port takes any whole
+multiple of it, the same on both axes. At the game's own size the glyph is 22px
+of the 64px source art, which reads blurry once the HUD is scaled up (#229,
+from Prime 1). The per-device sets are replacements for the game's own textures
+by name, which the game draws at their declared size, so they stay at 1x.
 """
 import os
 import re
@@ -39,6 +46,9 @@ from PIL import Image
 SIZE = 32
 ICON_SIZE = 22
 INSET = (SIZE - ICON_SIZE) // 2
+# Bindings icons are written at this multiple of the game's size (#229); the
+# port accepts any whole multiple.
+SCALE = 2
 ICONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompt_icons")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORT_PROMPTS = os.path.join(ROOT, "platform", "port_prompts.cpp")
@@ -270,14 +280,16 @@ def make_cluster(stems):
     return img
 
 
-def make_icon(name, width=SIZE, height=SIZE):
+def make_icon(name, width=SIZE, height=SIZE, scale=SCALE):
     """Scale the icon to the game's inset for a texture of this size: 22px in
     the 32x32 buttons, 28px in the 64x32 stick and D-pad art (which the game
-    draws as a centred 28px square)."""
+    draws as a centred 28px square). The image is `scale` times that size; the
+    name keeps the game's."""
     if width == height:
         size = max(1, int(round(ICON_SIZE * width / SIZE)))
     else:
         size = max(1, min(width, height) - 4)
+    width, height, size = width * scale, height * scale, size * scale
     tile = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     stem = name[:-4] if name.endswith(".png") else name
     if stem in COMPOSITES:
@@ -301,7 +313,9 @@ def main():
         for action, w, h, hsh, fmt in keys:
             if action not in icons:
                 continue  # this device has no icon for that action
-            write_dds(make_icon(icons[action], w, h), os.path.join(d, texture_name(w, h, hsh, fmt)))
+            # 1x: these replace the game's own texture by name, drawn at its declared size.
+            write_dds(make_icon(icons[action], w, h, scale=1),
+                      os.path.join(d, texture_name(w, h, hsh, fmt)))
         print(f"{device}: {len(keys)} textures -> {d}")
 
     bindings = os.path.join(OUT, "bindings")

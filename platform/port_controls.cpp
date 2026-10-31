@@ -7,6 +7,7 @@
 #include "port_input_bindings.h"
 #include "port_input_map.h"
 #include "port_mouse.h"
+#include "port_overlay_internal.h"
 #include "input/port_input_devices.h"
 
 #include "MetroidPrime/CControlMapper.hpp"
@@ -399,6 +400,8 @@ bool ApplyKeyPresetNamed(std::string_view name) {
   } else {
     return false;
   }
+  // The presets turn mouse aim and Twin Stick Aim on or off; settings.cfg keeps them.
+  PortOverlaySettings::MarkDirty();
   return true;
 }
 
@@ -414,6 +417,7 @@ bool ApplyPadPresetNamed(std::string_view name) {
   } else {
     return false;
   }
+  PortOverlaySettings::MarkDirty();
   return true;
 }
 

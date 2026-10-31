@@ -765,8 +765,12 @@ bool CMinorIng::UpdateTargetPos(CStateManager& mgr) {
 void CMinorIng::UpdateBallPursuit(CStateManager& mgr) {
   CScriptTeamAiMgr* team = TCastToPtr< CScriptTeamAiMgr >(mgr.ObjectById(mTeamId));
   const CPlayer* player = TCastToConstPtr< CPlayer >(mgr.GetObjectById(mTargetId));
-  // [?] retail reads the morph state at player+0x38c only when the word at +0x390 is 0.
-  if (player != nullptr && player->GetMorphballTransitionState() == CPlayer::kMS_Morphed &&
+  // The morph state at player+0x38c counts only when the word at +0x390 is 0 (asm 0x5BF4-0x5C0C).
+  const CPlayer::EPlayerMorphBallState morphState =
+      player != nullptr && player->GetSpawnedMorphballState() == CPlayer::kMS_Unmorphed
+          ? player->GetMorphballTransitionState()
+          : CPlayer::kMS_Unmorphed;
+  if (player != nullptr && morphState == CPlayer::kMS_Morphed &&
       (player->GetTranslation() - GetTranslation()).MagSquared() <
           mData.mMorphballPursuitDistance * mData.mMorphballPursuitDistance) {
     const CTeamAiRole* role = CScriptTeamAiMgr::GetTeamAiRole(mgr, mTeamId, GetUniqueId());
@@ -1293,11 +1297,10 @@ void CMinorIng::SetWallPointCoverDest(CStateManager& mgr, EStateMsg msg, float) 
   if (from == -1) {
     return;
   }
-  // [?] the second filter's third argument is not visible in the pseudocode; the register still
-  // holds the -1 of the first.
+  // The second filter is connected to the first point (asm 0x53B8-0x53D8: r5 = from).
   int to = -1;
   mPointPathFindSearch.FindClosestPhysicalPoint(hint->GetTranslation(), to,
-                                                CPathFindPointSearchFilter(20.f, 0, -1));
+                                                CPathFindPointSearchFilter(20.f, 0, from));
   if (to != -1 && PortIngPointSearch(mPointPathFindSearch, *mPathArea, from, to)) {
     mFoundMovementPos = true;
   }
@@ -2227,6 +2230,8 @@ void CMinorIng::MassiveDeath(CStateManager& mgr) {
           xf.RotateLocalX(CRelAngle::FromRadians(pitch));
           const float yaw = (skIngletAngles[(base + i) % 10] * 10.f - 50.f) * 0.017453292f;
           xf.RotateLocalZ(CRelAngle::FromRadians(yaw));
+          // Two units along the forward column (asm 0x7550-0x757C, f28 = rodata 0x3C = 2.0).
+          xf.SetTranslation(xf.GetTranslation() + xf.GetForward() * 2.f);
           // The inglet (asm 0x74A8-0x75CC): the launch speed is random out of the data's range,
           // the model data and the actor parameters are the empty ones and the bounds are the
           // inverted box.
@@ -2426,7 +2431,7 @@ static CEntity* PortLoadMinorIng(CStateManager& mgr, CInputStream& input, CEntit
                                   static_cast< ushort >(sldrThis.ingSpot.sound_Death));
 
   // The retail's loader (fn_44_110) reads seven bool properties and fn_44_9B4 packs them into
-  // three bytes of the data (asm 0xA5AC-0xA5C4): the byte at 0x154's bit 7 is the inglet block's
+  // three bytes of the data (fn_44_9B4, asm 0x9B4-0xC44): the byte at 0x154's bit 7 is the inglet block's
   // allow-lock-on, the byte at 0x155 is the property 0x9207f51 on its own and the byte at 0x156
   // holds the other six, most significant bit first. The property ids are the ones the generated
   // SLdrMinorIng reader uses, so each bool lands in the bit fn_44_9B4 gives it.
@@ -2436,7 +2441,7 @@ static CEntity* PortLoadMinorIng(CStateManager& mgr, CInputStream& input, CEntit
     flags156 |= 0x80; // 0x399d1eaa
   }
   if (sldrThis.unknown_0xbce16644) {
-    flags156 |= 0x40; // 0xbfd0e644
+    flags156 |= 0x40; // 0xbce16644
   }
   if (sldrThis.unknown_0x142433d3) {
     flags156 |= 0x20; // 0x142433d3

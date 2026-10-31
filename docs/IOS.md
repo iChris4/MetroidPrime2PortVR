@@ -43,7 +43,7 @@ game finds it there without asking.
 ## Where things are
 
 Everything the game writes is in **Files > On My iPhone (or iPad) > Metroid Prime 2 Port**: the
-log (`metroid_prime2_port.log`, when the `logfile` setting is on), `settings.cfg`, `controls.toml`, the memory card (`USA/Card A/`) and your disc image. Shader
+log (`metroid_prime2_port.log`, when the `log_file` setting is on), `settings.cfg`, `controls.toml`, the memory card (`USA/Card A/`) and your disc image. Shader
 caches stay in the hidden Library/Caches folder; iOS may clear them. Deleting the app deletes the
 folder: copy your saves out first.
 

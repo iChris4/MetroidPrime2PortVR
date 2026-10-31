@@ -110,6 +110,10 @@ struct ResumeInfo {
 bool ResumeOffer(ResumeInfo& out);
 // The player said yes: the game loads the resume once it runs. Returns the card file to boot into.
 int ResumeAccept(const ResumeInfo& info);
+// PortSkipFrontEnd::StartGame, with the card's save already the running state: when a resume is
+// pending (accepted, or an MP2_SKIP_FRONTEND auto-resume) and fits this card file, the world and
+// area it was saved in, so the first world the game loads is the resume room and not the card's.
+bool ResumeBootArea(uint32_t& world, uint32_t& area);
 void ResumeClear();
 std::string ResumeStatus();
 void RequestResumeSnapshot(); // console: take and write a snapshot now

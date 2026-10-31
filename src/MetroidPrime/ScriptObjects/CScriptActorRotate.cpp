@@ -8,6 +8,9 @@
 #include "MetroidPrime/ScriptObjects/CScriptEffect.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptPlatform.hpp"
 #include "MetroidPrime/TCastTo.hpp"
+#ifdef TARGET_PC
+#include "port_overlay.h"
+#endif
 
 CScriptActorRotate::~CScriptActorRotate() {}
 
@@ -112,6 +115,13 @@ void CScriptActorRotate::Think(float dt, CStateManager& mgr) {
 
   if ((mFlags & kF_AdvanceTime) != 0 && (mFlags & kF_ExternalTime) == 0) {
     mCurrentTime += dt;
+#ifdef TARGET_PC
+    // Port: a timed one-shot rotation (the energy controller rooms' turning room) marks the
+    // cutscene it belongs to, so CStateManager::Update can run it at double speed.
+    if ((mFlags & (kF_Loop | kF_AngularVelocity)) == 0 && mDuration >= 5.f) {
+      PortOverlay::NoteRotatingSequence(mgr.GetUpdateFrameIdx());
+    }
+#endif
   }
 
   if (TCastToPtr< CScriptActorRotate >(mgr.ObjectById(mTargetId))) {

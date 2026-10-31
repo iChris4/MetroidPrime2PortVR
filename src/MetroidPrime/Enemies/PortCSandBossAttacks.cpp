@@ -317,7 +317,9 @@ int CSandBoss::CountActiveChargeBeams(CStateManager& mgr) {
   for (int i = 0; i < mChargeBeams.size(); ++i) { // 0xE94
     const CPlasmaProjectile* beam =
         TCastToPtr< CPlasmaProjectile >(mgr.ObjectById(mChargeBeams[i].mBeam));
-    if (beam != nullptr && beam->IsFiring()) {
+    // Retail 0x2704-0x2718: firing bit set and the expansion state (0x5E8) is not 3 (kES_Release).
+    if (beam != nullptr && beam->IsFiring() &&
+        beam->GetExpansionState() != CPlasmaProjectile::kES_Release) {
       ++count;
     }
   }
@@ -399,8 +401,15 @@ void CSandBoss::UpdateChargeBeams(CStateManager& mgr, float dt) {
         shrink = 1.f;
       }
       effect->SetGlobalScale(shrink * baseScale);
-      // Retail also writes `shrink` over a CVector3f at beam+0x674; the host class does not identify
-      // that member yet (its particles follow the beam's own expansion), so only the effect scales.
+      // Retail 0x2B3C-0x2B78: every live beam's muzzle scale (CVector3f at +0x674, built as
+      // 1,1,1 in the constructor and read by UpdateFx) is set to `shrink`.
+      for (int i = 0; i < mChargeBeams.size(); ++i) {
+        CPlasmaProjectile* beam =
+            TCastToPtr< CPlasmaProjectile >(mgr.ObjectById(mChargeBeams[i].mBeam));
+        if (beam != nullptr) {
+          beam->SetMuzzleScale(CVector3f(shrink, shrink, shrink));
+        }
+      }
     }
   }
 }
@@ -667,12 +676,14 @@ void CSandBoss::StartDoubleChargeBeam(CStateManager& mgr, const rstl::string& lo
 
 // @ fn_55_42A8
 // Picks the worm that should fire the dark beam and returns its uid (kInvalidUniqueId for none).
-// With two attached siblings the pick only happens once this worm's doubleCharge cooldown field
-// matches mChargeBeamCooldown (0x898 vs 0xF44), with three it is tripleCharge's (0x8E0); any other
-// sibling count always picks. The walk covers the whole sibling list, so this worm is a candidate;
-// it needs the worm attached to the sphere and in locomotion, stops at the first sibling whose
-// dark-beam probe already succeeded (0x165C b3), and prefers the smallest angle between that worm's
-// facing and the player (two siblings) or the largest 0xF34 (three).
+// pick is true when the attached-sibling count is not 2 or 3, otherwise when this worm's
+// doubleCharge (two siblings, 0x898) or tripleCharge (three, 0x8E0) cooldown field matches
+// mChargeBeamCooldown (0xF44). With pick set the walk (the whole sibling list, so this worm is a
+// candidate) keeps the attached, locomotion-ready worm whose facing is closest to the player, from
+// FLT_MAX; with pick clear it keeps the largest 0xF34 from -1. Either way the walk gives up with
+// kInvalidUniqueId at the first attached sibling whose dark-beam probe already succeeded (0x165C
+// b3). The compares are fcmpo + bge/ble skips, taken on NaN, so a NaN value never wins (asm
+// 0x43F0, 0x4484).
 TUniqueId CSandBoss::ShouldDarkBeamAttackCheck(CStateManager& mgr) const {
   const int attached = CountAttachedSiblings(mgr); // fn_55_595C
   bool pick;
@@ -683,28 +694,28 @@ TUniqueId CSandBoss::ShouldDarkBeamAttackCheck(CStateManager& mgr) const {
   } else {
     pick = mData.unknown_0x7619e561.tripleCharge.unknown_0x8d4f3b88 == mChargeBeamCooldown; // 0x8E0
   }
-  if (!pick) {
-    return kInvalidUniqueId;
+  CVector3f toPlayer = CVector3f::Zero();
+  if (pick) {
+    const CPlayer* player = mgr.GetPlayer(0); // mgr 0x14FC
+    if (player == nullptr) {
+      return kInvalidUniqueId;
+    }
+    toPlayer = player->GetTranslation() - GetTranslation(); // 0x54..0x5C
   }
-  const CPlayer* player = mgr.GetPlayer(0); // mgr 0x14FC
-  if (player == nullptr) {
-    return kInvalidUniqueId;
-  }
-  const CVector3f toPlayer = player->GetTranslation() - GetTranslation(); // 0x54..0x5C
   TUniqueId best = kInvalidUniqueId;
-  float bestValue = attached == 2 ? 3.4028234663852886e+38f : -1.f;
+  float bestValue = pick ? 3.4028234663852886e+38f : -1.f; // rodata_EC / rodata_F0
   for (int i = 0; i < mSiblings.size(); ++i) { // 0xDD8 / 0xDDC
     const CSandBoss* sibling = CastSandBoss(mgr.GetObjectById(mSiblings[i]));
     if (sibling == nullptr || !sibling->mAttachedToSphere) { // 0x165D b7
       continue;
     }
     if (sibling->mDarkBeamResult) { // 0x165C b3: someone already got the shot through
-      break;
+      return kInvalidUniqueId;
     }
     if (!sibling->CheckBodyStateForDarkBeam(mgr)) { // fn_55_8C88
       continue;
     }
-    if (attached == 2) {
+    if (pick) {
       const float angle =
           CVector3f::GetAngleDiff(sibling->GetTransform().GetColumn(kDY), toPlayer); // 0x28/38/48
       if (angle < bestValue) {
@@ -755,8 +766,10 @@ void CSandBoss::FireDarkBeam(CStateManager& mgr, float dt) {
               mgr.ObjectById(target->CheckConnectedObject(mgr, kSS_Connect, kSM_Follow)))) {
         point = waypoint->GetTranslation();
         hasPoint = true;
-      } else if (CActor* actor = TCastToPtr< CActor >(target)) { // [inferred: the actor cast]
-        point = actor->GetTranslation();
+      } else {
+        // Retail 0x4750: target + 0x54 with no type check. mSafeZoneTarget is only ever set from a
+        // CScriptSafeZone (PortCSandBossStates.cpp), an actor, so the cast is exact.
+        point = static_cast< CActor* >(target)->GetTranslation();
         hasPoint = true;
       }
       if (hasPoint) {

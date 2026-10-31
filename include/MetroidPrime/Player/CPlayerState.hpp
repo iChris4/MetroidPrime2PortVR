@@ -299,6 +299,14 @@ public:
 
   static uint GetBitCount(uint);
   static int GetPowerUpMaxValue(EItemType);
+#ifdef TARGET_PC
+  // Port (#27 "Beam ammo per expansion"): the retail maximum, except Dark/Light ammo which follows
+  // the slider (250 * N / 50). The save keeps retail's bit widths; see port_beam_ammo.h.
+  static int PortPowerUpMaxValue(EItemType);
+  // Records / restores the Dark and Light amounts above 250 for the save bytes just written / read.
+  void PortRememberBeamAmmo(const void* data, unsigned long size, bool persist) const;
+  void PortApplyBeamAmmo(const void* data, unsigned long size);
+#endif
 
   CHealthInfo* HealthInfo() { return &mHealth; }
 

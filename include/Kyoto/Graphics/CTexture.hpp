@@ -112,6 +112,9 @@ public:
 #ifdef TARGET_PC
   // Port: the GX object built with the bitmap (the touch wheels' HUD icons decode it).
   const GXTexObj* PortTexObj() const { return &mTexObj; }
+  // Port: appends `extraRows` zeroed rows (a multiple of 8) below a single-mip C4 bitmap, keeping the
+  // old texels in place; the caller paints the rows and then calls InitTextureObjects.
+  bool PortGrowRows(int extraRows);
 #endif
   CGraphicsPalette* GetPalette() { return mGraphicsPalette.get(); }
 

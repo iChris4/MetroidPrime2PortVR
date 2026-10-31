@@ -142,6 +142,9 @@ private:
 
   static int KernLookup(const rstl::vector< CKernPair >& kerning, int start, int chr);
   const CGlyph* InternalGetGlyph(wchar_t chr) const;
+#ifdef TARGET_PC
+  void AddInfinityGlyph();
+#endif
 };
 CHECK_SIZEOF(CRasterFont, 0x94)
 

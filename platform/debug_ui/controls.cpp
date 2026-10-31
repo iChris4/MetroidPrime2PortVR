@@ -6,6 +6,7 @@
 #include "../input/port_input_devices.h"
 #include "port_controls.h"
 #include "port_gyro_motion.h"
+#include "port_input_remap_ui.h"
 #include "port_mouse.h"
 #include "port_overlay.h"
 #include "port_touch.h"
@@ -26,6 +27,29 @@
 namespace PortDebug {
 
 void DrawControlsOptions() {
+  // Issue #5: the one-click way to play with mouse and keyboard, first on the page.
+  ImGui::SeparatorText("Quick setup");
+  if (ImGui::Button("Use mouse & keyboard")) {
+    PortInputRemap::ApplyPreset(PortInput::Family::Keyboard, "mouse");
+  }
+  ItemHelp("Turns on mouse aim and the Mouse & keyboard layout: WASD to move, mouse to aim, left "
+           "click to fire, Space to jump, Q to lock on. Replaces your own keyboard bindings; "
+           "Controls > Remap > Presets... has the others.");
+  SameLineAfterHelp();
+  ImGui::TextDisabled(PortMouse::Enabled() ? "Mouse aim is on." : "Mouse aim is off.");
+  // A GameCube pad has no right stick click for the dual-stick layout (as Remap's Presets...).
+  ImGui::BeginDisabled(PADIsGCAdapter(0) != 0);
+  if (ImGui::Button("Use twin-stick controller")) {
+    PortInputRemap::ApplyPreset(PortInput::Family::Pad, "remastered");
+  }
+  ImGui::EndDisabled();
+  ItemHelp("Turns on Twin Stick Aim and the Remastered layout for all controllers: left stick moves, "
+           "right stick aims, RT fire, LT lock on, A jump, X morph ball, right stick click free look. "
+           "Replaces your own controller bindings; Controls > Remap > Presets... has Modern and the "
+           "others. Not for a GameCube controller, which has no right stick click.");
+  SameLineAfterHelp();
+  ImGui::TextDisabled(PortMouse::StickEnabled() ? "Twin-stick aim is on." : "Twin-stick aim is off.");
+
   ImGui::SeparatorText("On-screen prompts");
   int glyphs = sPromptGlyphs;
   if (ImGui::Combo("Button glyphs", &glyphs,
@@ -52,8 +76,6 @@ void DrawControlsOptions() {
   Changed(ImGui::Checkbox("Remastered charge (rapid fire)", &sRapidCharge));
   ItemHelp("As in Metroid Prime Remastered: holding fire after the press shot fires a few quick "
            "shots. Power Beam only.");
-  Changed(ImGui::Checkbox("Swap the Scan and Echo visor buttons", &sSwapVisors));
-  ItemHelp("Swaps the two visors' D-pad directions (and 6/8 on the keyboard).");
   ImGui::EndDisabled();
 
   ImGui::SeparatorText("Aiming");
@@ -130,6 +152,14 @@ void DrawControlsOptions() {
   }
   ImGui::EndDisabled();
   ItemHelp("Same switch as Rumble in the pause menu.");
+
+  ImGui::SeparatorText("Map");
+  Changed(ImGui::Checkbox("Invert map rotate X", &sMapInvertX));
+  ItemHelp("Flips which way the map turns when you rotate it left and right. The game turns the "
+           "map the opposite way to the stick.");
+  SameLineAfterHelp();
+  Changed(ImGui::Checkbox("Invert map rotate Y", &sMapInvertY));
+  ItemHelp("Flips which way the map tilts up and down. Both on gives camera-style rotation.");
 }
 
 void DrawControlsKeyboardMouse() {
@@ -184,10 +214,6 @@ void DrawControlsKeyboardMouse() {
     PortMouse::SetInvertY(invertY);
     Changed(true);
   }
-  ImGui::SameLine();
-  Changed(ImGui::Checkbox("Weapon buttons", &sMouseButtons));
-  ImGui::SetItemTooltip("Mouse buttons are set in Controls > Remap; keyboard and controller weapon "
-                        "bindings also work.");
   // The game's crosshair input is a look control the port never presses, so the port holds the
   // reticle on while its own aim owns the view.
   Changed(ImGui::Checkbox("Crosshair", &sAimCrosshair));
@@ -198,9 +224,6 @@ void DrawControlsKeyboardMouse() {
                            "%d%%"));
   ImGui::EndDisabled();
   ImGui::SetItemTooltip("Applies under mouse aim, twin stick and touch aim.");
-
-  ImGui::SeparatorText("Mouse buttons");
-  ImGui::TextDisabled("Mouse buttons are bound in Controls > Remap (Keyboard & mouse).");
 }
 
 void DrawControlsController() {
@@ -210,8 +233,8 @@ void DrawControlsController() {
     PortMouse::SetStickEnabled(twinStick);
     Changed(true);
   }
-  ItemHelp("Aims with the right stick like the mouse, so it no longer free-looks. Fire stays on A; "
-           "change it in Controls > Remap.");
+  ItemHelp("Aims with the right stick like the mouse, so it no longer free-looks, and the R trigger stops "
+           "free-looking (it stays Spider Ball in the Morph Ball). Fire stays on A; change it in Controls > Remap.");
   // Shown only with twin stick on, as MP1 does.
   if (PortMouse::StickEnabled()) {
     float rate = PortMouse::StickAimRate();

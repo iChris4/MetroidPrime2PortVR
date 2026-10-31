@@ -5,6 +5,7 @@
 #include "port_mobile.h"
 #include "debug_ui_internal.h"
 
+#include "port_overlay.h"
 #include "port_collision_view.h"
 #include "port_savestate.h"
 #include "port_warp.h"
@@ -185,7 +186,7 @@ void CheatGrantEverything() {
   for (const CPlayerState::EItemType counter :
        {CPlayerState::kIT_Missile, CPlayerState::kIT_Powerbomb, CPlayerState::kIT_EnergyTanks,
         CPlayerState::kIT_DarkAmmo, CPlayerState::kIT_LightAmmo}) {
-    const int max = CPlayerState::GetPowerUpMaxValue(counter);
+    const int max = CPlayerState::PortPowerUpMaxValue(counter);
     GrantItem(*ps, counter, max, max);
   }
   ps->HealthInfo()->SetHP(ps->CalculateHealth());
@@ -227,6 +228,16 @@ void DrawRendering() {
 void DrawCheatsSection() {
   ImGui::Checkbox("God mode", &sGodMode);
   ItemHelp("The player takes no damage; other actors still do. Not saved.");
+  ImGui::Checkbox("No Dark Aether damage", &sNoDarkAetherDamage);
+  ItemHelp("Dark Aether's air does not hurt, as with the Light Suit; light crystals still heal. "
+           "Not saved.");
+  ImGui::BeginDisabled(PortOverlay::OriginalExperience());
+  bool beamDoors = sUnlockBeamDoors;
+  if (ImGui::Checkbox("Unlock beam doors", &beamDoors)) {
+    PortOverlay::SetUnlockBeamDoors(beamDoors);
+  }
+  ImGui::EndDisabled();
+  ItemHelp("Colour-locked doors open to any of the four beams. Missile locks stay.");
 
   CPlayerState* ps = gpGameState != nullptr ? gpGameState->GetPlayerState().GetPtr() : nullptr;
   // The front end has its own player state and its own Samus; the page is about the game's.
@@ -252,7 +263,7 @@ void DrawCheatsSection() {
   }
 
   const auto counter = [ps](const char* label, CPlayerState::EItemType type) {
-    const int max = CPlayerState::GetPowerUpMaxValue(type);
+    const int max = CPlayerState::PortPowerUpMaxValue(type);
     int amount = std::min(ps->GetItemAmount(type, false), max);
     // A fixed width, so the label sits next to its slider instead of at the page's right edge.
     ImGui::SetNextItemWidth(220.f);
@@ -262,11 +273,61 @@ void DrawCheatsSection() {
       // outright: a slide down must take ammo away even though the capacity has room.
       GrantItem(*ps, type, std::max(amount, ps->GetItemCapacity(type)), amount);
     }
+    ImGui::SameLine();
+    ImGui::PushID(label);
+    ImGui::CheckboxFlags("Infinite", &sInfiniteAmmo, PortOverlay::InfiniteAmmoKind(type));
+    ImGui::PopID();
+    ItemHelp("Firing does not use this ammo up, even at zero, and the HUD shows infinity. The real count "
+             "is kept and pickups still add to it. Not saved.");
   };
   counter("Missiles", CPlayerState::kIT_Missile);
   counter("Power Bombs", CPlayerState::kIT_Powerbomb);
   counter("Dark Ammo", CPlayerState::kIT_DarkAmmo);
   counter("Light Ammo", CPlayerState::kIT_LightAmmo);
+  // Ammo costs and expansion size (#27). Each has a Reset button: a slider is hard to land on
+  // an exact value with a finger.
+  {
+    int comboBeam = PortOverlay::ComboBeamCost();
+    ImGui::SetNextItemWidth(220.f);
+    if (ImGui::SliderInt("Combo beam ammo cost", &comboBeam, 0, PortOverlay::kComboBeamCostMax,
+                         "%d", ImGuiSliderFlags_AlwaysClamp)) {
+      PortOverlay::SetComboBeamCost(comboBeam);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reset##combobeamcost")) {
+      PortOverlay::SetComboBeamCost(PortOverlay::kComboBeamCostMax);
+    }
+    ItemHelp("Dark or Light ammo a charge combo uses (the Annihilator Beam uses it from both). "
+             "Reset: 30, the original cost. Saved.");
+    int comboMissile = PortOverlay::ComboMissileCost();
+    ImGui::SetNextItemWidth(220.f);
+    if (ImGui::SliderInt("Combo missile cost", &comboMissile, 0, PortOverlay::kComboMissileCostMax,
+                         "%d", ImGuiSliderFlags_AlwaysClamp)) {
+      PortOverlay::SetComboMissileCost(comboMissile);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reset##combomissilecost")) {
+      PortOverlay::SetComboMissileCost(PortOverlay::kComboMissileCostMax);
+    }
+    ItemHelp("Missiles a charge combo uses. At 0 a combo needs no missile. Reset: 5, the original "
+             "cost. Saved.");
+    int perExpansion = PortOverlay::BeamAmmoPerExpansion();
+    ImGui::SetNextItemWidth(220.f);
+    if (ImGui::SliderInt("Beam ammo per expansion", &perExpansion,
+                         PortOverlay::kBeamAmmoPerExpansionMin, PortOverlay::kBeamAmmoPerExpansionMax,
+                         "%d", ImGuiSliderFlags_AlwaysClamp)) {
+      PortOverlay::SetBeamAmmoPerExpansion((perExpansion + 5) / 10 * 10);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reset##beamammoperexpansion")) {
+      PortOverlay::SetBeamAmmoPerExpansion(PortOverlay::kBeamAmmoPerExpansionDefault);
+    }
+    ItemHelp("Dark and Light ammo each Ammo Expansion adds, and the matching ammo it fills; the "
+             "maximum is 5 expansions' worth (250 at 50, 500 at 100). Reset: 50, the original. "
+             "Lowering it only lowers the cap: ammo above it is trimmed the next time you pick "
+             "some up. Saves keep working: the extra above 250 is stored beside the card "
+             "(beam_ammo.sidecar), so a save without it loads at 250. Saved.");
+  }
   // Energy tanks are the one counter that also moves the health bar.
   {
     const int max = CPlayerState::GetPowerUpMaxValue(CPlayerState::kIT_EnergyTanks);
@@ -406,6 +467,23 @@ void DrawCheatsSection() {
       for (int i = 0; i < worlds.size(); ++i) {
         const uint32_t id = static_cast< uint32_t >(worlds[i].first);
         std::string name = PlainWorldName(worlds[i].second.GetFrontEndName());
+        // The six multiplayer arenas (Metroid6.pak, same ids in every release) and the front end
+        // carry no name in the card's table (Front End: G2ME, G2MP, R3ME ids); MLVL names from the disc (tools/world_areas.py --list).
+        static const struct {
+          uint32_t id;
+          const char* name;
+        } kUnnamedWorlds[] = {
+            {0xa50a80cc, "Multiplayer: Sidehopper Station"}, {0xae171602, "Multiplayer: Spires"},
+            {0xe3b0c703, "Multiplayer: Crossfire Chaos"},    {0x233e42be, "Multiplayer: Pipeline"},
+            {0x406add7f, "Multiplayer: Spider Complex"},     {0x7e19ed26, "Multiplayer: Shooting Gallery"},
+            {0x69802220, "Front End"},                       {0x7b6eaa68, "Front End"},
+            {0xdaea74a3, "Front End"},
+        };
+        for (const auto& known : kUnnamedWorlds) {
+          if (name.empty() && known.id == id) {
+            name = known.name;
+          }
+        }
         if (name.empty()) {
           char buf[32];
           std::snprintf(buf, sizeof(buf), "MLVL %08X", static_cast< unsigned >(id));

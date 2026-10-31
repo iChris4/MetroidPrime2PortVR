@@ -126,6 +126,10 @@ bool TakeEditRequested();
 // state, the Java view's Ball page), as MP1's CPlayer does.
 void SetMorphed(bool morphed);
 bool Morphed();
+// CStateManager::Update publishes whether the game is soft paused: the scan text is up (CPlayer's
+// scan freeze, its only soft pause).
+void SetScanTextUp(bool up);
+bool ScanTextUp();
 // Steps Default -> Classic -> Twin -> Default and persists it. The per-control offsets stay:
 // the Java view keys them by control id, which differs between layouts, as in MP1.
 void CycleLayout();

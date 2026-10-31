@@ -442,6 +442,8 @@ bool Capture(CStateManager& mgr, State& s, std::string& error) {
     CBitStreamWriter writer(stream);
     gpGameState->PutTo(writer);
   }
+  // Dark/Light ammo above 250 (Beam ammo per expansion) does not fit the retail blob.
+  gpGameState->GetPlayerState()->PortRememberBeamAmmo(s.blob.data(), s.blob.size(), true);
   worldState.SetDesiredAreaAssetId(desired);
   if (PortOverlay::SaveStateRoomState()) {
     CaptureRoomState(mgr, s.roomState);
@@ -489,6 +491,7 @@ void SwapGameState(const State& s) {
     CBitStreamReader reader(stream);
     owner = rs_new CGameState(reader);
   }
+  owner->GetPlayerState()->PortApplyBeamAmmo(s.blob.data(), s.blob.size());
   gpGameState = owner.get();
   gpGameState->SystemOptions() = systemOptions;
   gpGameState->SetCompressedGameStates(states);
@@ -959,7 +962,11 @@ void TickRoom(CStateManager& mgr) {
   if (sRoom.nextLayer < sRoom.layers.size() || mgr.PortLayerRequestPending()) {
     if (sRoom.nextLayer < sRoom.layers.size() && !mgr.PortLayerRequestPending() && !idsTight) {
       const std::pair< int, int >& want = sRoom.layers[sRoom.nextLayer++];
-      mgr.PortWarpToLayer(TAreaId(want.first), want.second);
+      // A layer the state's own layer bits have off (the intro cinematic's once it has played)
+      // keeps its saved objects in the room, but switching it on would run its load scripts again.
+      if (mgr.PortLayerFlagOn(TAreaId(want.first), want.second)) {
+        mgr.PortWarpToLayer(TAreaId(want.first), want.second);
+      }
     }
   } else {
     waiting = ApplyRoomState(mgr, sRoom.state, sRoom.progress);
@@ -1123,6 +1130,29 @@ bool ResumeOffer(ResumeInfo& out) {
   out.fileIdx = s.resumeHeader.fileIdx;
   out.crashedAfterThis = sLastRunCrashed;
   out.crashedAgain = PortResume::CrashedAgain(sLastRunCrashed, sLastMarker, s.savedAt);
+  return true;
+}
+
+bool ResumeBootArea(uint32_t& world, uint32_t& area) {
+  // The same two entries as ResumeCheck: the prompt's Yes, or an MP2_SKIP_FRONTEND launch that no
+  // boot warp overrides.
+  if (!sResumeAccepted.load()) {
+    if (!ResumeActive() || std::getenv("MP2_WORLD") != nullptr || std::getenv("MP2_TELEPORT") != nullptr) {
+      return false;
+    }
+  }
+  EnsureInit();
+  State s;
+  std::string error;
+  if (!ReadSlot(kResumeSlot, s, error) || s.worldId == kInvalidAssetId ||
+      s.areaAssetId == kInvalidAssetId || gpGameState == nullptr ||
+      s.resumeHeader.fileIdx != gpGameState->SystemOptions().GetSaveIdx() ||
+      !PortResume::Matches(s.resumeHeader, gpGameState->GetCardSerial()) ||
+      gpMain == nullptr || PortWarp::Pending()) {
+    return false;
+  }
+  world = static_cast< uint32_t >(s.worldId);
+  area = static_cast< uint32_t >(s.areaAssetId);
   return true;
 }
 

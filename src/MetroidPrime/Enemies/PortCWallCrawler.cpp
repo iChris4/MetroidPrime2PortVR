@@ -93,7 +93,7 @@ CWallCrawler::CWallCrawler(EPatternedAI character, TUniqueId uid, const rstl::st
                            float f2, float f3, float f4, float f5, float f6)
 : CPatterned(character, uid, name, flavor, info, xf, mData, pInfo, moveType, colType, bodyType,
              actParms)
-, mAlignSurface(CVector3f::Zero(), CVector3f::Right(), CVector3f::Forward(), 0xffffffff) // @ fn_83_26CC (0x54): the CCollisionSurface ctor (asm 0x24A0)
+, mAlignSurface(CVector3f::Zero(), CVector3f::Right(), CVector3f::Forward(), ~u64(0)) // @ fn_83_26CC (0x54): the CCollisionSurface ctor (asm 0x24A0)
 , mColSphere(CSphere(CVector3f::Zero(), sphereRadius), GetMaterialList())
 , mCollisionCloseMargin(collisionCloseMargin)
 , mAlignAngVel(alignAngVel)
@@ -176,7 +176,8 @@ void CWallCrawler::Think(float dt, CStateManager& mgr) {
   CPatterned::Think(dt, mgr); // asm 0x5E0
 
   if (mPatrolPauseRemTime > 0.f) { // asm 0x5E4-0x610
-    mPatrolPauseRemTime = CMath::Max(0.f, mPatrolPauseRemTime - dt);
+    const float remaining = mPatrolPauseRemTime - dt; // asm 0x6A4-0x6BC: NaN clamps to 0
+    mPatrolPauseRemTime = remaining > 0.f ? remaining : 0.f;
   }
 
   CBodyController* bc = BodyController();
@@ -321,8 +322,8 @@ void CWallCrawler::UpdateConstraintPlane(CStateManager& mgr) {
   CPlane plane(0.f, CUnitVector3f(x838_, CUnitVector3f::kN_No));
   if (count == 3) { // asm 0x360-0x364
     plane = CPlane(points[0], points[1], points[2]); // asm 0x374
-  } else if (count == 2 && CMath::AbsF(points[0].GetX() - points[1].GetX()) >= 0.00001f && // asm 0x3A8-0x3C8
-             CMath::AbsF(points[0].GetY() - points[1].GetY()) >= 0.00001f) { // asm 0x3CC-0x3E4
+  } else if (count == 2 && !(CMath::AbsF(points[0].GetX() - points[1].GetX()) < 0.00001f) && // asm 0x3A8-0x3C8
+             !(CMath::AbsF(points[0].GetY() - points[1].GetY()) < 0.00001f)) { // asm 0x3CC-0x3E4
     plane = CPlane(points[0], points[1], points[1] + CVector3f(0.f, 0.f, 1.f)); // asm 0x404-0x424
   } else {
     return; // the old plane stays (asm 0x448)
@@ -344,7 +345,7 @@ bool CWallCrawler::UpdateWPDestination(CStateManager& mgr) {
     mDestObj = GetNextWaypoint(mgr, waypoint, true); // asm 0xFAC-0xFDC (reverse = true)
     advanced = true;
     if (const CScriptAIWaypoint* aiWaypoint = TCastToConstPtr< CScriptAIWaypoint >(waypoint)) { // asm 0xFE0
-      if (CMath::AbsF(aiWaypoint->GetPause()) >= 0.00001f) { // asm 0xFF4-0x1010
+      if (!(CMath::AbsF(aiWaypoint->GetPause()) < 0.00001f)) { // NaN proceeds (blt) // asm 0xFF4-0x1010
         mPatrolPauseRemTime = aiWaypoint->GetPause(); // asm 0x1014
         // Retail tests the EType word for zero here (no named type is 0) (asm 0x1018-0x1020).
         if (mType == 0) {

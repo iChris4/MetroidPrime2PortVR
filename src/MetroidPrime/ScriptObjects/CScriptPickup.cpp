@@ -37,6 +37,7 @@
 #include "MetroidPrime/ScriptObjects/CScriptHUDMemo.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptRelay.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptTimer.hpp"
+#include "port_overlay.h"
 #include "port_randomizer.h"
 #include "port_rando_models.h"
 #include <set>
@@ -371,8 +372,20 @@ void CScriptPickup::Touch(CActor& act, CStateManager& mgr) {
     playerState->AddPowerUp(CPlayerState::kIT_ItemPercentage, mPercentageIncrease);
     playerState->IncrPickUp(CPlayerState::kIT_ItemPercentage, mPercentageIncrease);
     if (!mAbsoluteValue) {
-      playerState->AddPowerUp(itemType, mCapacity);
-      playerState->IncrPickUp(itemType, mAmount);
+      int grantCapacity = mCapacity;
+      int grantAmount = mAmount;
+#ifdef TARGET_PC
+      // Port: Beam ammo per expansion scales what a Dark/Light capacity pickup grants (N / 50).
+      // Ammo drops carry no capacity and stay as they are.
+      if ((itemType == CPlayerState::kIT_DarkAmmo || itemType == CPlayerState::kIT_LightAmmo) &&
+          mCapacity > 0) {
+        const int per = PortOverlay::BeamAmmoPerExpansion();
+        grantCapacity = mCapacity * per / PortOverlay::kBeamAmmoPerExpansionDefault;
+        grantAmount = mAmount * per / PortOverlay::kBeamAmmoPerExpansionDefault;
+      }
+#endif
+      playerState->AddPowerUp(itemType, grantCapacity);
+      playerState->IncrPickUp(itemType, grantAmount);
     } else {
       playerState->ReInitializePowerUp(itemType, mCapacity);
       playerState->SetItemAmount(itemType, mAmount);

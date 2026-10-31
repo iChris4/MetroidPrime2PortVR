@@ -517,20 +517,36 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
     CGuiCamera* mapCamera = mSamusHud->GetLoadedHudFrame() != nullptr
                                 ? mSamusHud->GetLoadedHudFrame()->GetFrameCamera()
                                 : nullptr;
-    if (mapCamera != nullptr && !mAutoMapper->IsFullyOutOfMiniMapState()) {
-      float mapT = 0.f;
-      if (!mAutoMapper->IsFullyInMiniMapState()) {
+    // The map screen's window is spread with the screen (CAutoMapper's frame); the mask is widened
+    // to match as the map grows into it, or the map is cut to the authored box (issue #23).
+    CTransform4f maskWiden = CTransform4f::Identity();
+    if (mapCamera != nullptr) {
+      float mapT = 1.f;
+      if (mAutoMapper->IsFullyInMiniMapState()) {
+        mapT = 0.f;
+      } else if (!mAutoMapper->IsFullyOutOfMiniMapState()) {
         mapT = mAutoMapper->GetNextState() != CAutoMapper::kAMS_MiniMap
                    ? mAutoMapper->GetInterp()
                    : 1.f - mAutoMapper->GetInterp();
       }
-      mapSpread = mapCamera->GetSpreadTransform(mMapCameraTransform.GetTranslation(), 1.f - mapT);
+      if (!mAutoMapper->IsFullyOutOfMiniMapState()) {
+        mapSpread =
+            mapCamera->GetSpreadTransform(mMapCameraTransform.GetTranslation(), 1.f - mapT);
+      }
+      const float widen = 1.f + mapT * (mAutoMapper->PortMapScreenWindowWiden() - 1.f);
+      if (widen != 1.f && mapCamera->IsPerspective()) {
+        // Scaling view-space X scales screen X about the centre under a perspective projection.
+        const CTransform4f& view = mapCamera->GetSpreadView();
+        maskWiden = view *
+                    CTransform4f(widen, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f) *
+                    view.GetInverse();
+      }
     }
     if (model != nullptr) {
       model->SetIsVisible(true);
       CTransform4f savedXf = CTransform4f::Identity();
       bool savedValid = false;
-      if (model->PortSetWorldTransform(mapSpread * model->GetWorldTransform(), savedXf,
+      if (model->PortSetWorldTransform(maskWiden * mapSpread * model->GetWorldTransform(), savedXf,
                                        savedValid)) {
         model->Draw(CGuiWidgetDrawParms(1.f, CVector3f::Zero()));
         model->PortRestoreWorldTransform(savedXf, savedValid);

@@ -1088,6 +1088,11 @@ void CMain::StreamNewGameState(bool forceReloadSave) {
     CMemoryInStream stream(savedState.data(), savedState.size());
     CBitStreamReader reader(stream);
     mGameGlobalObjects->GameState() = rs_new CGameState(reader);
+#ifdef TARGET_PC
+    // Port: restore Dark/Light ammo above 250 recorded for exactly these save bytes.
+    mGameGlobalObjects->GameState()->GetPlayerState()->PortApplyBeamAmmo(savedState.data(),
+                                                                         savedState.size());
+#endif
   }
   gpGameState = mGameGlobalObjects->GameState().get();
   gpGameState->SystemOptions() = systemOptions;

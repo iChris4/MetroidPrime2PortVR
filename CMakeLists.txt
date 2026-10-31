@@ -718,7 +718,7 @@ endif()
 
 if(AURORA_SDL3_TARGET)
     add_library(mp_port_audio OBJECT platform/ai_dma.cpp platform/port_controls.cpp
-        platform/port_save.cpp platform/port_save_convert.cpp platform/port_save_trilogy.cpp platform/port_save_trilogy_payload.cpp platform/port_savestate.cpp platform/port_savestate_room.cpp platform/port_savestate_format.cpp platform/port_randomizer.cpp platform/port_rando_gen.cpp platform/port_rando_models.cpp platform/port_rando_world.cpp platform/port_rando_logic.cpp platform/port_logfile.cpp platform/port_breadcrumb.cpp
+        platform/port_save.cpp platform/port_save_convert.cpp platform/port_save_trilogy.cpp platform/port_save_trilogy_payload.cpp platform/port_savestate.cpp platform/port_beam_ammo.cpp platform/port_savestate_room.cpp platform/port_savestate_format.cpp platform/port_randomizer.cpp platform/port_rando_gen.cpp platform/port_rando_models.cpp platform/port_rando_world.cpp platform/port_rando_logic.cpp platform/port_logfile.cpp platform/port_breadcrumb.cpp
         platform/port_crash.cpp platform/port_watchdog.cpp platform/port_memory_log.cpp platform/port_storage_report.cpp
         platform/port_pointer.cpp platform/port_pointer_menu.cpp
         platform/port_events.cpp platform/port_livesplit.cpp platform/port_harness.cpp platform/port_mouse.cpp
@@ -736,7 +736,8 @@ if(AURORA_SDL3_TARGET)
         platform/port_touch.cpp platform/port_touch_jni.cpp platform/touch_pad.cpp
         platform/input/port_input_remap_ui.cpp
         platform/input/port_input_devices.cpp
-        platform/port_embedded.cpp platform/port_textures.cpp platform/port_prompts.cpp
+        platform/input/port_input_user_presets.cpp platform/input/port_input_user_presets_store.cpp
+        platform/port_embedded.cpp platform/port_textures.cpp platform/port_zip.cpp platform/port_prompts.cpp
         platform/port_discord.cpp
         platform/port_disc_verify.cpp
         platform/port_disc_verify_core.cpp)
@@ -766,6 +767,11 @@ if(AURORA_SDL3_TARGET)
     mp_websocket_tls(mp_port_audio)
     # aurora::core carries ImGui's include directory, which the F1 overlay builds against.
     target_link_libraries(mp_port_audio PRIVATE ${AURORA_SDL3_TARGET} aurora::core)
+    # port_zip.cpp includes <zlib.h>: Aurora provides ZLIB::ZLIB (system or fetched zlib-ng),
+    # and Windows has no system header to fall back on.
+    if(TARGET ZLIB::ZLIB)
+        target_link_libraries(mp_port_audio PRIVATE ZLIB::ZLIB)
+    endif()
     # platform/main.cpp turns fd 1 and fd 2 into logcat lines and resolves its directories
     # through SDL_GetPrefPath on Android, so the entry object needs SDL3's headers there.
     # AURORA_SDL3_TARGET only exists once Aurora has been added, which is why this is here
@@ -957,6 +963,16 @@ if(AURORA_SDL3_TARGET)
     target_include_directories(port_suit_colours_tests PRIVATE platform/include)
     add_test(NAME port_suit_colours_tests COMMAND port_suit_colours_tests)
     set_tests_properties(port_suit_colours_tests PROPERTIES TIMEOUT 15 LABELS port)
+    # The texture-pack zip reader (platform/port_zip.cpp) against archives the test builds.
+    find_package(ZLIB QUIET)
+    if(ZLIB_FOUND)
+        add_executable(port_zip_tests tests/port_zip.cpp platform/port_zip.cpp)
+        target_include_directories(port_zip_tests PRIVATE platform/include tests)
+        target_link_libraries(port_zip_tests PRIVATE ZLIB::ZLIB)
+        add_test(NAME port_zip_tests COMMAND port_zip_tests)
+        set_tests_properties(port_zip_tests PROPERTIES TIMEOUT 30 LABELS port)
+    endif()
+
     add_executable(port_config_reset_tests tests/port_config_reset.cpp)
     target_include_directories(port_config_reset_tests PRIVATE platform/include)
     add_test(NAME port_config_reset_tests COMMAND port_config_reset_tests
@@ -1094,6 +1110,14 @@ if(AURORA_SDL3_TARGET)
             INCLUDES platform/include DEFINITIONS MP_ENABLE_OPENXR)
         target_link_libraries(port_vr_panel_pose_tests PRIVATE ${MP_OPENXR_TARGET})
     endif()
+
+    # Saved binding presets (platform/input/port_input_user_presets.cpp): the file format round-trips.
+    add_executable(port_input_user_presets_tests tests/port_input_user_presets.cpp
+        platform/input/port_input_user_presets.cpp
+        platform/input/port_input_bindings.cpp platform/input/port_input_engine.cpp)
+    target_include_directories(port_input_user_presets_tests PRIVATE platform/include)
+    add_test(NAME port_input_user_presets_tests COMMAND port_input_user_presets_tests)
+    set_tests_properties(port_input_user_presets_tests PROPERTIES TIMEOUT 30 LABELS port)
 endif()
 
 # ---------------------------------------------------------------------------

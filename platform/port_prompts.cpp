@@ -80,24 +80,45 @@ struct PromptAsset {
   uint32_t id;
   uint32_t prompt;
 };
+// Ids marked "Trilogy only" are Wii art that the GameCube disc draws with other
+// ids; each was paired with its GameCube counterpart by aligning the two discs'
+// STRGs string by string.
 constexpr PromptAsset kAssets[] = {
+    {0x057FAEE3, PROMPT_STICK}, // Trilogy only: Nunchuk stick frame, "Use (stick) and tap B to Dash"
     {0x08BCA722, PROMPT_STICK_RIGHT}, {0x0A254C97, PAD_BUTTON_START}, // the GameCube pause Exit
-    {0x10799395, PAD_TRIGGER_Z}, {0x13AD51E9, PAD_BUTTON_DOWN},
-    {0x17EB2A51, PROMPT_CSTICK_RIGHT}, {0x1B525041, PROMPT_CSTICK}, {0x2187B2A1, PROMPT_STICK_UP},
+    {0x10799395, PAD_TRIGGER_Z}, {0x13AD51E9, PAD_BUTTON_DOWN}, {0x17EB2A51, PROMPT_CSTICK_RIGHT},
+    {0x194E0B59, PROMPT_STICK}, // Trilogy only: Nunchuk stick frame (Dash)
+    {0x1B525041, PROMPT_CSTICK}, {0x2187B2A1, PROMPT_STICK_UP},
     {0x2CB3B7D2, PROMPT_CSTICK}, {0x2DBD0327, PROMPT_CSTICK}, {0x304DEF5A, PAD_TRIGGER_L},
-    {0x3AA65ECD, PAD_BUTTON_Y}, {0x3F609B4A, PROMPT_STICK_LEFT}, {0x4475EAD6, PAD_BUTTON_Y},
+    {0x3AA65ECD, PAD_BUTTON_Y}, {0x3F609B4A, PROMPT_STICK_LEFT},
+    {0x4475EAD6, PAD_BUTTON_X}, // Trilogy only: the Nunchuk C, "Press C to turn into the Morph Ball"
     {0x45990439, PROMPT_CSTICK_DOWN}, {0x47F931C8, PROMPT_STICK}, {0x4EFFA9AA, PROMPT_STICK_DOWN},
-    {0x53B7AC95, PAD_BUTTON_B}, {0x59500D0C, PAD_BUTTON_B}, {0x5EA16CAD, PAD_TRIGGER_R},
-    {0x61E49F68, PROMPT_STICK}, {0x6D482337, PAD_BUTTON_A}, {0x72A83A41, PROMPT_STICK},
+    {0x53B7AC95, PAD_BUTTON_B},
+    {0x574CDE37, PAD_BUTTON_A}, // Trilogy only: Wii A, fire / charge / back to Beam mode
+    {0x59500D0C, PAD_BUTTON_B}, {0x5EA16CAD, PAD_TRIGGER_R},
+    // Trilogy only: Nunchuk Z, which scans, grapples and holds the Spider Ball. The
+    // GameCube disc says L for the first two and R for the third; one id takes one.
+    {0x60ACB985, PAD_TRIGGER_L},
+    {0x617D3700, PROMPT_STICK}, // Trilogy only: Nunchuk stick frame (Dash)
+    {0x61E49F68, PROMPT_STICK},
+    {0x637BA080, PROMPT_STICK}, // Trilogy only: Nunchuk stick frame (Dash)
+    {0x6D482337, PAD_BUTTON_A},
+    {0x71AA55E3, PAD_BUTTON_B}, // Trilogy only: Wii B, jump / Space Jump / Screw Attack
+    {0x72A83A41, PROMPT_STICK},
     {0x738A4798, PROMPT_CSTICK_UP}, {0x73E9B3B2, PROMPT_CSTICK_LEFT}, {0x83A73184, PAD_BUTTON_START},
     {0x8D13D507, PROMPT_CSTICK_UP}, {0x8E28D58C, PROMPT_STICK}, {0x9016E5BF, PROMPT_CSTICK_RIGHT},
-    {0x944EBD78, PROMPT_STICK}, {0x967A3516, PAD_TRIGGER_L}, {0xA9CA8654, PROMPT_CSTICK_LEFT},
-    {0xADCBEDAE, PROMPT_CSTICK}, {0xB4EDE4B6, PROMPT_DPAD}, {0xBC322C63, PAD_TRIGGER_Z},
+    {0x944EBD78, PROMPT_STICK}, {0x967A3516, PAD_TRIGGER_L},
+    {0x9FFB4F4D, PROMPT_STICK}, // Trilogy only: Nunchuk stick frame (Dash)
+    {0xA9CA8654, PROMPT_CSTICK_LEFT}, {0xADCBEDAE, PROMPT_CSTICK}, {0xB4EDE4B6, PROMPT_DPAD},
+    {0xB5F3DA09, PROMPT_CSTICK}, // Trilogy only: "hold and point" to pick a Beam (GameCube: C-stick)
+    {0xBC322C63, PAD_TRIGGER_Z},
     {0xC14A95C6, PAD_TRIGGER_Z}, {0xC3E07487, PROMPT_STICK_RIGHT}, {0xC622B06F, PAD_BUTTON_RIGHT},
     {0xC83111AA, PROMPT_CSTICK_DOWN}, {0xC96F93E3, PAD_BUTTON_A}, {0xCDA81421, PROMPT_STICK},
     {0xD212C48A, PAD_BUTTON_X}, {0xD3D8817F, PROMPT_CSTICK}, {0xD523DE3B, PAD_BUTTON_A},
     {0xD89B9F7C, PAD_TRIGGER_R}, {0xDE5170B7, PAD_BUTTON_A}, {0xDEA628DC, PAD_BUTTON_B},
-    {0xDFC47FA2, PAD_BUTTON_A}, {0xE43966EC, PROMPT_CSTICK}, {0xE72B1419, PAD_BUTTON_A},
+    {0xDFC47FA2, PAD_BUTTON_A},
+    {0xE2F4B915, PROMPT_DPAD}, // Trilogy only: "hold and point" to pick a Visor (GameCube: D-pad)
+    {0xE43966EC, PROMPT_CSTICK}, {0xE72B1419, PAD_BUTTON_A},
     {0xF1FA8D68, PAD_BUTTON_X}, {0xF237E982, PAD_TRIGGER_R}, {0xF43C48EF, PROMPT_STICK_LEFT},
     {0xF6E8276F, PAD_TRIGGER_R}, {0xF7D62F50, PAD_BUTTON_UP}, {0xFF73F326, PROMPT_STICK},
     {0xFFFED384, PAD_BUTTON_LEFT},
@@ -277,11 +298,25 @@ u32 PadNativeForButton(PADButton button) {
   return PortInputDevices::PromptNativeButton(in);
 }
 
+// The GameCube icon for an action's own button.
+std::string GameCubeStemForAction(PADButton button) {
+  for (const GameCubeButton& entry : kGameCubeButtons) {
+    if (entry.action == button) {
+      return entry.stem;
+    }
+  }
+  return {};
+}
+
 // The icon for `button` on a GameCube pad, or empty to leave the game's own art,
 // which is already right for a GC pad on its default mapping. So only an action
 // moved to another button gets an icon. The GameCube touch layout also resolves
-// to "gamecube", hence the check that a GC pad really is in port 0.
+// to "gamecube", hence the check that a GC pad really is in port 0. The Trilogy
+// disc's art is the Wii's, so there every action gets its GameCube icon.
 std::string GameCubeStemForButton(PADButton button) {
+  const std::string fallback = port::entry::IsTrilogy(port::entry::CurrentDiscVersion())
+                                   ? GameCubeStemForAction(button)
+                                   : std::string();
   const PADControllerType type = PADGetControllerType(PAD_CHAN0);
   const GameCubeButton* table = nullptr;
   size_t tableSize = 0;
@@ -292,15 +327,15 @@ std::string GameCubeStemForButton(PADButton button) {
     table = kNsoGameCubeButtons;
     tableSize = sizeof(kNsoGameCubeButtons) / sizeof(kNsoGameCubeButtons[0]);
   } else {
-    return {};
+    return fallback;
   }
   const int native = static_cast<int>(PadNativeForButton(button));
   for (size_t j = 0; j < tableSize; ++j) {
     if (table[j].sdlButton == native) {
-      return table[j].action == button ? std::string() : std::string(table[j].stem);
+      return table[j].action == button ? fallback : std::string(table[j].stem);
     }
   }
-  return {};
+  return fallback;
 }
 
 // The SDL button a mapping points at, named the way the generated pad icons
@@ -468,7 +503,9 @@ std::string FindIconFile(const std::string& name) {
   return std::filesystem::is_regular_file(path, ec) ? PortUtf8::ToUtf8(path) : std::string();
 }
 
-// The icon for `stem`: the one generated at exactly this size, then the unsuffixed one.
+// The icon for `stem`: the one generated for this texture's size, then the unsuffixed one. A
+// sized file is drawn at any whole multiple of that size (IconFitsBound), so "for this size" is
+// the game slot the file is named for, not the file's own dimensions.
 // A single stem can serve textures of different sizes - the C-stick prompts here are one
 // 32x32 and one 64x32 - and a mismatch is not scaled by the game: it reads 64x32 of pixels
 // out of 32x32 of data and draws the right-hand half as noise. tools/make_prompt_glyphs.py
@@ -495,6 +532,20 @@ bool IconDimensions(const std::string& path, uint32_t& width, uint32_t& height) 
   return true;
 }
 
+// Port: whether `iconWidth` x `iconHeight` may stand in for a `width` x `height` texture. Any
+// whole multiple of the texture's size is accepted, the same on both axes: the icons are drawn
+// larger than the game's art so they stay sharp on a scaled-up HUD (#229, from Prime 1), and a
+// file name's `_64x32` suffix is the game texture it serves, not the file's own size. The game
+// does not scale, so a file that is not a whole multiple reads past its data as noise.
+bool IconFitsBound(uint32_t iconWidth, uint32_t iconHeight, uint32_t width, uint32_t height) {
+  if (width == 0 || height == 0 || iconWidth < width || iconWidth % width != 0) {
+    return false;
+  }
+  // The same aspect ratio, so a 64x32 texture takes 128x64 art and not 128x128: one whole
+  // multiple on the width and on the height.
+  return iconHeight * width == iconWidth * height;
+}
+
 // The read callback's userData. Aurora worker threads can still be reading an
 // icon after Apply has unregistered it and moved on to another path, so each
 // path gets storage that is never changed or freed. Only the main thread adds
@@ -507,7 +558,7 @@ const std::string* StablePath(const std::string& path) {
 // Serves one generated icon as if it were a replacement file. Called from
 // Aurora worker threads, so it only touches the filesystem.
 bool ReadIconBytes(void* userData, const char* path, std::vector<uint8_t>& out) {
-  // The prompts are 32x32 with a single mip, so any mip sidecar Aurora probes
+  // The prompts have a single mip, so any mip sidecar Aurora probes
   // for is a miss rather than the same image again.
   if (path != nullptr && std::strstr(path, "_mip") != nullptr) {
     return false;
@@ -763,15 +814,15 @@ void Apply(size_t index, const std::string& stem) {
     // them. Leaving the stem recorded means one attempt and then silence.
     return;
   }
-  // Last line of defence, in case a sized file is ever wrong: refuse art whose
-  // dimensions do not match the texture it is standing in for. As above,
+  // Last line of defence, in case a sized file is ever wrong: refuse art that is
+  // not a whole multiple of the texture it is standing in for. As above,
   // activeStem is left recorded so Poll does not retry, and as above what
   // remains on screen is the static device set if it has one, not necessarily
   // the game's own art.
   uint32_t iconWidth = 0;
   uint32_t iconHeight = 0;
   if (!IconDimensions(reg.iconPath, iconWidth, iconHeight) ||
-      (iconWidth != key.width || iconHeight != key.height)) {
+      !IconFitsBound(iconWidth, iconHeight, key.width, key.height)) {
     return;
   }
   // Above the static device set (priority 0) and the user's texture pack (1).
@@ -819,8 +870,8 @@ void ApplyBound(const void* owner, BoundPrompt& bound, const std::string& stem) 
   const std::string iconPath = FindIconForSize(stem, bound.width, bound.height);
   uint32_t iconWidth = 0;
   uint32_t iconHeight = 0;
-  if (iconPath.empty() || !IconDimensions(iconPath, iconWidth, iconHeight) || iconWidth != bound.width ||
-      iconHeight != bound.height) {
+  if (iconPath.empty() || !IconDimensions(iconPath, iconWidth, iconHeight) ||
+      !IconFitsBound(iconWidth, iconHeight, bound.width, bound.height)) {
     return;
   }
   const std::string* path = StablePath(iconPath);
@@ -865,6 +916,75 @@ const char* ActiveDevice() {
   default:
     return PortTextures::PadDeviceName();
   }
+}
+
+const char* ConfirmLabel() {
+  static std::string label;
+  const char* device = ActiveDevice();
+  if (std::strcmp(device, "keyboard") == 0) {
+    const int key = KeyForButton(PAD_BUTTON_A);
+    if (key >= 0) {
+      if (const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(key)); name != nullptr && name[0] != '\0') {
+        label = name;
+        return label.c_str();
+      }
+    }
+    return "A";
+  }
+  if (std::strcmp(device, "xbox") == 0 || std::strcmp(device, "gamecube") == 0) {
+    return "A";
+  }
+  // A pad's mapping is positional: the game's A usually sits on the south button.
+  u32 count = 0;
+  int native = SDL_GAMEPAD_BUTTON_SOUTH;
+  if (const PADButtonMapping* list = PADGetButtonMappings(0, &count)) {
+    for (u32 i = 0; i < count; ++i) {
+      if (list[i].padButton == PAD_BUTTON_A) {
+        native = static_cast<int>(list[i].nativeButton);
+      }
+    }
+  }
+  const bool ps = std::strcmp(device, "playstation") == 0;
+  const bool nintendo = std::strcmp(device, "switch") == 0;
+  switch (native) {
+  case SDL_GAMEPAD_BUTTON_EAST: return ps ? "Circle" : nintendo ? "A" : "B";
+  case SDL_GAMEPAD_BUTTON_WEST: return ps ? "Square" : nintendo ? "Y" : "X";
+  case SDL_GAMEPAD_BUTTON_NORTH: return ps ? "Triangle" : nintendo ? "X" : "Y";
+  default: return ps ? "Cross" : nintendo ? "B" : "A";
+  }
+}
+
+std::string ConfirmIconStem() {
+  if (!sEnabled) {
+    return {};
+  }
+  const char* device = ActiveDevice();
+  std::string stem = IconStemForButton(PAD_BUTTON_A, device);
+  // A GameCube pad on its default mapping leaves the game's own art (empty); here there is none.
+  if (stem.empty() && std::strcmp(device, "gamecube") == 0) {
+    stem = GameCubeStemForAction(PAD_BUTTON_A);
+  }
+  return stem;
+}
+
+bool LoadIcon(const std::string& stem, std::vector< uint8_t >& rgba, uint32_t& width, uint32_t& height) {
+  constexpr size_t kHeader = 128; // "DDS " + the 124-byte header (tools/make_prompt_glyphs.py)
+  const std::string path = stem.empty() ? std::string() : FindIconFile(stem + ".dds");
+  std::vector< uint8_t > bytes;
+  if (path.empty() || !IconDimensions(path, width, height) || width == 0 || height == 0 ||
+      !ReadIconFile(path, bytes)) {
+    return false;
+  }
+  const size_t row = size_t(width) * 4;
+  if (bytes.size() < kHeader + row * height) {
+    return false;
+  }
+  // The DDS is stored bottom-up.
+  rgba.resize(row * height);
+  for (uint32_t y = 0; y < height; ++y) {
+    std::memcpy(rgba.data() + row * y, bytes.data() + kHeader + row * (height - 1 - y), row);
+  }
+  return true;
 }
 
 void Initialize(const char* textureRoot) {

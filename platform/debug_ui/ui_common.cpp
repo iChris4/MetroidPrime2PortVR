@@ -133,7 +133,7 @@ void ApplyTouchStyle(ImGuiStyle& style) {
 float sUiAppliedScale = 1.f;
 namespace {
 float sThemeAppliedScale = 0.f;
-enum UiThemeId { kThemeAuto = 0, kThemePrime = 1, kThemePlain = 2 };
+enum UiThemeId { kThemeAuto = 0, kThemePrime = 1, kThemePlain = 2, kThemeEchoes = 3 };
 int sThemeApplied = -1;
 
 int ResolveTheme() {
@@ -158,6 +158,32 @@ void ApplyPrimeTheme(ImGuiStyle& style, int theme) {
     return;
   }
   Palette p;
+  if (theme == kThemeEchoes) {
+    // Echoes / Dark Aether: black panels, white borders, violet accent, lavender-white text.
+    p.bg = {0.012f, 0.010f, 0.020f};  // #030305
+    p.bgAlpha = 0.95f;
+    p.deep = {0.035f, 0.028f, 0.060f};
+    p.frame = {0.085f, 0.065f, 0.150f};
+    p.frameHi = {0.170f, 0.125f, 0.300f};
+    p.accent = {0.690f, 0.520f, 1.000f};  // #B085FF
+    p.text = {0.95f, 0.94f, 1.00f};
+    p.textDim = {0.58f, 0.55f, 0.72f};
+    FillThemeColors(style, p);
+    ImVec4* c = style.Colors;
+    c[ImGuiCol_Border] = ImVec4(1.f, 1.f, 1.f, 0.80f);
+    c[ImGuiCol_TabSelectedOverline] = ImVec4(1.f, 1.f, 1.f, 1.f);
+    c[ImGuiCol_TableBorderStrong] = ImVec4(1.f, 1.f, 1.f, 0.50f);
+    c[ImGuiCol_NavCursor] = ImVec4(1.f, 1.f, 1.f, 1.f);
+    c[ImGuiCol_Header] = Rgba(p.accent, 0.30f); // the selected page stands out from the black
+    c[ImGuiCol_Separator] = Rgba(p.accent, 0.55f);
+    style.WindowBorderSize = style.ChildBorderSize = style.PopupBorderSize = style.FrameBorderSize =
+        std::max(1.f, std::round(scale));
+    style.TabBorderSize = 0.f;
+    style.WindowRounding = style.ChildRounding = style.PopupRounding = 0.f;
+    style.FrameRounding = style.GrabRounding = style.TabRounding = 0.f;
+    style.ScrollbarRounding = 0.f;
+    return;
+  }
   p.bg = {0.020f, 0.063f, 0.102f};  // #05101A
   p.bgAlpha = 0.92f;
   p.deep = {0.030f, 0.090f, 0.140f};
@@ -325,15 +351,15 @@ void UpdateControllerNav() {
 }
 
 ImVec4 ThemeWarnColor(const ImVec4& plain) {
-  return ResolveTheme() == kThemePrime ? ImVec4(1.f, 0.88f, 0.32f, 1.f) : plain; // yellow, apart from the amber accent
+  return ResolveTheme() != kThemePlain ? ImVec4(1.f, 0.88f, 0.32f, 1.f) : plain; // yellow, apart from the amber accent
 }
 
 ImVec4 ThemeGoodColor(const ImVec4& plain) {
-  return ResolveTheme() == kThemePrime ? ImVec4(0.45f, 0.95f, 0.55f, 1.f) : plain;
+  return ResolveTheme() != kThemePlain ? ImVec4(0.45f, 0.95f, 0.55f, 1.f) : plain;
 }
 
 ImVec4 ThemeBadColor(const ImVec4& plain) {
-  return ResolveTheme() == kThemePrime ? ImVec4(1.f, 0.42f, 0.35f, 1.f) : plain;
+  return ResolveTheme() != kThemePlain ? ImVec4(1.f, 0.42f, 0.35f, 1.f) : plain;
 }
 
 // What a setting does (kInlineHelp: printed under it on Android, a tooltip elsewhere).

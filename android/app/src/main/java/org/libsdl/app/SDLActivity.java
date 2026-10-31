@@ -60,6 +60,8 @@ import java.util.Locale;
 */
 public class SDLActivity extends Activity implements View.OnSystemUiVisibilityChangeListener {
     private static final String TAG = "SDL";
+    private static final java.util.concurrent.atomic.AtomicReference<String> sNextSaveDialogSuggestedFilename =
+            new java.util.concurrent.atomic.AtomicReference<>();
     private static final int SDL_MAJOR_VERSION = 3;
     private static final int SDL_MINOR_VERSION = 4;
     private static final int SDL_MICRO_VERSION = 10;
@@ -2086,9 +2088,31 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
     }
 
     /**
+     * Called through JNI before SDL_ShowSaveFileDialog: SDL's Android picker
+     * ignores its default-location argument, so the suggested name travels here.
+     */
+    public static void setNextSaveDialogSuggestedFilename(String filename) {
+        sNextSaveDialogSuggestedFilename.set(filename);
+    }
+
+    private static String safeSaveDialogTitle(String suggestedFilename) {
+        if (suggestedFilename != null) {
+            int separator = Math.max(suggestedFilename.lastIndexOf('/'), suggestedFilename.lastIndexOf('\\'));
+            String basename = suggestedFilename.substring(separator + 1);
+            if (!basename.isEmpty() && !basename.equals(".") && !basename.equals("..")) {
+                return basename;
+            }
+        }
+        return "save.gci";
+    }
+
+    /**
      * This method is called by SDL using JNI.
      */
     public static boolean showFileDialog(String[] filters, boolean allowMultiple, boolean forWrite, int requestCode) {
+        // Consume only on a save request, before any early return or launch
+        // failure, so cancelling one export cannot leave its name for the next.
+        String suggestedFilename = forWrite ? sNextSaveDialogSuggestedFilename.getAndSet(null) : null;
         if (mSingleton == null) {
             return false;
         }
@@ -2125,6 +2149,9 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         // Lists the phone's own storage root, which the picker otherwise hides
         // behind its shortcuts (Downloads, Recent, ...).
         intent.putExtra("android.content.extra.SHOW_ADVANCED", true);
+        if (forWrite) {
+            intent.putExtra(Intent.EXTRA_TITLE, safeSaveDialogTitle(suggestedFilename));
+        }
         switch (mimes.size()) {
             case 0:
                 intent.setType("*/*");

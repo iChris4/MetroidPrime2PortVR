@@ -8,6 +8,7 @@
 
 #include "port_config_reset.h"
 #include "port_disc_replace.h"
+#include "port_debug.h"
 #include "port_disc_verify.h"
 #include "port_discord.h"
 #include "port_freecam.h"
@@ -20,6 +21,7 @@
 #include "port_savestate.h"
 #include "port_settings.h"
 #include "port_textures.h"
+#include "port_zip.h"
 #include "port_update_check.h"
 #include "port_build_info.h"
 #include "port_env.h"
@@ -28,6 +30,7 @@
 #include "MetroidPrime/Player/CGameState.hpp"
 
 #include <aurora/aurora.h>
+#include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_misc.h>
 #include <imgui.h>
@@ -38,7 +41,10 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <atomic>
 #include <mutex>
+#include <optional>
+#include <thread>
 #if defined(__ANDROID__)
 #include <jni.h>
 #include <SDL3/SDL_system.h>
@@ -118,17 +124,19 @@ static void DrawUnlocksSection() {
     PortOverlay::SetUnlockGalleries(galleries);
   }
   ImGui::SetItemTooltip("All of them.");
-  bool beamDoors = sUnlockBeamDoors;
-  if (ImGui::Checkbox("Unlock beam doors", &beamDoors)) {
-    PortOverlay::SetUnlockBeamDoors(beamDoors);
-  }
-  ImGui::SetItemTooltip("Colour-locked doors open to any of the four beams. Missile locks stay.");
-  ImGui::SameLine();
   bool stackBeams = sStackBeams;
   if (ImGui::Checkbox("Stack beams", &stackBeams)) {
     PortOverlay::SetStackBeams(stackBeams);
   }
   ImGui::SetItemTooltip("Each shot also fires the other beams you own, at no extra ammo cost.");
+  ImGui::BeginDisabled(!sStackBeams);
+  bool skipDark = sStackBeamsSkipDark;
+  if (ImGui::Checkbox("Leave out Dark Beam", &skipDark)) {
+    PortOverlay::SetStackBeamsSkipDark(skipDark);
+  }
+  ImGui::SetItemTooltip("Stacked shots skip the Dark Beam unless it's the one in hand, so they "
+                        "don't drain light beacons and crystals.");
+  ImGui::EndDisabled();
   ImGui::EndDisabled();
   ImGui::TextDisabled("What finishing the game unlocks. Not written into the save.");
   ItemHelp("Turning an option off locks it again.");
@@ -186,6 +194,15 @@ void DrawCutscenesSection() {
   }
   ItemHelp("The ride between worlds. Fast plays it at double speed; Skip leaves as soon as the next "
            "world has loaded. Applies from the next ride.");
+  int rotatingRooms = sRotatingRooms;
+  ImGui::SetNextItemWidth(rideWidth);
+  if (ImGui::Combo("Rotating rooms", &rotatingRooms, "Original\0" "Fast\0")) {
+    sRotatingRooms = std::clamp(rotatingRooms, static_cast< int >(PortOverlay::kRotatingRooms_Original),
+                                static_cast< int >(PortOverlay::kRotatingRooms_Fast));
+    Changed(true);
+  }
+  ItemHelp("The energy controller rooms' bomb-slot cutscene, where the room turns. Fast plays it at "
+           "double speed.");
   SameLineAfterHelp();
   int portalTransition = sPortalTransition;
   ImGui::SetNextItemWidth(rideWidth);
@@ -229,19 +246,22 @@ void DrawCutscenesSection() {
   DrawUnlocksSection();
 }
 
-// The game's own volumes, the same as the pause menu's two sliders.
+// The game's own volumes, the same as the pause menu's two sliders. Echoes clamps both to 0x69
+// (`CGameOptions::SetSfxVolume`/`SetMusicVolume`), not Prime 1's 0x7F, and 0x69 is also the
+// default, so 100% here is the retail maximum. Scaling by 127 capped the slider at 83% (#14).
+constexpr int kGameVolumeMax = 0x69;
 void DrawGameAudio() {
   ImGui::SeparatorText("Audio");
   ImGui::BeginDisabled(gpGameState == nullptr);
   int music = gpGameState != nullptr ? static_cast< int >(gpGameState->GameOptions().GetMusicVolume()) : 0;
-  int musicPct = (music * 100 + 63) / 127;
+  int musicPct = (music * 100 + kGameVolumeMax / 2) / kGameVolumeMax;
   if (ImGui::SliderInt("Music volume", &musicPct, 0, 100, "%d%%") && gpGameState != nullptr) {
-    gpGameState->GameOptions().SetMusicVolume((musicPct * 127 + 50) / 100, true);
+    gpGameState->GameOptions().SetMusicVolume((musicPct * kGameVolumeMax + 50) / 100, true);
   }
   int sfx = gpGameState != nullptr ? static_cast< int >(gpGameState->GameOptions().GetSfxVolume()) : 0;
-  int sfxPct = (sfx * 100 + 63) / 127;
+  int sfxPct = (sfx * 100 + kGameVolumeMax / 2) / kGameVolumeMax;
   if (ImGui::SliderInt("Sound effects volume", &sfxPct, 0, 100, "%d%%") && gpGameState != nullptr) {
-    gpGameState->GameOptions().SetSfxVolume((sfxPct * 127 + 50) / 100, true);
+    gpGameState->GameOptions().SetSfxVolume((sfxPct * kGameVolumeMax + 50) / 100, true);
   }
   // Sound mode: Mono / Stereo / Dolby Surround
   int soundMode = gpGameState != nullptr ? static_cast< int >(gpGameState->GameOptions().GetSurroundMode())
@@ -304,8 +324,8 @@ void DrawSpeedrunSection() {
   ImGui::SetItemTooltip("Also splits on each new suit, beam, visor, ball part, key or other upgrade.");
 }
 
-#if defined(__ANDROID__)
-// The folder picker's progress, set from the Java copy thread.
+// The texture pack import's progress: set from the Java copy thread on Android, from the zip
+// extraction thread on the desktop.
 namespace {
 std::mutex sTexturePackStatusMutex;
 std::string sTexturePackStatus;
@@ -320,6 +340,8 @@ void SetTexturePackStatus(std::string status) {
   std::lock_guard lock(sTexturePackStatusMutex);
   sTexturePackStatus = std::move(status);
 }
+
+#if defined(__ANDROID__)
 
 // MetroidPrime2Activity.pickTexturePack opens the system folder picker and copies the chosen folder
 // in the background, reporting back through nativeTexturePackStatus / nativeTexturePackReady.
@@ -348,6 +370,92 @@ void PickTexturePack() {
 }
 #endif
 
+#if !defined(__ANDROID__)
+// Import texture pack .zip: the file dialog answers on another thread, so its pick waits in
+// sTexturePackZipPick for DrawTexturesSection; the extraction runs on its own detached thread (it
+// touches only statics) into `<root>.partial`, then the finished folder is renamed to
+// `<root>.new` for PortTextures to swap in.
+namespace {
+std::mutex sTexturePackZipMutex;
+std::optional<std::string> sTexturePackZipPick;
+std::atomic<bool> sTexturePackZipDialogOpen{false};
+std::atomic<bool> sTexturePackZipBusy{false};
+
+void ImportTexturePackZip(std::string zipPath, std::string root) {
+  namespace fs = std::filesystem;
+  const std::string partial = root + ".partial";
+  std::error_code ec;
+  fs::remove_all(PortUtf8::FromUtf8(partial), ec);
+  size_t count = 0;
+  std::string error;
+  const bool ok = PortZip::Extract(
+      zipPath, partial, PortZip::TexturePackFilter,
+      [](size_t done) { SetTexturePackStatus("Copying the texture pack... " + std::to_string(done) + " textures"); },
+      count, error);
+  if (!ok) {
+    fs::remove_all(PortUtf8::FromUtf8(partial), ec);
+    SetTexturePackStatus("Copying the texture pack failed: " + error);
+  } else if (count == 0) {
+    fs::remove_all(PortUtf8::FromUtf8(partial), ec);
+    SetTexturePackStatus("No .png or .dds textures in that file (is it a .zip?); nothing changed.");
+  } else {
+    fs::remove_all(PortUtf8::FromUtf8(root + ".new"), ec);
+    fs::rename(PortUtf8::FromUtf8(partial), PortUtf8::FromUtf8(root + ".new"), ec);
+    if (ec) {
+      fs::remove_all(PortUtf8::FromUtf8(partial), ec);
+      SetTexturePackStatus("Copying the texture pack failed: " + ec.message());
+    } else {
+      PortTextures::RequestUserPackReload();
+      SetTexturePackStatus("Copied " + std::to_string(count) + " textures.");
+    }
+  }
+  sTexturePackZipBusy = false;
+}
+
+void OpenTexturePackZipDialog() {
+  int windowCount = 0;
+  SDL_Window** windows = SDL_GetWindows(&windowCount);
+  SDL_Window* window = windows != nullptr && windowCount > 0 ? windows[0] : nullptr;
+  SDL_free(windows);
+  static const SDL_DialogFileFilter filters[] = {
+      {"Zip archives", "zip"},
+      {"All files", "*"},
+  };
+  const SDL_DialogFileCallback done = [](void*, const char* const* files, int) {
+    std::lock_guard lock(sTexturePackZipMutex);
+    // Empty = cancelled; a leading \x01 marks a failed dialog's error.
+    sTexturePackZipPick = files != nullptr ? std::string(files[0] != nullptr ? files[0] : "")
+                                           : std::string("\x01") + SDL_GetError();
+    sTexturePackZipDialogOpen = false;
+  };
+  sTexturePackZipDialogOpen = true;
+  SDL_ShowOpenFileDialog(done, nullptr, window, filters, 2, nullptr, false);
+}
+
+// Starts the extraction for a pick the dialog delivered.
+void ProcessTexturePackZipPick(const char* root) {
+  std::optional<std::string> pick;
+  {
+    std::lock_guard lock(sTexturePackZipMutex);
+    pick.swap(sTexturePackZipPick);
+  }
+  if (!pick || pick->empty()) {
+    return;
+  }
+  if ((*pick)[0] == '\x01') {
+    SetTexturePackStatus("Could not open the file picker: " + pick->substr(1));
+    return;
+  }
+  if (sTexturePackZipBusy.exchange(true)) {
+    SetTexturePackStatus("A texture pack is still being copied.");
+    return;
+  }
+  SetTexturePackStatus("Copying the texture pack... 0 textures");
+  std::thread(ImportTexturePackZip, std::move(*pick), std::string(root != nullptr ? root : "")).detach();
+}
+} // namespace
+#endif
+
 // The user's texture pack, layered over the built-in set (see port_textures.h). On Android the
 // folder is picked with the system folder picker and copied into the data folder; on the desktop
 // the player fills the folder themselves.
@@ -361,8 +469,20 @@ void DrawTexturesSection() {
     ImGui::TextUnformatted("No user texture folder.");
     return;
   }
+  bool enabled = PortTextures::UserPackEnabled();
+  const std::string toggleKeys = PortInputRemap::BindingsText(PortInput::Action::ToggleTexturePack, " / ");
+  const std::string toggleLabel =
+      (toggleKeys.empty() ? std::string("Use the texture pack") : "Use the texture pack (" + toggleKeys + ")") +
+      "###texture-pack-enabled";
+  if (ImGui::Checkbox(toggleLabel.c_str(), &enabled)) {
+    PortTextures::SetUserPackEnabled(enabled);
+  }
+  ImGui::SetItemTooltip("Off shows the game's own textures, without deleting the pack.\n"
+                        "The binding (Controls > Remap > Port) switches it in game, to compare.");
   const size_t count = PortTextures::UserPackCount();
-  if (count > 0) {
+  if (!enabled) {
+    ImGui::TextUnformatted("Texture pack off.");
+  } else if (count > 0) {
     ImGui::Text("%zu replacements loaded, over the built-in set.", count);
   } else {
     ImGui::TextUnformatted("No texture pack loaded.");
@@ -384,9 +504,21 @@ void DrawTexturesSection() {
                      "original is moved. Pick it again after changing it.");
 #else
   ImGui::TextWrapped("Folder: %s", root);
+  ProcessTexturePackZipPick(root);
+  const std::string status = TexturePackStatus();
+  if (!status.empty()) {
+    ImGui::TextWrapped("%s", status.c_str());
+  }
   if (ImGui::Button("Reload texture pack")) {
     PortTextures::RequestUserPackReload();
   }
+  ImGui::SameLine();
+  const bool busy = sTexturePackZipBusy || sTexturePackZipDialogOpen;
+  ImGui::BeginDisabled(busy);
+  if (ImGui::Button("Import texture pack .zip...")) {
+    OpenTexturePackZipDialog();
+  }
+  ImGui::EndDisabled();
 #endif
 }
 
@@ -397,7 +529,7 @@ void DrawOverlaySection() {
   Changed(ImGui::Checkbox("Overlay as a floating window", &sOverlayWindowed));
 #endif
   int theme = sUiTheme;
-  if (ImGui::Combo("Menu theme", &theme, "Auto\0Metroid Prime\0Plain\0")) {
+  if (ImGui::Combo("Menu theme", &theme, "Auto\0Metroid Prime\0Plain\0Echoes\0")) {
     sUiTheme = theme;
     Changed(true);
   }
@@ -674,6 +806,15 @@ void DrawLogSection() {
                        "next start.",
                        logPath.empty() ? "metroid_prime2_port.log in the user folder" : logPath.c_str());
   }
+}
+
+void ToggleTexturePack() {
+  const bool on = !PortTextures::UserPackEnabled();
+  PortTextures::SetUserPackEnabled(on);
+  // Saved now: outside the overlay, changes are otherwise written at exit.
+  PortOverlaySettings::MarkDirty();
+  PortOverlaySettings::SaveSettings();
+  ShowNote(on ? "Texture pack: on" : "Texture pack: off");
 }
 
 } // namespace PortDebug

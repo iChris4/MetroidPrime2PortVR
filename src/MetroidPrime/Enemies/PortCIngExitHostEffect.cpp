@@ -293,7 +293,8 @@ void CIngExitHostEffect::UpdateParticles(float dt, CStateManager& mgr) {
   mEffectA->SetTranslation(pos);
   mEffectA->Update(dt);
 
-  const int lag = static_cast< int >(mX2c4 * (dt / 0.016666668f) * 60.f);
+  // Retail multiplies 60 by the frame quotient first, then by mX2c4 (asm 0x10B38-0x10B54).
+  const int lag = static_cast< int >(mX2c4 * (60.f * (dt / 0.016666668f)));
   int idx = (mTrailIndex - lag) % 60;
   if (idx < 0) {
     idx += 60;

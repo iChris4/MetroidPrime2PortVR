@@ -341,7 +341,7 @@ void CScriptCoin::AcceptScriptMsg(CStateManager& mgr, const CScriptMsg& msg) {
       rstl::vector< SConnection >::const_iterator it = GetConnectionList().begin();
       for (; it != GetConnectionList().end(); ++it) {
         const SConnection& connection = *it;
-        if (connection.state != kSS_Generate || connection.msg != kSM_Activate) {
+        if (connection.state != kSS_GeneratorConnection || connection.msg != kSM_Activate) {
           continue;
         }
 

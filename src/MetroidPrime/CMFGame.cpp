@@ -115,6 +115,7 @@ CMFGame::~CMFGame() {
   // (and anything else reading these) stop seeing the last in-game state: the Ball page on the title.
   PortHarness::GameFlowState(-1, false);
   PortTouch::SetMorphed(false);
+  PortTouch::SetScanTextUp(false);
   // Port: the render mode is widened by the aspect setting.
   CGraphics::SetViewport(0, 0, CGraphics::GetRenderMode().fbWidth,
                          CGraphics::GetRenderMode().efbHeight);
@@ -149,6 +150,7 @@ void CMFGame::SetFlowState(EFlowState state) {
     sPortUserCinematicSkip = false;
     sPortSkipGapHold = false;
     sPortCinematicTime = 0.f;
+    PortOverlay::SkipConfirmDisarm();
 #endif
     break;
   default:
@@ -268,6 +270,17 @@ CIOWin::EMessageReturn CMFGame::OnMessage(const CArchitectureMessage& message,
       const CCinematicCamera* const introCam = TCastToConstPtr< CCinematicCamera >(
           *mStateManager->GetCameraManager(0)->GetCurrentCamera(*mStateManager, true));
       sPortCinematicTime = introCam ? sPortCinematicTime + dt : 0.f;
+      if (!introCam) {
+        PortOverlay::SkipConfirmDisarm();
+      } else if (PortOverlay::TakeSkipConfirmTap() && PortOverlay::SkipConfirmArmed()) {
+        // A tap on the "Skip" prompt is the second press.
+        PortOverlay::SkipConfirmDisarm();
+        CMidiManager::StopAll();
+        mSkippedCineCam = introCam->GetScriptCameraId();
+        sPortUserCinematicSkip = true;
+        SetFlowState(kFS_CinematicSkip);
+        mFlowTime = 0.f;
+      }
       if (introCam && PortHarness::IntroSkipCinematic(introCam->GetScriptCameraId().Value())) {
         CMidiManager::StopAll();
         mSkippedCineCam = introCam->GetScriptCameraId();
@@ -665,11 +678,16 @@ CIOWin::EMessageReturn CMFGame::OnMessage(const CArchitectureMessage& message,
       // (off, retail: START, and only one the player has seen). A counts once the cinematic has been
       // on for a moment, so the press that walked the player into its trigger does not skip it. The
       // skip takes the robust path in kFS_CinematicSkip (sPortUserCinematicSkip).
+      // The first press only arms the "Skip [A]" prompt; a second one while it shows skips
+      // (PortOverlay::SkipConfirm*). The retail START path below follows the same rule.
+      bool portSkipArmedNow = false;
       if (PortOverlay::SkipCinematics() && !sPortGameEnded &&
           static_cast< int >(input.ControllerNumber()) == 0 && cineCam &&
           (input.PStart() || (input.PA() && sPortCinematicTime >= kPortSkipAGuard)) &&
           !mStateManager->IsMultiplayer() &&
-          gpGameState->GetGameMode().GetGameModeType() != 'FRND') {
+          gpGameState->GetGameMode().GetGameModeType() != 'FRND' &&
+          !(portSkipArmedNow = !PortOverlay::SkipConfirmArmed())) {
+        PortOverlay::SkipConfirmDisarm();
         CMidiManager::StopAll();
         mSkippedCineCam = cineCam->GetScriptCameraId();
         sPortUserCinematicSkip = true;
@@ -677,10 +695,13 @@ CIOWin::EMessageReturn CMFGame::OnMessage(const CArchitectureMessage& message,
         mFlowTime = 0.f;
         break;
       }
+      if (portSkipArmedNow) {
+        PortOverlay::SkipConfirmArm();
+      }
 #endif
       if (static_cast< int >(input.ControllerNumber()) == 0 && input.PStart()
 #ifdef TARGET_PC
-          && !PortPhoto::Active()
+          && !PortPhoto::Active() && !portSkipArmedNow
 #endif
       ) {
         if (cineCam) {
@@ -688,6 +709,14 @@ CIOWin::EMessageReturn CMFGame::OnMessage(const CArchitectureMessage& message,
                                ((cineCam->GetFlags() & 8) && cineCam->CanSkip(*mStateManager));
           if (canSkip && !mStateManager->IsMultiplayer() &&
               gpGameState->GetGameMode().GetGameModeType() != 'FRND') {
+#ifdef TARGET_PC
+            // Port: a first START only arms the prompt (see above).
+            if (!PortOverlay::SkipConfirmArmed()) {
+              PortOverlay::SkipConfirmArm();
+              break;
+            }
+            PortOverlay::SkipConfirmDisarm();
+#endif
             CMidiManager::StopAll();
             mSkippedCineCam = cineCam->GetScriptCameraId();
             SetFlowState(kFS_CinematicSkip);

@@ -34,6 +34,7 @@
 #include "MetroidPrime/Player/CGameOptions.hpp"
 #include "MetroidPrime/CWorldLayerState.hpp"
 #include "MetroidPrime/Player/CGameState.hpp"
+#include "MetroidPrime/Player/CPlayerState.hpp"
 
 #include <SDL3/SDL.h>
 #include <filesystem>
@@ -73,20 +74,27 @@ bool sLogFile = true;
 bool sFastMorph = false;
 bool sPointerMenus = true;
 bool sMapSwapFingers = false;
+// Controls > Options > Map: flip either map rotate axis, as Prime 1's #225.
+bool sMapInvertX = false;
+bool sMapInvertY = false;
 int sWalkSpeed = PortOverlay::kWalkSpeedDefault;
 int sScanSpeed = PortOverlay::kScanSpeedDefault;
 int sLanguage = 0;
 int sElevatorRide = PortOverlay::kElevatorRide_Original;
 int sPortalTransition = PortOverlay::kPortalTransition_Original;
+int sRotatingRooms = PortOverlay::kRotatingRooms_Original;
+int sComboBeamCost = PortOverlay::kComboBeamCostMax;
+int sComboMissileCost = PortOverlay::kComboMissileCostMax;
+int sBeamAmmoPerExpansion = PortOverlay::kBeamAmmoPerExpansionDefault;
 bool sMinimapTap = true;
 int sPromptGlyphs = 0;
-bool sSwapVisors = false;
 bool sIgtTimer = false;
 bool sOriginalExperience = false;
 bool sUnlockHardMode = false;
 bool sUnlockGalleries = false;
 bool sUnlockBeamDoors = false;
 bool sStackBeams = false;
+bool sStackBeamsSkipDark = false;
 int sHintDelay = 0;
 bool sSpringBall = false;
 bool sSpringFlick = false;
@@ -117,7 +125,6 @@ bool sResetAimBoth = false;
 bool sLockOnFreeAim = false;
 bool sMenuStandardButtons = false;
 bool sRapidCharge = false;
-bool sMouseButtons = true;
 // `MP2_CARD_BACKUP`: copy the card's save file into save-backups before every card write (F1 >
 // System > Memory card, `cardbackup`).
 bool sCardBackup = false;
@@ -226,6 +233,8 @@ namespace PortDebug {
 
 bool sVisible = false;
 bool sGodMode = false; // never saved: a cheat must not persist, so it is not a setting
+unsigned sInfiniteAmmo = 0; // InfiniteAmmoKind bits; never saved, as sGodMode
+bool sNoDarkAetherDamage = false; // never saved, as sGodMode
 uint32_t sWorldId = 0;
 int sAreaId = -1;
 std::vector< SRoomEntry > sRooms;
@@ -311,6 +320,8 @@ void ReadEnv() {
   }
   sReadEnv = true;
   sGodMode = port::EnvFlag("MP2_GODMODE");
+  sInfiniteAmmo = port::EnvFlag("MP2_INFINITE_AMMO") ? PortOverlay::kInfAmmoAll : 0;
+  sNoDarkAetherDamage = port::EnvFlag("MP2_NO_DARK_AETHER_DAMAGE");
   PortOverlaySettings::LoadSettings();
 }
 
@@ -644,6 +655,9 @@ bool ShowPage(const std::string& name) {
 // Called on the UI thread (the two-finger scroll), but ImGui's input queue is only safe on the game
 // thread, so the steps wait here until Draw() hands them over.
 static std::atomic< int > sPendingWheelMilli{0};
+static std::atomic< bool > sToggleRequested{false};
+
+void RequestToggle() { sToggleRequested.store(true, std::memory_order_release); }
 
 void Wheel(float steps) {
   sPendingWheelMilli.fetch_add(static_cast< int >(std::lround(steps * 1000.f)),
@@ -667,6 +681,40 @@ bool SkipCinematics() {
   }
   return EnvBool("MP2_SKIP_CINEMATICS", sSkipCinematics);
 }
+
+namespace {
+uint64_t sSkipConfirmUntilNs = 0;
+std::atomic<bool> sSkipConfirmTapped{false};
+} // namespace
+
+bool SkipConfirmArmed() { return sSkipConfirmUntilNs != 0 && SDL_GetTicksNS() < sSkipConfirmUntilNs; }
+
+void SkipConfirmArm() {
+  sSkipConfirmTapped.store(false);
+  sSkipConfirmUntilNs = SDL_GetTicksNS() + static_cast< uint64_t >(kSkipConfirmSeconds * 1e9f);
+}
+
+void SkipConfirmDisarm() {
+  sSkipConfirmUntilNs = 0;
+  sSkipConfirmTapped.store(false);
+}
+
+float SkipConfirmAlpha() {
+  const uint64_t now = SDL_GetTicksNS();
+  if (sSkipConfirmUntilNs == 0 || now >= sSkipConfirmUntilNs) {
+    return 0.f;
+  }
+  const float left = static_cast< float >(sSkipConfirmUntilNs - now) * 1e-9f;
+  return left >= 0.5f ? 1.f : left * 2.f;
+}
+
+void SkipConfirmTap() {
+  if (SkipConfirmArmed()) {
+    sSkipConfirmTapped.store(true);
+  }
+}
+
+bool TakeSkipConfirmTap() { return sSkipConfirmTapped.exchange(false); }
 
 void SetSkipCinematics(bool skip) {
   ReadEnv();
@@ -912,6 +960,41 @@ void SetGodMode(bool enabled) {
   sGodMode = enabled;
 }
 
+bool NoDarkAetherDamage() {
+  ReadEnv();
+  return sNoDarkAetherDamage;
+}
+
+void SetNoDarkAetherDamage(bool enabled) {
+  ReadEnv();
+  sNoDarkAetherDamage = enabled;
+}
+
+unsigned InfiniteAmmoKind(int itemType) {
+  switch (itemType) {
+  case CPlayerState::kIT_Missile:
+    return kInfAmmoMissile;
+  case CPlayerState::kIT_Powerbomb:
+    return kInfAmmoPowerBomb;
+  case CPlayerState::kIT_DarkAmmo:
+    return kInfAmmoDark;
+  case CPlayerState::kIT_LightAmmo:
+    return kInfAmmoLight;
+  default:
+    return 0;
+  }
+}
+
+bool InfiniteAmmo(unsigned kinds) {
+  ReadEnv();
+  return kinds != 0 && (sInfiniteAmmo & kinds) == kinds;
+}
+
+void SetInfiniteAmmo(unsigned kinds, bool enabled) {
+  ReadEnv();
+  sInfiniteAmmo = enabled ? sInfiniteAmmo | kinds : sInfiniteAmmo & ~kinds;
+}
+
 bool FastMorph() {
   ReadEnv();
   if (OriginalExperience()) {
@@ -956,6 +1039,28 @@ bool MapSwapFingers() {
 void SetMapSwapFingers(bool swap) {
   ReadEnv();
   sMapSwapFingers = swap;
+  Persist();
+}
+
+bool MapInvertX() {
+  ReadEnv();
+  return EnvBool("MP2_MAP_INVERT_X", sMapInvertX);
+}
+
+void SetMapInvertX(bool invert) {
+  ReadEnv();
+  sMapInvertX = invert;
+  Persist();
+}
+
+bool MapInvertY() {
+  ReadEnv();
+  return EnvBool("MP2_MAP_INVERT_Y", sMapInvertY);
+}
+
+void SetMapInvertY(bool invert) {
+  ReadEnv();
+  sMapInvertY = invert;
   Persist();
 }
 
@@ -1221,11 +1326,6 @@ void SetRapidCharge(bool enabled) {
   ReadEnv();
   sRapidCharge = enabled;
   Persist();
-}
-
-bool MouseButtons() {
-  ReadEnv();
-  return EnvBool("MP2_MOUSE_BUTTONS", sMouseButtons);
 }
 
 bool CardBackup() {
@@ -1702,6 +1802,9 @@ void Draw() {
   if (const int milli = sPendingWheelMilli.exchange(0, std::memory_order_relaxed); milli != 0) {
     ImGui::GetIO().AddMouseWheelEvent(0.f, static_cast< float >(milli) / 1000.f);
   }
+  if (sToggleRequested.exchange(false, std::memory_order_acq_rel)) {
+    Toggle();
+  }
   PortPhoto::Frame();
   // Even with the window closed: the env vars are settings, and a headless run never opens it.
   ApplyGraphicsQuality();
@@ -1853,17 +1956,6 @@ const char* PromptGlyphs() {
   return kNames[EnvIntIn("MP2_PROMPT_GLYPHS", sPromptGlyphs, kPromptGlyphs_Auto, kPromptGlyphs_Keyboard)];
 }
 
-bool SwapVisors() {
-  ReadEnv();
-#if defined(MP_ENABLE_OPENXR)
-  // PortVr: the visor gesture sends the retail D-pad directions.
-  if (PortVr::VrPadOwnsPort0()) {
-    return false;
-  }
-#endif
-  return !OriginalExperience() && EnvBool("MP2_SWAP_VISORS", sSwapVisors);
-}
-
 int ElevatorRide() {
   ReadEnv();
   if (OriginalExperience()) {
@@ -1887,6 +1979,83 @@ void SetElevatorRide(int mode) {
   sElevatorRide = std::clamp(mode, static_cast< int >(kElevatorRide_Original),
                              static_cast< int >(kElevatorRide_Skip));
   Persist();
+}
+
+int ComboBeamCost() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return kComboBeamCostMax;
+  }
+  return EnvIntIn("MP2_COMBO_BEAM_COST", sComboBeamCost, 0, kComboBeamCostMax);
+}
+
+void SetComboBeamCost(int cost) {
+  ReadEnv();
+  sComboBeamCost = std::clamp(cost, 0, kComboBeamCostMax);
+  Persist();
+}
+
+int ComboMissileCost() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return kComboMissileCostMax;
+  }
+  return EnvIntIn("MP2_COMBO_MISSILE_COST", sComboMissileCost, 0, kComboMissileCostMax);
+}
+
+void SetComboMissileCost(int cost) {
+  ReadEnv();
+  sComboMissileCost = std::clamp(cost, 0, kComboMissileCostMax);
+  Persist();
+}
+
+int BeamAmmoPerExpansion() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return kBeamAmmoPerExpansionDefault;
+  }
+  return EnvIntIn("MP2_BEAM_AMMO_PER_EXPANSION", sBeamAmmoPerExpansion, kBeamAmmoPerExpansionMin,
+                  kBeamAmmoPerExpansionMax);
+}
+
+void SetBeamAmmoPerExpansion(int ammo) {
+  ReadEnv();
+  sBeamAmmoPerExpansion = std::clamp(ammo, kBeamAmmoPerExpansionMin, kBeamAmmoPerExpansionMax);
+  Persist();
+}
+
+int RotatingRooms() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return kRotatingRooms_Original;
+  }
+  const char* env = port::EnvString("MP2_ROTATING_ROOMS");
+  if (env != nullptr && std::strcmp(env, "original") == 0) {
+    return kRotatingRooms_Original;
+  }
+  if (env != nullptr && std::strcmp(env, "fast") == 0) {
+    return kRotatingRooms_Fast;
+  }
+  return EnvIntIn("MP2_ROTATING_ROOMS", sRotatingRooms, kRotatingRooms_Original, kRotatingRooms_Fast);
+}
+
+void SetRotatingRooms(int mode) {
+  ReadEnv();
+  sRotatingRooms = std::clamp(mode, static_cast< int >(kRotatingRooms_Original),
+                              static_cast< int >(kRotatingRooms_Fast));
+  Persist();
+}
+
+static unsigned sRotatingSequenceFrame = 0;
+static bool sRotatingSequenceSeen = false;
+
+void NoteRotatingSequence(unsigned frame) {
+  sRotatingSequenceFrame = frame;
+  sRotatingSequenceSeen = true;
+}
+
+bool RotatingSequenceActive(unsigned frame) {
+  return sRotatingSequenceSeen && frame - sRotatingSequenceFrame <= 2;
 }
 
 int PortalTransition() {
@@ -2003,6 +2172,17 @@ bool StackBeams() {
 void SetStackBeams(bool enabled) {
   ReadEnv();
   sStackBeams = enabled;
+  Persist();
+}
+
+bool StackBeamsSkipDark() {
+  ReadEnv();
+  return EnvBool("MP2_STACK_BEAMS_SKIP_DARK", sStackBeamsSkipDark);
+}
+
+void SetStackBeamsSkipDark(bool enabled) {
+  ReadEnv();
+  sStackBeamsSkipDark = enabled;
   Persist();
 }
 

@@ -1858,7 +1858,8 @@ void CIng::UpdateLight(CStateManager& mgr, float dt) {
   const CColor color = CColor::Lerp(CColor::Black(), mData.mLightColor, mLightBlend);
   const CTransform4f xf = GetLctrTransform(mEyeSegId);
   CLight point = CLight::BuildPoint(xf.GetTranslation(), color);
-  point.SetAttenuation(1.f / mData.mLightAttenuation, 0.f, 0.f);
+  // Retail 0x4A60-0x4A80: constant 0, 1 / [0x7DC], 0 (the second, linear, term).
+  point.SetAttenuation(0.f, 1.f / mData.mLightAttenuation, 0.f);
   light->SetLight(point);
 }
 
@@ -2089,7 +2090,8 @@ void CIng::Lurk(CStateManager& mgr, EStateMsg msg, float) {
       fprintf(stderr, "[ing] %04x lurk: detection range %.1f height %.1f\n", GetUniqueId().Value(),
               mDetectionRange, mDetectionHeightRange);
     }
-    if (mgr.GetObjectById(mTargetId) != nullptr) {
+    // Retail 0x8A70-0x8A80 (file 0x8B4C-0x8B5C): only the id is compared with kInvalidUniqueId.
+    if (mTargetId != kInvalidUniqueId) {
       mAlert = true;
     }
     CRandom16* random = mgr.Random();

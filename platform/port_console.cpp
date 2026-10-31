@@ -62,6 +62,7 @@ extern bool gPortForceMultiplayer; // CStateManager.cpp, console `mpforce`
 #include "MetroidPrime/Factories/CScannableObjectInfo.hpp"
 #include "Kyoto/Animation/CInt32POINode.hpp"
 #include "Kyoto/Audio/CSfxManager.hpp"
+#include <musyx/port_voices.h>
 #include "MetroidPrime/CDamageInfo.hpp"
 #include "MetroidPrime/CEntity.hpp"
 #include "MetroidPrime/CEntityInfo.hpp"
@@ -1020,6 +1021,53 @@ void CmdGod(CStateManager&, const Args& args, std::string& out) {
   out += enabled ? "god mode on\n" : "god mode off\n";
 }
 
+void CmdNoDarkAether(CStateManager&, const Args& args, std::string& out) {
+  const bool enabled =
+      args.size() < 2 ? !PortOverlay::NoDarkAetherDamage() : ArgToInt(args[1], 1) != 0;
+  PortOverlay::SetNoDarkAetherDamage(enabled);
+  out += enabled ? "no dark aether damage on\n" : "no dark aether damage off\n";
+}
+
+// infammo [all|missile|powerbomb|dark|light] [0|1]: the F1 Cheats "Infinite" boxes; no 0|1 flips.
+void CmdInfiniteAmmo(CStateManager&, const Args& args, std::string& out) {
+  struct Kind {
+    const char* name;
+    unsigned bits;
+  };
+  static const Kind kKinds[] = {{"all", PortOverlay::kInfAmmoAll},
+                                {"missile", PortOverlay::kInfAmmoMissile},
+                                {"powerbomb", PortOverlay::kInfAmmoPowerBomb},
+                                {"dark", PortOverlay::kInfAmmoDark},
+                                {"light", PortOverlay::kInfAmmoLight}};
+  size_t next = 1;
+  unsigned kinds = PortOverlay::kInfAmmoAll;
+  if (args.size() > next && !args[next].empty() && (args[next][0] < '0' || args[next][0] > '9')) {
+    kinds = 0;
+    for (const Kind& kind : kKinds) {
+      if (args[next] == kind.name) {
+        kinds = kind.bits;
+      }
+    }
+    if (kinds == 0) {
+      out += "usage: infammo [all|missile|powerbomb|dark|light] [0|1]\n";
+      return;
+    }
+    ++next;
+  }
+  const bool enabled =
+      args.size() <= next ? !PortOverlay::InfiniteAmmo(kinds) : ArgToInt(args[next], 1) != 0;
+  PortOverlay::SetInfiniteAmmo(kinds, enabled);
+  out += "infinite ammo:";
+  for (const Kind& kind : kKinds) {
+    if (kind.bits != PortOverlay::kInfAmmoAll) {
+      out += ' ';
+      out += kind.name;
+      out += PortOverlay::InfiniteAmmo(kind.bits) ? " on" : " off";
+    }
+  }
+  out += '\n';
+}
+
 // `mpforce <0|1>`: CStateManager::IsMultiplayer reports true, so multiplayer-only arms run in
 // single player. The game mode itself stays single player (no score, no split screen).
 void CmdMpForce(CStateManager&, const Args& args, std::string& out) {
@@ -1112,6 +1160,28 @@ void CmdSkipCine(CStateManager&, const Args& args, std::string& out) {
   const bool enabled = args.size() < 2 ? !PortOverlay::SkipCinematics() : ArgToInt(args[1], 1) != 0;
   PortOverlay::SetSkipCinematics(enabled);
   out += enabled ? "skip cutscenes on\n" : "skip cutscenes off\n";
+}
+
+// skipprompt: show the "Press [A] to skip" prompt as a first press in a cinematic would, for screenshots.
+void CmdSkipPrompt(CStateManager&, const Args&, std::string& out) {
+  PortOverlay::SkipConfirmArm();
+  out += "skip prompt shown\n";
+}
+
+// sfx: CSfxManager state (channel, mMuted, mDoUpdate, live sounds per channel) and MusyX voices.
+void CmdSfx(CStateManager&, const Args&, std::string& out) {
+  int channel = 0;
+  bool muted = false, doUpdate = false;
+  int live[4];
+  int poolFree[2];
+  CSfxManager::PortDebugState(channel, muted, doUpdate, live, poolFree);
+  PortMusyxVoice voices[64];
+  const int voiceCount = MusyxPortCopyVoices(voices, 64);
+  out += "sfx: channel=" + std::to_string(channel) + " muted=" + std::to_string(muted) +
+         " doUpdate=" + std::to_string(doUpdate) + " live=[" + std::to_string(live[0]) + "," +
+         std::to_string(live[1]) + "," + std::to_string(live[2]) + "," + std::to_string(live[3]) +
+         "] poolFree=" + std::to_string(poolFree[0]) + "/" + std::to_string(poolFree[1]) +
+         " musyxVoices=" + std::to_string(voiceCount) + "\n";
 }
 
 // credits [1|2]: end the game into the credits (CGMSinglePlayer::EndGame's kRM_Credits1/2 route).
@@ -1233,6 +1303,47 @@ void CmdElevator(CStateManager&, const Args& args, std::string& out) {
     PortOverlay::SetElevatorRide(mode);
   }
   out += std::string("elevator ") + kNames[PortOverlay::ElevatorRide()] + "\n";
+}
+
+// combocost / combomissiles / beamammo [n]: the F1 Cheats sliders; no argument prints the value.
+void CmdComboCost(CStateManager&, const Args& args, std::string& out) {
+  if (args.size() > 1) {
+    PortOverlay::SetComboBeamCost(ArgToInt(args[1], PortOverlay::kComboBeamCostMax));
+  }
+  out += "combo beam ammo cost " + std::to_string(PortOverlay::ComboBeamCost()) + "\n";
+}
+
+void CmdComboMissiles(CStateManager&, const Args& args, std::string& out) {
+  if (args.size() > 1) {
+    PortOverlay::SetComboMissileCost(ArgToInt(args[1], PortOverlay::kComboMissileCostMax));
+  }
+  out += "combo missile cost " + std::to_string(PortOverlay::ComboMissileCost()) + "\n";
+}
+
+void CmdBeamAmmo(CStateManager&, const Args& args, std::string& out) {
+  if (args.size() > 1) {
+    PortOverlay::SetBeamAmmoPerExpansion(ArgToInt(args[1], PortOverlay::kBeamAmmoPerExpansionDefault));
+  }
+  out += "beam ammo per expansion " + std::to_string(PortOverlay::BeamAmmoPerExpansion()) + "\n";
+}
+
+// rooms [original|fast]: the rotating-room cutscenes (rotating_rooms); no argument prints it.
+void CmdRooms(CStateManager&, const Args& args, std::string& out) {
+  static const char* const kNames[] = {"original", "fast"};
+  if (args.size() > 1) {
+    int mode = -1;
+    for (int i = 0; i < 2; ++i) {
+      if (args[1] == kNames[i]) {
+        mode = i;
+      }
+    }
+    if (mode < 0) {
+      Fail("usage: rooms [original|fast]");
+      return;
+    }
+    PortOverlay::SetRotatingRooms(mode);
+  }
+  out += std::string("rooms ") + kNames[PortOverlay::RotatingRooms()] + "\n";
 }
 
 void CmdPortal(CStateManager&, const Args& args, std::string& out) {
@@ -2149,6 +2260,19 @@ struct PortConsoleDoor {
                   : lock->GetModelData()->IsAnimating()    ? " animating"
                                                            : " still",
                   door.mOpenRequestCount, door.mResetPending ? ", reset pending" : "");
+    out += line;
+    // Which of the four beams the door's own vulnerability takes, and what the shots see (the
+    // Unlock beam doors cheat swaps a colour lock for any beam).
+    static const char kBeam[] = "PDLA";
+    char base[5] = "----", seen[5] = "----";
+    const CDamageVulnerability* shot = door.GetDamageVulnerability();
+    for (int type = kWT_Power; type <= kWT_Annihilator; ++type) {
+      const CWeaponMode mode(static_cast< EWeaponType >(type));
+      if (door.mCurrentVulnerability.WeaponHits(mode, 0)) base[type] = kBeam[type];
+      if (shot->WeaponHits(mode, 0)) seen[type] = kBeam[type];
+    }
+    std::snprintf(line, sizeof(line), "  beams %s%s, shots see %s\n", base,
+                  door.mCurrentVulnerability.PortIsColorLock() ? " (colour lock)" : "", seen);
     out += line;
   }
 };
@@ -4783,6 +4907,11 @@ const CommandSpec kCommands[] = {
       "layer <n>                   activate a layer of the current area\n"},
     {"god", CmdGod,
       "god <0|1>                   god mode (the F1 cheat)\n"},
+    {"nodarkair", CmdNoDarkAether,
+      "nodarkair <0|1>             no Dark Aether air damage (the F1 cheat)\n"},
+    {"infammo", CmdInfiniteAmmo,
+      "infammo [kind] [0|1]        infinite ammo (F1 Cheats); kind all (default), missile,\n"
+      "                            powerbomb, dark or light\n"},
     {"mpforce", CmdMpForce,
       "mpforce <0|1>               IsMultiplayer reports true (multiplayer-only arms)\n"},
     {"overlay", CmdOverlay,
@@ -4801,6 +4930,10 @@ const CommandSpec kCommands[] = {
       "credits [1|2]               end the game into the credits (<75% / <100% route)\n"},
     {"skipcine", CmdSkipCine,
       "skipcine <0|1>              skip cutscenes the player has not seen (the F1 setting)\n"},
+    {"sfx", CmdSfx,
+      "sfx                         CSfxManager channel, mMuted, live sounds per channel, MusyX voices\n"},
+    {"skipprompt", CmdSkipPrompt,
+      "skipprompt                  show the cutscene skip prompt for a few seconds\n"},
     {"gunoffset", CmdGunOffset,
       "gunoffset [<r> <f> <u>]     arm cannon offset in metres (+-1), as the F1 Render row does\n"},
     {"msaa", CmdMsaaAniso,
@@ -4860,6 +4993,14 @@ const CommandSpec kCommands[] = {
       "scanspeed [50..400]         scan speed in percent (scan_speed); no argument prints it\n"},
     {"language", CmdLanguage,
       "language [0..6]             text language, applied live (language); no argument prints it\n"},
+    {"combocost", CmdComboCost,
+      "combocost [0..30]           beam ammo a combo takes (combo_beam_cost); no argument prints it\n"},
+    {"combomissiles", CmdComboMissiles,
+      "combomissiles [0..5]        missiles a combo takes (combo_missile_cost); no argument prints it\n"},
+    {"beamammo", CmdBeamAmmo,
+      "beamammo [50..100]          Dark/Light ammo per capacity pickup (beam_ammo_per_expansion); no argument prints it\n"},
+    {"rooms", CmdRooms,
+      "rooms [original|fast]      the energy controller rooms' turning-room cutscene (rotating_rooms); no argument prints it\n"},
     {"portal", CmdPortal,
       "portal [original|fast|skip] the light/dark world portal ride (portal_transition); no argument prints it\n"},
     {"elevator", CmdElevator,
@@ -4889,7 +5030,7 @@ const CommandSpec kCommands[] = {
     {"objs", CmdObjs,
       "objs [filter]               objects of the world: uid, editor id, class, area, position\n"},
     {"obj", CmdObj,
-      "obj <id>                    one object (an id as `objs` prints it: u046e, or e<editor id>): health, fsm, messages\n"},
+      "obj <id>                    one object (an id as `objs` prints it: u046e, or e<editor id>): health, fsm, messages, door beams\n"},
     {"send", CmdSend,
       "send <id> <msg> [from <id>] deliver a script message to an object (name or number), from a sender\n"},
     {"covdump", CmdCovdump,

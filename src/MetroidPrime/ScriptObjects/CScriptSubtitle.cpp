@@ -11,6 +11,10 @@
 #include <dolphin/gx/GXAurora.h>
 #endif
 
+#ifdef TARGET_PC
+#include "port_overlay.h"
+#endif
+
 CScriptSubtitle::CScriptSubtitle(TUniqueId uid, const rstl::string& name, const CEntityInfo& info,
                                  int positionX, int positionY, int extentX, int extentY,
                                  const CColor& fontColor, const CColor& outlineColor,
@@ -109,9 +113,21 @@ void CScriptSubtitle::Render(const CStateManager& mgr) const {
       break;
     }
     const CViewport& viewport = CGraphics::GetViewport();
+#ifdef TARGET_PC
+    // Port: the authored 640-wide layout sits centred in a wider viewport (the same reference
+    // width as the map's, CAutoMapper MapReferenceWidth), not pinned to its left edge.
+    const float widen = PortOverlay::AspectWiden();
+    const float refWidth = widen > 0.f ? static_cast< float >(viewport.mWidth) / widen
+                                       : static_cast< float >(viewport.mWidth);
+    const float offsetX = 0.5f * (static_cast< float >(viewport.mWidth) - refWidth);
+    const CTransform4f xf = CTransform4f::Translate(
+        offsetX + (refWidth / 640.f) * mPositionX, 0.f,
+        (static_cast< float >(viewport.mHeight) / 448.f) * (448.f - mPositionY));
+#else
     const CTransform4f xf = CTransform4f::Translate(
         (static_cast< float >(viewport.mWidth) / 640.f) * mPositionX, 0.f,
         (static_cast< float >(viewport.mHeight) / 448.f) * (448.f - mPositionY));
+#endif
     gpRender->SetModelMatrix(xf);
     mTextSupport.Render();
 #ifdef TARGET_PC
