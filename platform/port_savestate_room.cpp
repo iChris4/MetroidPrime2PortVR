@@ -56,6 +56,23 @@ struct PortRoomState {
   static bool IsFlotsam(const CDarkTrooper& t) { return t.mRagDollHolder.mFlotsam; }
   static CScriptDoor::ELockState DoorLock(const CScriptDoor& d) { return d.mLockState; }
   static void SetDoorUnlocked(CScriptDoor& d, CStateManager& mgr) { d.SetLockState(mgr, CScriptDoor::kLS_Unlocked); }
+  // A door the save had open goes straight to the settled Open state. The open message would park
+  // it in WaitingForArea until the area behind it is streamed and out of ARAM (several ticks), so a
+  // dump right after the restore saw it shut. Same end state as Opening -> Open for a held request
+  // (mOpenRequestCount 1, shield hidden), without re-sending the Open connections the save already
+  // carries the effects of.
+  static void SetDoorOpen(CScriptDoor& d, CStateManager& mgr) {
+    d.mOpenRequestCount = 1;
+    d.mIsOpen = true;
+    d.mWasOpen = true;
+    d.mShieldState = CScriptDoor::kSS_Hidden;
+    d.mShieldAlpha = 0.f;
+    d.mColorDirty = true;
+    d.SetShieldAlpha(0.f, mgr);
+    mgr.MapWorldInfo()->SetDoorVisited(mgr.GetEditorIdForUniqueId(d.GetUniqueId()), true);
+    d.SetDoorAnimation(CScriptDoor::kDAT_Open);
+    d.SetDoorState(mgr, CScriptDoor::kDS_Open);
+  }
   // A scenery actor or platform destroyed before the save already sent its Dead connections (debris,
   // damage to its neighbours); the rebuilt one has mDead clear and would send them again on its
   // next Think once the restored hp is <= 0.
@@ -650,7 +667,11 @@ bool ApplyObject(CStateManager& mgr, CEntity& ent, const RoomObject& obj, Change
       const bool open = r.U32() != 0;
       // The door's own messages run its state machine: an open request waits for the area
       // behind it the way a shot door does, and a close swings it shut.
-      if (r.ok && open != door->IsOpen()) {
+      if (r.ok && open && !door->IsOpen()) {
+        PortRoomState::SetDoorOpen(*door, mgr);
+        log.Note(obj.editorId, "door opened");
+        changed = true;
+      } else if (r.ok && open != door->IsOpen()) {
         mgr.SendScriptMsg(door, kInvalidUniqueId, open ? kSM_Open : kSM_Close);
         log.Note(obj.editorId, open ? "door opened" : "door closed");
         changed = true;
