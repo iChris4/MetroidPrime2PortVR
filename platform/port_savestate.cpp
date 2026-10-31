@@ -844,6 +844,10 @@ void TickResume(CStateManager& mgr) {
 void TickPlacement(CStateManager& mgr) {
   if (++sPlace.waited > kPlaceTimeoutFrames) {
     sPlace.active = false;
+    std::fprintf(stderr, "[savestate] load wait ended: quit=%d full=%d state=%d warp=%d cinematic=%d\n",
+                 mgr.mQuitGame, mgr.IsFullyInitialized(), static_cast< int >(mgr.GetGameState()),
+                 PortWarp::Pending(),
+                 mgr.CameraManager(0) != nullptr && mgr.CameraManager(0)->IsInCinematicCamera());
     DisarmSpawnLayers();
     SetMessage("load timed out before the world came back; Samus stays at the area's spawn");
     return;
@@ -972,7 +976,14 @@ void TickRoom(CStateManager& mgr) {
   // A reload comes up with ~1008 of the 1024 object ids taken and purges a few hundred frames later;
   // a layer streamed in before that runs the pool dry (AllocateUniqueId aborts). Wait, as
   // PortWarpSettle does, without counting the wait as idle.
-  const bool idsTight = mgr.PortFreeObjectIds() < kRoomMinFreeIds;
+  // Only a layer that has to stream in allocates ids: one already active (or switched off) is
+  // passed without waiting, or a world that stays under the floor (749 objects in Agon's two
+  // areas) would never get past its first entry.
+  const bool nextStreams =
+      sRoom.nextLayer < sRoom.layers.size() &&
+      mgr.PortLayerNeedsStream(TAreaId(sRoom.layers[sRoom.nextLayer].first),
+                               sRoom.layers[sRoom.nextLayer].second);
+  const bool idsTight = nextStreams && mgr.PortFreeObjectIds() < kRoomMinFreeIds;
   if (sRoom.nextLayer < sRoom.layers.size() || mgr.PortLayerRequestPending()) {
     if (sRoom.nextLayer < sRoom.layers.size() && !mgr.PortLayerRequestPending() && !idsTight) {
       const std::pair< int, int >& want = sRoom.layers[sRoom.nextLayer++];
@@ -1283,6 +1294,8 @@ void Forget(const CStateManager* mgr) {
 
 void RequestModReload() { sModReloadRequest.store(true); }
 void RequestRoomReload() { sRoomReloadRequest.store(true); }
+bool LoadAwaitsCinematic() { return sPlace.active; }
+
 bool ModReloadActive() {
   return sModReloadRequest.load() || sModReloadPending.load() || sModReloadWorldStale.load();
 }
