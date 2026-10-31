@@ -176,6 +176,8 @@ struct RoomApplyProgress {
   std::vector< int32_t > done;
   std::vector< int32_t > seen;
   std::vector< uint32_t > held; // running timers restored stopped, started with the last area
+  std::vector< uint32_t > openDoors; // doors the save had open, still waiting for their area to open
+  int doorTicks = 0;
   RoomApplyStats stats;
 };
 
