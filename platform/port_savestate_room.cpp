@@ -56,6 +56,11 @@ struct PortRoomState {
   // rebuilds it, so it is not a kill the state should remember.
   static bool IsFlotsam(const CDarkTrooper& t) { return t.mRagDollHolder.mFlotsam; }
   static CScriptDoor::ELockState DoorLock(const CScriptDoor& d) { return d.mLockState; }
+  // An open request parks the door in WaitingForArea (CScriptDoor::Think) until the area behind it
+  // is loaded, out of ARAM and done occluding; only then does it open (mIsOpen).
+  static bool DoorWaitingForArea(const CScriptDoor& d) {
+    return !d.IsOpen() && d.mDoorState == CScriptDoor::kDS_WaitingForArea;
+  }
   static void SetDoorUnlocked(CScriptDoor& d, CStateManager& mgr) { d.SetLockState(mgr, CScriptDoor::kLS_Unlocked); }
   // A scenery actor or platform destroyed before the save already sent its Dead connections (debris,
   // damage to its neighbours); the rebuilt one has mDead clear and would send them again on its
@@ -886,6 +891,9 @@ bool ConsumeSkipUpdate() {
   return skip;
 }
 
+// Ticks a restore waits for the doors the save had open to leave WaitingForArea.
+constexpr int kDoorSettleTicks = 120;
+
 int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress& progress,
                    bool force) {
   const CWorld* world = mgr.World();
@@ -933,6 +941,25 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
   // on from its saved clocks (platforms, rotations, AI timers) for the whole wait. `force` is the
   // give-up pass, which restores the areas that did come back.
   if (now.empty() || (waiting != 0 && !force)) {
+    if (waiting == 0 && !progress.openDoors.empty()) {
+      // Every area is restored; hold the restore open while a door is still opening (bounded).
+      std::vector< uint32_t > still;
+      for (uint32_t uid : progress.openDoors) {
+        const CScriptDoor* door = TCastToConstPtr< CScriptDoor >(mgr.GetObjectById(TUniqueId(uid)));
+        if (door != nullptr && PortRoomState::DoorWaitingForArea(*door)) {
+          still.push_back(uid);
+        }
+      }
+      if (!still.empty() && ++progress.doorTicks <= kDoorSettleTicks) {
+        progress.openDoors = still;
+        return static_cast< int >(still.size());
+      }
+      if (!still.empty()) {
+        std::fprintf(stderr, "[savestate] room: %d doors still waiting for their area after %d ticks\n",
+                     static_cast< int >(still.size()), kDoorSettleTicks);
+      }
+      progress.openDoors.clear();
+    }
     return waiting;
   }
 
@@ -1077,6 +1104,24 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
   }
   // Every object's own messages have run: the saved fields go in.
   mgr.DispatchScriptMessages();
+  // Doors the save had open that the Open message left waiting for their area: the caller keeps
+  // ticking until the door's own Think opens them (retail path), so the restored room shows them open.
+  for (const RoomObject& obj : room.objects) {
+    if (now.count(TEditorId(obj.editorId).AreaNum()) == 0) {
+      continue;
+    }
+    const RoomBlock* b = FindBlock(obj, kTagDoor);
+    if (b == nullptr) {
+      continue;
+    }
+    BlockReader r(b->data);
+    const bool open = r.U32() != 0;
+    CScriptDoor* door =
+        TCastToPtr< CScriptDoor >(mgr.ObjectById(mgr.GetIdForScript(TEditorId(obj.editorId))));
+    if (r.ok && open && door != nullptr && PortRoomState::DoorWaitingForArea(*door)) {
+      progress.openDoors.push_back(door->GetUniqueId().Value());
+    }
+  }
   for (const DeferredFields& d : later) {
     CEntity* ent = mgr.ObjectById(d.uid);
     if (ent == nullptr) {
@@ -1178,7 +1223,7 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
   if (waiting == 0) {
     StartHeldTimers(mgr, progress);
   }
-  return waiting;
+  return waiting != 0 ? waiting : static_cast< int >(progress.openDoors.size());
 }
 
 namespace {
