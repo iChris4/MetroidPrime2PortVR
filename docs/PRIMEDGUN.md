@@ -9,6 +9,49 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## Headset culling of portal rooms (2026-10-31)
+
+From the user, after the Dolphin build's Echoes wide-culling patch
+(`Dolphin-OpenXR-2/Data/Sys/VRPatches/G2ME01/wide-culling.lua`): Echoes culls some objects and
+enemies another way than Metroid Prime. The patch replaces the frustum at four calls of
+`CFrustumPlanes`'s constructor: `CStateManager::PreRender`, `SetupViewForDraw` and
+`ResetViewAfterDraw` (this port already widened those three through `PortVr::VrCullingFrustum`) and
+`CPortalArea::PreRender` (0x801E4C84), which it did not.
+- Echoes-only: an area may carry portal data (PTLA: volumes joined by portals). Every actor's
+  `mUsePortalVisibility` starts true, so in such a room `CStateManager::IsActorVisible` (which
+  `CActor::PreRender` uses to skip the draw) asks only the portal area's visible list. That list
+  was built from the game camera's frustum, and each portal it passes through (`ClipPortal`) cuts
+  the frustum to the portal's opening projected through the game camera and clamped to its screen,
+  so the headset's wider view could never pass.
+- Now, while the headset culls, `CPortalArea::PreRender` uses `VrCullingFrustum` (the wide cone
+  around the head's facing, "Culling angle", 115 degrees by default), starts from the volume the
+  head is in (`VrHeadGaze`), and `ClipPortal` passes that frustum through a portal whose opening is
+  in view unchanged: volumes behind a visible portal are culled by the headset's frustum, not by the
+  opening. Portals the head cannot see still close. With culling off (no planes) or the head
+  untracked, every volume's actors are kept. Outside the headset the game's own code runs.
+- Where: 10 PTLA in the game (Temple Grounds 6, Agon Wastes 1, Sanctuary Fortress 2, multiplayer 1).
+  Temple Grounds' rooms with portals: the hive chambers (`01_temple_hive01`, `01_temple_hive02`),
+  Industrial Site (`02_temple_exploration`, light and dark) and Path of Eyes
+  (`10_temple_pathofeyes`, light and dark).
+- Measured on the Quest 3 (desk, temporary log building both lists every 120 frames), Path of Eyes,
+  the body turned in 30-degree steps: the headset's list held 7 to 73 of the room's 226 actors, the
+  game camera's 3 to 49; at 180 degrees 73 against 15, nine of the extra ones drawn models (scenery
+  `CScriptActor`s, a `CScriptDoor`, `CScriptPlatform`s; elsewhere the `CFishCloud`). The eye captures
+  of the desk could not show them (the untracked arm cannon covers the middle of the view).
+
+## Upstream 0.6.6 merged (2026-10-31)
+
+`a39e676e`: Echoes Unbound v0.6.6 into OpenXR (`master` = v0.6.6, the base the strip-diff checks
+against; upstream's `port` was 90 commits further on toward 0.6.7, untagged). Conflicts:
+- `scan_peek`: upstream's resolve pass (MSAA sample zero, Compatibility devices) kept; the eye peek
+  reads its layer of the eye array through it, and an eye without depth takes the no-depth resolve.
+- `CGraphics::EndScene`: upstream skips the stray-pixel flush itself (their issue #7); ours dropped.
+- Swap Scan/Echo visor buttons: removed upstream, with our VR exception.
+- Grant everything (shared with the VR menu) uses upstream's `PortPowerUpMaxValue`.
+Checked: port tests 55/55, strip-diff clean, desktop gunship scan, Quest look-to-scan sweep (eye 0
+picks), Quest U-Mos dialogue. Not handled: upstream 0.6.4's two-press cinematic skip shows its
+prompt through ImGui, which the headset does not show.
+
 ## PC launcher: Check for updates (2026-10-31)
 
 PrimedGun v2's verified GitHub updates (Nobbie's, beta.6) on the Echoes PC launcher: Setup > Check

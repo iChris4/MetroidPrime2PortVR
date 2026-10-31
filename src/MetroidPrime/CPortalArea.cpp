@@ -13,8 +13,17 @@
 
 #include <float.h>
 #include <string.h>
+#ifdef TARGET_PC
+#include "vr/vr_view.h"
+#endif
 
 static int sPortalTraversalDepth;
+#ifdef TARGET_PC
+// PortVr: set by PreRender while the headset culls (PortVr::VrCullingFrustum): the eye that the
+// portals are seen from, and ClipPortal passes the headset's frustum through a portal unchanged.
+static bool sPortVrPortals = false;
+static CVector3f sPortVrEye;
+#endif
 
 CPortalArea::SActorPool::SActorPool() : mNodes(SActorNode()) {
   for (int i = 0; i < mNodes.capacity() - 1; ++i) {
@@ -117,6 +126,24 @@ void CPortalArea::PreRender(CStateManager& mgr, const CGameCamera& camera, const
 
   const float radius = 0.25f * camera.GetNearClipDistance();
   const CVector3f extent(radius, radius, radius);
+#ifdef TARGET_PC
+  // PortVr: every actor of a room with portal data is drawn only when this list holds it
+  // (CStateManager::IsActorVisible, CActor::mUsePortalVisibility), so in the headset it is built
+  // for what the eyes see: the headset's wide frustum around the head's facing (as the world's,
+  // CStateManager::PreRender), walked from the volume the head is in. Without planes (culling off,
+  // or the head untracked) every volume's actors are kept.
+  CFrustumPlanes frustum(xf, CRelAngle::FromDegrees(camera.GetFov()).AsRadians(),
+                         camera.GetAspectRatio(), camera.GetNearClipDistance(), false, 100.f);
+  sPortVrPortals = PortVr::VrCullingFrustum(xf, camera.GetNearClipDistance(), frustum);
+  CVector3f portVrGaze;
+  if (!sPortVrPortals || !PortVr::VrHeadGaze(xf, sPortVrEye, portVrGaze)) {
+    sPortVrEye = camera.GetTranslation();
+  }
+  const CAABox bounds(sPortVrEye - extent, sPortVrEye + extent);
+  rstl::reserved_vector< short, 64 > volumes;
+  mData->FindOverlappingVolumes(bounds, volumes);
+  if (volumes.empty() || (sPortVrPortals && frustum.GetPlanes().empty())) {
+#else
   const CAABox bounds(camera.GetTranslation() - extent, camera.GetTranslation() + extent);
   rstl::reserved_vector< short, 64 > volumes;
   mData->FindOverlappingVolumes(bounds, volumes);
@@ -124,6 +151,7 @@ void CPortalArea::PreRender(CStateManager& mgr, const CGameCamera& camera, const
   const CFrustumPlanes frustum(xf, CRelAngle::FromDegrees(camera.GetFov()).AsRadians(),
                                camera.GetAspectRatio(), camera.GetNearClipDistance(), false, 100.f);
   if (volumes.empty()) {
+#endif
     for (short i = 0; i < mVolumes.size(); ++i) {
       BuildVisibleActorList(mgr, camera, i, frustum, true, xf.GetTranslation());
     }
@@ -139,6 +167,9 @@ void CPortalArea::PreRender(CStateManager& mgr, const CGameCamera& camera, const
       mVisibleActors.AddObjectIfAbsent(*node->mActor);
     }
   }
+#ifdef TARGET_PC
+  sPortVrPortals = false;
+#endif
 }
 
 static rstl::pair< bool, CFrustumPlanes > ClipPortal(const CGameCamera& camera,
@@ -189,7 +220,11 @@ static rstl::pair< bool, CFrustumPlanes > ClipPortal(const CGameCamera& camera,
                                                      const CFrustumPlanes& frustum,
                                                      const CPortalAreaData::SPortal& portal) {
   typedef rstl::pair< bool, CFrustumPlanes > Result;
+#ifdef TARGET_PC
+  const CVector3f& position = sPortVrPortals ? sPortVrEye : camera.GetTranslation();
+#else
   const CVector3f& position = camera.GetTranslation();
+#endif
   if (!portal.mPlane.IsFacing(position)) {
     return Result(false, CFrustumPlanes());
   }
@@ -240,6 +275,15 @@ static rstl::pair< bool, CFrustumPlanes > ClipPortal(const CGameCamera& camera,
     }
     polygon = clipped;
   }
+#ifdef TARGET_PC
+  // PortVr: below, the portal's opening is projected through the game camera and clamped to its
+  // screen, which would cut the headset's view back to the game camera's (a portal beside or
+  // behind it would close). In the headset a portal whose opening is in view passes the frustum on
+  // as it is: the volumes behind it are culled by the headset's frustum, not by the opening.
+  if (sPortVrPortals) {
+    return polygon.empty() ? Result(false, CFrustumPlanes()) : Result(true, frustum);
+  }
+#endif
 
   float minX = FLT_MAX;
   float maxX = -FLT_MAX;
