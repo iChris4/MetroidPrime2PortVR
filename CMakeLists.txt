@@ -108,7 +108,7 @@ endif()
 option(MP_ENABLE_OPENXR "Build OpenXR VR support (PrimedGun Echoes)" ${MP_ENABLE_OPENXR_DEFAULT})
 unset(MP_ENABLE_OPENXR_DEFAULT)
 # PrimedGun Echoes' release version: the launcher's title and About tab, and the game's --version.
-set(MP_PRIMEDGUN_VERSION "1.0.0-alpha.1")
+set(MP_PRIMEDGUN_VERSION "1.0.0-alpha.2")
 # PrimedGun Echoes' launcher (launcher/): a Qt 6 window beside the game. Needs Qt on
 # CMAKE_PREFIX_PATH (docs/PRIMEDGUN.md, "Launcher").
 option(MP_BUILD_LAUNCHER "Build the PrimedGun Echoes Qt launcher (PrimedGunEchoes.exe)" OFF)
