@@ -12,10 +12,13 @@ boot, at d3dbe57b5). 266 pass with 0 strict diffs. Table and repro: `/tmp/openco
 - Load never restores the room (reproduced with one run alone): TG 62b0d67d (Landing Site), TG 9fb7503c
   (0q_temple_hall), Agon 50017152 (0f_sand_hall). Fixed by sc/load-timeout (merged f556fa724): a load skips the opening cinematic the rebuilt
   world replays, and a layer entry that streams nothing no longer waits for 256 free ids (Agon has 223).
-- `door_open 1 -> 0`: TG fb843824 (01_temple_hive_04), Agon 845c85a7 (00_mapstation_sand). Lane sc/door-open.
+- `door_open 1 -> 0`: TG fb843824 (01_temple_hive_04), Agon 845c85a7 (00_mapstation_sand). Fixed by sc/door-open (merged 7d3475de5): the
+  restore keeps ticking (at most 120) while a door the save had open is still WaitingForArea, so the retail
+  path opens it and streams the area behind it; walking through 000B0022 after a load reaches the next room.
 - CScriptTriggerOrientated `active 0 -> 1`: Sanctuary df073157 (0j_cliff_hall_loop). Fixed by sc/trigger-active (merged): CScriptSwitch
   `opened` is saved (kTagSwitch), so a SetToZero after the load no longer re-fires Open.
-- Rerun on f556fa724: the 4 load/trigger areas 0 strict.
+- Rerun on 7d3475de5: all 6 formerly strict areas and 2 controls 0 strict. The sweep is clean apart from
+  the 2 ending areas.
 - TG game_end_part1/2 never reach gameplay with a direct boot (the ending script). Not a save-state result.
 
 The area list comes from `tools/world_areas.py`, not the `modules.tsv` spawns column (that one is cut short at `(+N more)`).
