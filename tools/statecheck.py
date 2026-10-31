@@ -153,7 +153,9 @@ class Game:
         a = self.a
         env = dict(os.environ, USERDIR=a.userdir, LOG=str(self.log), RUNTAG="statecheck", SECS=str(a.secs),
                    FRAMES="1000000", DISPLAY_NUM=a.display, MP2_CONSOLE=str(a.port), MP2_CONSOLE_WAIT="1")
-        if teleport:
+        if a.world:
+            env["WORLD"] = f"{a.world},{teleport}" if teleport else a.world  # direct boot, not a teleport
+        elif teleport:
             env["TELEPORT"] = teleport
         cards = [c for c in Path(a.userdir).glob("*/Card A") if c.is_file() or any(c.iterdir())]
         if not cards:
@@ -469,6 +471,8 @@ def main():
                     "a run already listening there")
     ap.add_argument("--userdir", help="directory holding the memory card: start a run with tools/run_gameplay.sh")
     ap.add_argument("--area", action="append", default=[], help="area (slot, id or name) to check; repeatable")
+    ap.add_argument("--world", help="world to boot into (id or MLVL name part, run_gameplay.sh WORLD); every --area "
+                    "is then a slot, id or MLVL name of that world (a slot index does not work for the first)")
     ap.add_argument("--setup", action="append", default=[], metavar="CMD",
                     help="console command run unheld in each room before the round trip (repeatable); "
                     "`wait N` lets the game run N more updates (the game must be running, not held)")

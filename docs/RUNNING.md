@@ -196,6 +196,8 @@ itself on the tick `[savestate] room state restored` shows, so nothing runs past
 from A1 (so tick drift is filtered); the rest are warnings. `--post-wait N` also steps N ticks and
 dumps C. Dumps land in `--out` (`<n>-area_<a>-A.jsonl`); `--detail`/`--all` list more. An empty
 card runs as a new game (`MP2_NEW_GAME=1`). Use a copy of the card: the run saves slot 8 and loads it.
+`--world <id|MLVL name part>` direct-boots that world (`WORLD=<world>,<first area>`); the areas are then
+MLVL names (`--world 42b935e4 --area 06_sand_alamofront --area 0b_sand_hall`), never a slot for the first.
 The player is held safe by default: every room runs `god 1` and `nodarkair 1` before its `--setup`
 commands (then `--wait` unheld ticks to let the room settle), so an enemy hit or a dark-aether drain
 is not a strict player hp diff; `--unsafe-player` leaves the player as the room found it.
