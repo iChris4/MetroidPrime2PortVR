@@ -24,8 +24,10 @@ Session 3 lanes merged: sc/ing3stage1 (reset a live FSM whose saved machine neve
 sc/statecheck-setup (`--setup` chains with `;`), docs/mods-followup, sc/dg-pickups (not reproduced
 in 8 runs; debris drops documented in SAVESTATE_SCHEMA.md). GPL LZO replaced by an MIT decoder.
 
-Running: sonnet `ses_e6c761547ffeX5tUweH9CI54Y4` sc/debris-pickup (saved fields applied to the
-pickup a restored debris drops) → /tmp/opencode/reports/sc-debris-pickup.md.
+sc/debris-pickup merged (a0fc2d185): a debris' dropped pickup is saved on the debris (`kTagDrop`);
+the restored debris drops again and that pickup takes the saved fields (or is removed). killknee
+route 3/3, 0 strict, pickups 3=3. Not saved: a drop kept by `mKeepGeneratedObject` after its debris
+is gone.
 
 Open: retail Puffer has no engaged state. `platform/debug_ui.cpp:296` has the old env claim but is unbuilt. Statecheck runs:
 copy the userdir, own --port/--display, `--build <tree>/build-port-link`.
