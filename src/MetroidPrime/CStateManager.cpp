@@ -5904,6 +5904,21 @@ bool CStateManager::PortLayerFlagOn(TAreaId aid, int layer) const {
   return mCurrentWorldLayerState->IsLayerActive(aid, TLayerId(layer));
 }
 
+bool CStateManager::PortLayerNeedsStream(TAreaId aid, int layer) {
+  if (!PortLayerFlagOn(aid, layer)) {
+    return false;
+  }
+  CWorld* world = World();
+  if (world == nullptr || !world->DoesAreaExist(aid)) {
+    return false;
+  }
+  CGameArea* area = world->Area(aid);
+  if (area == nullptr || !area->IsLoaded()) {
+    return false;
+  }
+  return area->GetLayerPhase(TLayerId(layer)) != CGameArea::kLP_Active;
+}
+
 void CStateManager::PortLayerTick() {
   if (mPortLayerArea == kInvalidAreaId) {
     return;
