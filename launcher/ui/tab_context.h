@@ -64,6 +64,9 @@ public:
   // one key at once (the cannon slot, whose files are already applied).
   std::function<void()> onEdited;
   std::function<void()> openPortOptions;
+  // Before the update dialog installs an update: false when the game still runs or the settings
+  // could not be saved.
+  std::function<bool()> prepareUpdate;
   std::function<void(std::string_view)> saveKeyNow;
 
   void AddRefresher(std::function<void()> refresh) { m_refreshers.push_back(std::move(refresh)); }

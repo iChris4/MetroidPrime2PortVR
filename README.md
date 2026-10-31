@@ -51,9 +51,24 @@ only).
 ## Where your data is
 
 - **PC:** the `user` folder next to the executables: settings (`settings.cfg`), memory cards, save
-  states, logs and caches. Keep it when you update: copy `user` into the new release's folder.
+  states, logs and caches. Keep it when you update by hand: copy `user` into the new release's
+  folder. The launcher's own updater keeps it in place.
 - **Quest:** `/sdcard/Android/data/org.primedgun.echoes/files`. Install a new APK over the existing
   app to keep your saves; uninstalling removes them.
+
+## Updating the PC launcher
+
+**Setup > Check for updates...** in `PrimedGunEchoes.exe` (from v1.0.0-alpha.2) asks this
+repository's GitHub releases whether a newer version is out, with no GitHub login, and shows its
+release notes. **Include alpha, beta and release candidate versions** is on by default while a
+preview is installed.
+
+**Download update** downloads the Windows package and checks its SHA-256 (GitHub's digest of the
+file, else the release's `SHA256SUMS.txt`); a package that cannot be verified is not installed.
+**Install and restart launcher** then waits for the game and the launcher to close, copies the new
+files over the installation, keeps the replaced ones in a backup folder and puts them back if
+anything fails, then starts the new launcher. The `user` folder is never touched. Nothing is
+installed until you ask. The Quest has no updater yet: install the new APK over the old one.
 
 ## Not done yet
 

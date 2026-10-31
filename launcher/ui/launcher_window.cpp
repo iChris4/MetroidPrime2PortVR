@@ -10,6 +10,7 @@
 #include "primedgun_import.h"
 #include "style.h"
 #include "tabs.h"
+#include "update_dialog.h"
 
 #include <QCloseEvent>
 #include <QDateTime>
@@ -100,6 +101,18 @@ LauncherWindow::LauncherWindow()
 
   m_ctx.onEdited = [this] { OnEdited(); };
   m_ctx.openPortOptions = [this] { OpenPortOptions(); };
+  m_ctx.prepareUpdate = [this] {
+    if (m_game != nullptr) {
+      QMessageBox::information(this, tr("Close the game"), tr("Close the game before installing the update."));
+      return false;
+    }
+    if (!SaveSettings()) {
+      return false;
+    }
+    m_ini.setValue(QStringLiteral("geometry"), saveGeometry());
+    m_ini.sync();
+    return true;
+  };
   m_ctx.saveKeyNow = [this](std::string_view key) { SaveKeyNow(key); };
 
   m_tabs = new QTabWidget(page);
@@ -166,6 +179,10 @@ void LauncherWindow::BuildSetupTab(QTabWidget* tabs) {
   auto* notesButton = new QPushButton(tr("Setup Notes"));
   StyleGameButton(notesButton);
   layout->addWidget(notesButton);
+  auto* updatesButton = new QPushButton(tr("Check for updates..."));
+  StyleGameButton(updatesButton);
+  layout->addWidget(updatesButton);
+  connect(updatesButton, &QPushButton::clicked, this, [this] { CheckForUpdates(m_ctx); });
   m_ctx.Separator(layout);
 
   m_selectedGame = new QLabel;

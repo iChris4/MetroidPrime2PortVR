@@ -9,6 +9,38 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## PC launcher: Check for updates (2026-10-31)
+
+PrimedGun v2's verified GitHub updates (Nobbie's, beta.6) on the Echoes PC launcher: Setup > Check
+for updates... (`launcher/ui/update_dialog.cpp`, `update_release.cpp`, `launcher/update-windows.ps1`;
+`launcher/README.md` has how it works). Changed from Prime 1: this repository
+(`Updates::kRepo`), the `PrimedGunEchoes-v<version>-Windows-x64.zip` package, `PrimedGunEchoes.exe`
+and `metroid_prime2_port.exe` in the script, "Close the game" only (Echoes has no options-only
+process), the launcher's code style. The Quest half (`QuestUpdateController.kt`, `ReleaseUpdates.kt`)
+is not ported.
+Checked: `port_launcher_updates_tests` (also against the live releases list: it picks alpha.1's
+Windows package and its GitHub digest), `port_windows_update_tests` (six fixture cases: success,
+bad checksum, path traversal, `user.` alias, wrong package, rollback on a locked file), the
+settings-sync UI test (the button, the embedded script). The script installed the published alpha.1
+zip (curl, digest checked) over a copy of the staged alpha.2 folder: launcher and game replaced, the
+old ones in `backup\`, `user\` untouched. Through UI Automation, the real launcher's dialog asked
+GitHub and reported up to date. Not checked: a download and install from the dialog itself, which
+needs a newer release than the installed one.
+
+## Upstream Echoes Unbound 0.6.6 merged (2026-10-31)
+
+`a39e676e` merges upstream's 0.6.6 release (not `port`'s tip, 90 commits toward an untagged 0.6.7);
+`master` is set to `v0.6.6`, the base strip-diff compares against. Conflicts: aurora's scan peek
+(upstream's resolve pass for MSAA and Compatibility devices kept; the eye peek reads its layer of
+the eye array through it, `scan_peek::encode(..., multisampledColor, layer)`, and an eye without
+depth takes a no-depth resolve), the stray pixel (upstream skips the flush itself, #7; theirs
+replaces ours), the Swap Scan/Echo visor option (removed upstream, with our VR guard), Grant
+everything (upstream's `PortPowerUpMaxValue`). Upstream's Dawn for the PC is now v20261029.114630
+(same DXC versions). Upstream 0.6.4's two-press cinematic skip prompt is ImGui, so the headset does
+not show it. Checked: port tests, strip-diff, the desktop gunship scan, on the Quest a full turn of
+look to scan (eye 0 peeks find the scannables) and the U-Mos dialogue on the virtual screen.
+Packaged as v1.0.0-alpha.2.
+
 ## Immersive cutscenes: no letterbox, dialogue on the virtual screen (2026-10-31)
 
 First feedback on the alpha, with cutscenes immersive ("Show cutscenes on cinema screen" off): the

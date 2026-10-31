@@ -69,6 +69,18 @@ the window (label `port`).
 - **Memory cards.** The launcher does not transfer cards. The game shares or
   mirrors a Dolphin or PrimeHack card itself (in game, F1 > System > Memory
   card).
+- **Check for updates...** (Setup) opens the update dialog (`ui/update_dialog.cpp`,
+  `ui/update_release.cpp`, from PrimedGun v2's launcher). It reads the
+  releases of `iChris4/MetroidPrime2PortVR` (`Updates::kRepo`), offers the
+  newest one after this version that has a `PrimedGunEchoes-v<version>-Windows-x64.zip`,
+  downloads it with Windows' `curl.exe` and checks its SHA-256 (the asset's
+  GitHub digest, else `SHA256SUMS.txt`). Installing saves the settings, then
+  runs the embedded `update-windows.ps1` detached and quits: the script waits
+  for the launcher and the game to close, copies the package over the
+  installation except `user/`, keeps the replaced files for a rollback and
+  starts the new launcher. `port_launcher_updates_tests` and
+  `port_windows_update_tests` (fixture installations under
+  `build/updater-fixtures`) check both halves.
 - **Open Full Port Options (F1)** writes `open_options.request` in the user
   folder. A running game opens its F1 window and comes forward; otherwise the
   game starts with the window open (the Echoes port has no options-only start).

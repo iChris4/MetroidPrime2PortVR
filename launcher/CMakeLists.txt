@@ -22,6 +22,8 @@ set(PRIMEDGUN_LAUNCHER_UI_SOURCES
     ui/layout_tab.cpp
     ui/port_config_tab.cpp
     ui/tab_context.cpp
+    ui/update_dialog.cpp
+    ui/update_release.cpp
     ui/widgets.cpp)
 qt_add_executable(PrimedGunEchoes WIN32 main.cpp ${PRIMEDGUN_LAUNCHER_UI_SOURCES})
 qt_add_resources(PrimedGunEchoes "primedgun_assets"
@@ -33,6 +35,8 @@ qt_add_resources(PrimedGunEchoes "primedgun_assets"
         assets/default_arm.png
         assets/samus.png
         assets/samus_arm.png)
+# Setup > Check for updates installs through this script (ui/update_dialog.cpp).
+qt_add_resources(PrimedGunEchoes "primedgun_updater" PREFIX "/" FILES update-windows.ps1)
 if(WIN32)
     target_sources(PrimedGunEchoes PRIVATE PrimedGun.rc PrimedGun.manifest)
 endif()
@@ -79,9 +83,25 @@ qt_generate_deploy_app_script(
 install(SCRIPT ${primedgun_deploy_script})
 
 if(MP_BUILD_TESTS)
+    # The updater: release selection and checksums, and the Windows script against fixture
+    # installations (never the build's own folder).
+    add_executable(port_launcher_updates_tests ${PROJECT_SOURCE_DIR}/tests/port_launcher_updates.cpp
+        ui/update_release.cpp)
+    target_include_directories(port_launcher_updates_tests PRIVATE ui)
+    target_link_libraries(port_launcher_updates_tests PRIVATE Qt6::Core)
+    set_target_properties(port_launcher_updates_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+    add_test(NAME port_launcher_updates_tests COMMAND port_launcher_updates_tests)
+    set_tests_properties(port_launcher_updates_tests PROPERTIES LABELS port TIMEOUT 20)
+    if(WIN32 AND Python3_EXECUTABLE)
+        add_test(NAME port_windows_update_tests
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/port_windows_update.py)
+        set_tests_properties(port_windows_update_tests PROPERTIES LABELS port TIMEOUT 120)
+    endif()
     add_executable(port_launcher_settings_sync_tests
         ${PROJECT_SOURCE_DIR}/tests/port_launcher_settings_sync.cpp
         ${PRIMEDGUN_LAUNCHER_UI_SOURCES})
+    qt_add_resources(port_launcher_settings_sync_tests "primedgun_update_test_resource"
+        PREFIX "/" FILES update-windows.ps1)
     add_dependencies(port_launcher_settings_sync_tests port_build_info)
     target_include_directories(port_launcher_settings_sync_tests PRIVATE
         ui "${PROJECT_BINARY_DIR}/generated" ${PROJECT_SOURCE_DIR}/platform/include)
