@@ -1,12 +1,15 @@
 # NOTICE
 
-## What the licence covers
+## Original licences and scope
 
-`LICENSE` is an MIT grant over **this project's own work**: the platform layer
+`LICENSE` restores PrimeDecomp's original CC0 dedication verbatim, also retained
+in `LICENSE-decomp`. It speaks for its authors' work, not Nintendo's assets or
+retail code.
+
+`packaging/licenses/native-port-MIT.txt` preserves the native port's MIT grant over **this project's own work**: the platform layer
 under `platform/`, the port-only sources (`src/**/Port*.cpp`, `*PortStub.cpp`),
 the build and packaging scripts, the tests, the tooling under `tools/`, and the
-documentation under `docs/`. Those files carry no licence header of their own,
-so this is where their terms are stated.
+documentation under `docs/`. Files with their own licence headers keep those terms.
 
 ## What it does not cover
 
@@ -42,7 +45,7 @@ stereo, foveation and interop files it adds to `extern/aurora/` (and the Dawn
 patches under `quest/dawn/`), the PC and Quest launchers (`launcher/`,
 `quest/`), and their tests. Each of those files says
 `SPDX-License-Identifier: MIT`: they are under the MIT License, on the terms
-`LICENSE` states, Copyright (c) 2026 PrimedGun contributors. Parts of the
+`packaging/licenses/native-port-MIT.txt` states, Copyright (c) 2026 PrimedGun contributors. Parts of the
 launchers derive from PrimedGun's own launcher (the Dolphin-based PrimedGun
 project), whose authors relicensed that work here. Like the rest of this
 project's own work, the MIT grant does not reach the game code the VR layer is
@@ -50,7 +53,7 @@ built into.
 
 ## Third-party components, which keep their own terms
 
-Nothing in `LICENSE` applies to these; each is under its own licence, which
+The root dedication and native-port MIT grant do not replace these terms; each is under its own licence, which
 travels with any build that contains it.
 
 | Component | Licence | Where its terms are |
