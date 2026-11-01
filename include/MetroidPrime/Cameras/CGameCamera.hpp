@@ -9,6 +9,9 @@ class CFinalInput;
 class CPlayer;
 
 class CGameCamera : public CActor {
+#ifdef TARGET_PC
+  friend struct PortEntitySchema; // save-state field schema (platform/include/port_entity_schema.h)
+#endif
 public:
   CGameCamera(TUniqueId uid, const rstl::string& name, const CEntityInfo& info,
               const CTransform4f& xf, float fov, float nearZ, float farZ, float aspect,
@@ -73,6 +76,9 @@ public:
 private:
   // Guessed name
   struct SFovInterpolation {
+#ifdef TARGET_PC
+  friend struct PortEntitySchema; // save-state field schema (platform/include/port_entity_schema.h)
+#endif
     // Both helpers are emitted out of line in the target.
     SFovInterpolation(float delay, float remaining, float duration, float current, float target,
                       TUniqueId cameraId);

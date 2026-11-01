@@ -219,6 +219,9 @@ public:
   bool PortLayerRequestPending() const { return mPortLayerArea != kInvalidAreaId; }
   // True when the world layer state (the memory card stream, or a save state's) has the layer on.
   bool PortLayerFlagOn(TAreaId aid, int layer) const;
+  // True when PortWarpToLayer would stream the layer in (flag on, not already fully active), i.e.
+  // would allocate object ids; an entry for which this is false costs nothing.
+  bool PortLayerNeedsStream(TAreaId aid, int layer);
   // Drives a layer request to completion: ActivateLayerDynamic can only run once the layer's data
   // has streamed in (GetLayerPhase reports kLP_Ready), which takes frames.
   void PortLayerTick();

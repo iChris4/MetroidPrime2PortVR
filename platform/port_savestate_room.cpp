@@ -7,6 +7,9 @@
 // a collected pickup or a killed enemy stays gone - and puts the saved state back on the rest.
 
 #include "port_savestate.h"
+#include "port_savestate_block.h"
+#include "port_entity_schema.h"
+#include <cmath>
 
 #include "Kyoto/Math/CTransform4f.hpp"
 #include "Kyoto/Math/CVector3f.hpp"
@@ -23,7 +26,9 @@
 #include "MetroidPrime/CStateManager.hpp"
 #include "MetroidPrime/CWorld.hpp"
 #include "MetroidPrime/Cameras/CCinematicCamera.hpp"
+#include "MetroidPrime/Enemies/CDarkTrooper.hpp"
 #include "MetroidPrime/Enemies/CPatterned.hpp"
+#include "MetroidPrime/Player/CPlayer.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptCamera.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptActorRotate.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptCounter.hpp"
@@ -31,8 +36,10 @@
 #include "MetroidPrime/ScriptObjects/CScriptDock.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptDoor.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptPickup.hpp"
+#include "MetroidPrime/ScriptObjects/CScriptActor.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptPlatform.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptStreamedMusic.hpp"
+#include "MetroidPrime/ScriptObjects/CScriptSwitch.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptTimer.hpp"
 #include "MetroidPrime/TCastTo.hpp"
 
@@ -45,7 +52,20 @@
 // Friend of CScriptTimer, CScriptCounter and CScriptDoor (their TARGET_PC blocks): their state is
 // private.
 struct PortRoomState {
+  // A flotsam Dark Trooper is a corpse by design (AreaLoaded clears mAlive, HP -1): the reload
+  // rebuilds it, so it is not a kill the state should remember.
+  static bool IsFlotsam(const CDarkTrooper& t) { return t.mRagDollHolder.mFlotsam; }
   static CScriptDoor::ELockState DoorLock(const CScriptDoor& d) { return d.mLockState; }
+  // An open request parks the door in WaitingForArea (CScriptDoor::Think) until the area behind it
+  // is loaded, out of ARAM and done occluding; only then does it open (mIsOpen).
+  static bool DoorWaitingForArea(const CScriptDoor& d) {
+    return !d.IsOpen() && d.mDoorState == CScriptDoor::kDS_WaitingForArea;
+  }
+  static void SetDoorUnlocked(CScriptDoor& d, CStateManager& mgr) { d.SetLockState(mgr, CScriptDoor::kLS_Unlocked); }
+  // A scenery actor or platform destroyed before the save already sent its Dead connections (debris,
+  // damage to its neighbours); the rebuilt one has mDead clear and would send them again on its
+  // next Think once the restored hp is <= 0.
+  static void MarkDead(CScriptPlatform& p) { p.mDead = true; }
   static float TimerTime(const CScriptTimer& t) { return t.mTime; }
   static void SetTimer(CScriptTimer& t, float time, bool timing) {
     t.mTime = time;
@@ -115,89 +135,16 @@ enum : uint32_t {
   kTagDock = 12,     // u8 reference count, u8 refs, refs x u8 load-other: a CScriptDock's Dock
   kTagGenerated = 13, // empty: a script generator's copy of a template, made again on load
   kTagMessages = 14,  // u8 n, n x (u32 message, u32 sender editor id): what woke a scripted enemy
+  kTagFields = 15,    // the schema fields of an enemy, pickup or debris (port_savestate_fields.cpp)
+  kTagRng = 16,       // u32 seed of the state manager's CRandom16: room-wide, on the first object
+  kTagPlayer = 17,    // 4 x f32 dark-air clocks of the player (CPlayer::PortGetDarkAir): room-wide, first object
+  kTagDrop = 18,      // u8 live, then the drop's kTagFields bytes: the pickup a debris' Activate dropped
+  kTagSwitch = 19,    // u32 opened: a CScriptSwitch
 };
 
 // Per-object lines a restore logs, at most; the summary line always follows.
 constexpr int kMaxChangeLines = 24;
 constexpr uint32_t kMaxCount = 1u << 20; // sanity bound for decoded counts
-
-struct BlockWriter {
-  std::string bytes;
-  void U8(uint8_t v) { bytes.push_back(static_cast< char >(v)); }
-  void U32(uint32_t v) {
-    for (int i = 0; i < 4; ++i) {
-      bytes.push_back(static_cast< char >(v >> (8 * i)));
-    }
-  }
-  void F32(float f) {
-    uint32_t v;
-    std::memcpy(&v, &f, 4);
-    U32(v);
-  }
-  void Vec(const CVector3f& v) {
-    F32(v.GetX());
-    F32(v.GetY());
-    F32(v.GetZ());
-  }
-  void Bytes(const std::string& s) {
-    U32(static_cast< uint32_t >(s.size()));
-    bytes.append(s);
-  }
-};
-
-struct BlockReader {
-  const std::string& in;
-  size_t at = 0;
-  bool ok = true;
-  explicit BlockReader(const std::string& s) : in(s) {}
-  uint32_t U8() {
-    if (!ok || at + 1 > in.size()) {
-      ok = false;
-      return 0;
-    }
-    return static_cast< uint8_t >(in[at++]);
-  }
-  uint32_t U32() {
-    if (!ok || at + 4 > in.size()) {
-      ok = false;
-      return 0;
-    }
-    uint32_t v = 0;
-    for (int i = 0; i < 4; ++i) {
-      v |= static_cast< uint32_t >(static_cast< uint8_t >(in[at + i])) << (8 * i);
-    }
-    at += 4;
-    return v;
-  }
-  float F32() {
-    const uint32_t v = U32();
-    float f;
-    std::memcpy(&f, &v, 4);
-    return f;
-  }
-  // A finite vector, or false.
-  bool Vec(CVector3f& out) {
-    const float x = F32();
-    const float y = F32();
-    const float z = F32();
-    if (!ok || !(x == x) || !(y == y) || !(z == z) || x > 1e7f || x < -1e7f || y > 1e7f ||
-        y < -1e7f || z > 1e7f || z < -1e7f) {
-      return false;
-    }
-    out = CVector3f(x, y, z);
-    return true;
-  }
-  std::string Bytes() {
-    const uint32_t len = U32();
-    if (!ok || at + len > in.size()) {
-      ok = false;
-      return std::string();
-    }
-    std::string s = in.substr(at, len);
-    at += len;
-    return s;
-  }
-};
 
 const RoomBlock* FindBlock(const RoomObject& obj, uint32_t tag) {
   for (const RoomBlock& b : obj.blocks) {
@@ -310,25 +257,58 @@ bool JournalsScriptMsg(uint32_t msg) {
   }
 }
 
-// A script generator's copy carries its template's editor id. Enemy copies, pickups and debris
-// are saved as copies; others (sound, maze walls) are left to their generators.
+// A script generator's copy carries its template's editor id.
 bool IsGeneratedCopy(const CStateManager& mgr, const CEntity& ent) {
   const Noted* n = FindNoted(mgr, ent.GetUniqueId());
   return n != nullptr && n->generated;
 }
 
+// Whether a generated copy is saved and made again on load. Every actor with an entity schema is
+// (enemies, pickups, debris, swarms: it holds state the template does not), except transient
+// generator output: a sound or an effect starts again with the event that made it, and a
+// generated sound/effect copy saved and rebuilt would play twice.
 bool SavesCopy(CEntity& ent) {
-  return TCastToPtr< CPatterned >(&ent) != nullptr || TCastToPtr< CScriptPickup >(&ent) != nullptr ||
-         TCastToPtr< CScriptDebris >(&ent) != nullptr;
+  if (TCastToPtr< CPatterned >(&ent) != nullptr || TCastToPtr< CScriptPickup >(&ent) != nullptr ||
+      TCastToPtr< CScriptDebris >(&ent) != nullptr) {
+    return true;
+  }
+  const PortSchemaClass* cls = PortEntitySchema::For(ent);
+  if (cls == nullptr || cls->base[0] == '\0' || TCastToPtr< CActor >(&ent) == nullptr) {
+    return false; // no schema of its own (the CEntity fallback) or not an actor
+  }
+  return std::strcmp(cls->name, "CScriptEffect") != 0 && std::strcmp(cls->name, "CScriptSound") != 0;
 }
 
 TUniqueId RawId(uint16_t value) { return TUniqueId(value); }
+
+// The pickup a debris dropped on its Activate (mGeneratedObject), if it is still there. The drop
+// is not a generator's copy: the restored debris drops a fresh one, which takes the saved fields.
+CScriptPickup* DebrisDrop(CStateManager& mgr, const CScriptDebris& debris) {
+  const TUniqueId g = debris.PortGeneratedObject();
+  return g != kInvalidUniqueId ? TCastToPtr< CScriptPickup >(mgr.ObjectById(g)) : nullptr;
+}
+
+// Whether a debris has a generator connection that drops something on Activate.
+bool DropsOnActivate(const CScriptDebris& debris) {
+  const rstl::vector< SConnection >& connections = debris.GetConnectionList();
+  for (int i = 0; i < connections.size(); ++i) {
+    if (connections[i].state == kSS_GeneratorConnection && connections[i].msg == kSM_Activate) {
+      return true;
+    }
+  }
+  return false;
+}
 
 bool IsScripted(const CEntity& ent) { return ent.GetEditorId().value != kInvalidEditorId.value; }
 
 // A dead enemy is gone for the room even while its corpse still runs.
 bool IsGone(CEntity& ent) {
   const CPatterned* patterned = TCastToPtr< CPatterned >(&ent);
+  if (const CDarkTrooper* trooper = dynamic_cast< const CDarkTrooper* >(&ent)) { // REL class: no TCastTo
+    if (PortRoomState::IsFlotsam(*trooper)) {
+      return false;
+    }
+  }
   return patterned != nullptr && !patterned->GetAlive();
 }
 
@@ -340,6 +320,7 @@ void CaptureObject(CStateManager& mgr, CEntity& ent, RoomObject& obj) {
     if (const CHealthInfo* health = actor->HealthInfo()) {
       BlockWriter w;
       w.F32(health->GetHP());
+      w.F32(health->GetKnockBackResistance());
       obj.blocks.push_back({kTagHealth, w.bytes});
     }
   }
@@ -410,6 +391,11 @@ void CaptureObject(CStateManager& mgr, CEntity& ent, RoomObject& obj) {
     w.U32(static_cast< uint32_t >(counter->GetCurrent()));
     obj.blocks.push_back({kTagCounter, w.bytes});
   }
+  if (const CScriptSwitch* sw = TCastToConstPtr< CScriptSwitch >(&ent)) {
+    BlockWriter w;
+    w.U32(sw->IsOpened() ? 1 : 0);
+    obj.blocks.push_back({kTagSwitch, w.bytes});
+  }
   if (CScriptDoor* door = TCastToPtr< CScriptDoor >(&ent)) {
     // Open, then the lock (MP1's door block carries open plus close flags; Echoes' doors have a
     // lock machine instead, and a state written before it was saved has only the first word).
@@ -454,6 +440,26 @@ void CaptureObject(CStateManager& mgr, CEntity& ent, RoomObject& obj) {
       obj.blocks.push_back({kTagCinematic, w.bytes});
     }
   }
+  // A block over the 64 KiB a block holds would drop the whole room's objects.
+  std::string fields;
+  if (CaptureEntityFields(mgr, ent, fields) && fields.size() <= 0xffff) {
+    obj.blocks.push_back({kTagFields, std::move(fields)});
+  }
+  // A debris' dropped pickup: live or not, so a restore keeps or removes the fresh one it makes.
+  if (const CScriptDebris* debris = TCastToPtr< CScriptDebris >(&ent)) {
+    if (DropsOnActivate(*debris)) {
+      BlockWriter w;
+      std::string dropFields;
+      CScriptPickup* drop = DebrisDrop(mgr, *debris);
+      const bool live = drop != nullptr && CaptureEntityFields(mgr, *drop, dropFields, true) &&
+                        dropFields.size() <= 0xf000;
+      w.U8(live ? 1 : 0);
+      if (live) {
+        w.bytes += dropFields;
+      }
+      obj.blocks.push_back({kTagDrop, w.bytes});
+    }
+  }
 }
 
 struct ChangeLog {
@@ -464,6 +470,18 @@ struct ChangeLog {
     }
   }
 };
+
+// The index a generated copy was saved with (0 for a state made before copies carried one: the
+// stable sort then keeps their saved order).
+uint32_t CopyIndex(const RoomObject& obj) {
+  const RoomBlock* b = FindBlock(obj, kTagGenerated);
+  if (b == nullptr || b->data.size() < 4) {
+    return 0;
+  }
+  BlockReader r(b->data);
+  const uint32_t i = r.U32();
+  return r.ok ? i : 0;
+}
 
 // Returns whether a visible part of the object's state (active flag, health, door) differed.
 // `holdTimers`: a running timer is restored stopped and listed in `held` (RoomApplyProgress), to be
@@ -501,8 +519,15 @@ int ReplayScriptMsgs(CStateManager& mgr, CEntity& ent, const RoomObject& obj) {
   return replayed;
 }
 
+// The saved fields of objects whose messages ran: applied once every object has had its own, so
+// no object's Activate (which can reset a helper actor's timers) lands after another's fields.
+struct DeferredFields {
+  TUniqueId uid;
+  const RoomObject* obj;
+};
+
 bool ApplyObject(CStateManager& mgr, CEntity& ent, const RoomObject& obj, ChangeLog& log,
-                 bool holdTimers, std::vector< uint32_t >& held) {
+                 bool holdTimers, std::vector< uint32_t >& held, std::vector< DeferredFields >& later) {
   bool changed = false;
   if (ent.GetActive() != obj.active) {
     // Through the message, as a relay does: an object's own kSM_Activate sets up what its Think
@@ -512,11 +537,17 @@ bool ApplyObject(CStateManager& mgr, CEntity& ent, const RoomObject& obj, Change
     log.Note(obj.editorId, obj.active ? "activated" : "deactivated");
     changed = true;
   }
-  if (const int replayed = ReplayScriptMsgs(mgr, ent, obj)) {
+  const RoomBlock* fieldsBlock = FindBlock(obj, kTagFields);
+  // The fields hold what the messages woke, so a block covering the enemy needs no replay.
+  const bool fieldsCover = fieldsBlock != nullptr && EntityFieldsCover(ent, fieldsBlock->data);
+  if (const int replayed = fieldsCover ? 0 : ReplayScriptMsgs(mgr, ent, obj)) {
     log.Note(obj.editorId, "script messages replayed");
     (void)replayed;
     changed = true;
   }
+  // The messages above are queued; their handlers (an Activate restarts a patterned enemy's
+  // machine) must have run before the saved fields go in, or they overwrite them.
+  mgr.DispatchScriptMessages();
   if (CActor* actor = TCastToPtr< CActor >(&ent)) {
     if (const RoomBlock* b = FindBlock(obj, kTagHealth)) {
       BlockReader r(b->data);
@@ -524,7 +555,21 @@ bool ApplyObject(CStateManager& mgr, CEntity& ent, const RoomObject& obj, Change
       CHealthInfo* health = actor->HealthInfo();
       if (r.ok && hp == hp && health != nullptr && health->GetHP() != hp) {
         health->SetHP(hp);
+        if (hp <= 0.f) {
+          if (CScriptActor* scripted = TCastToPtr< CScriptActor >(actor)) {
+            scripted->SetDead(true);
+          } else if (CScriptPlatform* plat = TCastToPtr< CScriptPlatform >(actor)) {
+            PortRoomState::MarkDead(*plat);
+          }
+        }
         log.Note(obj.editorId, "health restored");
+        changed = true;
+      }
+      // Knockback resistance follows hp; states written before it was saved end after hp.
+      const float resist = r.F32();
+      if (r.ok && resist == resist && health != nullptr && health->GetKnockBackResistance() != resist) {
+        health->SetKnockbackResistance(resist);
+        log.Note(obj.editorId, "knockback resistance restored");
         changed = true;
       }
     }
@@ -535,15 +580,6 @@ bool ApplyObject(CStateManager& mgr, CEntity& ent, const RoomObject& obj, Change
       CTransform4f xf = CTransform4f::Identity();
       if (GetTransform(r, xf)) {
         physics->SetTransform(xf);
-      }
-    }
-    if (const RoomBlock* b = FindBlock(obj, kTagMotion)) {
-      BlockReader r(b->data);
-      CVector3f velocity(0.f, 0.f, 0.f);
-      CVector3f momentum(0.f, 0.f, 0.f);
-      if (r.Vec(velocity) && r.Vec(momentum)) {
-        physics->SetVelocityWR(velocity);
-        physics->SetMomentumWR(momentum);
       }
     }
   }
@@ -620,6 +656,18 @@ bool ApplyObject(CStateManager& mgr, CEntity& ent, const RoomObject& obj, Change
       }
     }
   }
+  if (CScriptSwitch* sw = TCastToPtr< CScriptSwitch >(&ent)) {
+    // The flag a later SetToZero reads: a switch that had closed would otherwise come back open
+    // and fire Open again, re-activating the triggers it had switched off.
+    if (const RoomBlock* b = FindBlock(obj, kTagSwitch)) {
+      BlockReader r(b->data);
+      const bool opened = r.U32() != 0;
+      if (r.ok && opened != sw->IsOpened()) {
+        sw->PortSetOpened(opened);
+        log.Note(obj.editorId, "switch restored");
+      }
+    }
+  }
   if (CScriptDoor* door = TCastToPtr< CScriptDoor >(&ent)) {
     if (const RoomBlock* b = FindBlock(obj, kTagDoor)) {
       BlockReader r(b->data);
@@ -641,7 +689,14 @@ bool ApplyObject(CStateManager& mgr, CEntity& ent, const RoomObject& obj, Change
                                 saved == CScriptDoor::kLS_Locking || saved == CScriptDoor::kLS_Locked;
         const bool isLocked = live == CScriptDoor::kLS_Pending || live == CScriptDoor::kLS_Locking ||
                               live == CScriptDoor::kLS_Locked;
-        if (wantLocked != isLocked) {
+        if (saved == CScriptDoor::kLS_Unlocked && live != CScriptDoor::kLS_Unlocked) {
+          // A rebuilt door starts Locked (AreaLoaded) when its template says so; an unlock
+          // message would only start the 1 s unlocking animation and leave it in Unlocking, so
+          // go straight to the settled state the save had.
+          PortRoomState::SetDoorUnlocked(*door, mgr);
+          log.Note(obj.editorId, "door unlocked");
+          changed = true;
+        } else if (wantLocked != isLocked) {
           mgr.SendScriptMsg(door, kInvalidUniqueId, wantLocked ? kSM_Lock : kSM_Unlock);
           log.Note(obj.editorId, wantLocked ? "door locked" : "door unlocked");
           changed = true;
@@ -711,6 +766,24 @@ bool ApplyObject(CStateManager& mgr, CEntity& ent, const RoomObject& obj, Change
       }
     }
   }
+  if (fieldsBlock != nullptr || FindBlock(obj, kTagDrop) != nullptr) {
+    later.push_back({ent.GetUniqueId(), &obj});
+  }
+  // Velocity and momentum go in last, after every block above: a class's own block can stop the
+  // actor, and a platform's does - PortRoomState::SetPlatform calls CScriptPlatform::SetMotionTime,
+  // which calls Stop() and so zeroed the velocity kTagMotion had just carried in: Agon area 12's
+  // moving platforms read 0,0,0 after a round trip while the save held 0.1-1.5 units/tick.
+  if (CPhysicsActor* physics = TCastToPtr< CPhysicsActor >(&ent)) {
+    if (const RoomBlock* b = FindBlock(obj, kTagMotion)) {
+      BlockReader r(b->data);
+      CVector3f velocity(0.f, 0.f, 0.f);
+      CVector3f momentum(0.f, 0.f, 0.f);
+      if (r.Vec(velocity) && r.Vec(momentum)) {
+        physics->SetVelocityWR(velocity);
+        physics->SetMomentumWR(momentum);
+      }
+    }
+  }
   return changed;
 }
 
@@ -740,7 +813,23 @@ void CaptureRoomState(CStateManager& mgr, RoomState& out) {
       out.areas.push_back(ra);
     }
   }
+  std::map< uint32_t, uint32_t > copyIndex;
+  std::set< uint32_t > drops; // pickups debris dropped: saved on the debris, not as objects
   ForEachObject(mgr, [&](CEntity& ent) {
+    if (const CScriptDebris* debris = TCastToPtr< CScriptDebris >(&ent)) {
+      const TUniqueId g = debris->PortGeneratedObject();
+      if (g != kInvalidUniqueId && DebrisDrop(mgr, *debris) != nullptr && !IsGeneratedCopy(mgr, *mgr.ObjectById(g))) {
+        drops.insert(g.Value());
+      }
+    }
+  });
+  ForEachObject(mgr, [&](CEntity& ent) {
+    if (drops.count(ent.GetUniqueId().Value()) != 0) {
+      return;
+    }
+    // Objects without an editor id (projectiles, effects, owner-spawned children such as the Boost
+    // Guardian's ball) are not recorded: nothing could rebuild them. An owner state that needs its child
+    // re-makes it on re-entry (BoostAttack's Activate), and GetUid's kUidDynamic keeps the live id.
     if (!IsScripted(ent) || areas.count(ent.GetEditorId().AreaNum()) == 0 || IsGone(ent)) {
       return;
     }
@@ -751,10 +840,30 @@ void CaptureRoomState(CStateManager& mgr, RoomState& out) {
     RoomObject obj;
     CaptureObject(mgr, ent, obj);
     if (generated) {
-      obj.blocks.push_back({kTagGenerated, std::string()});
+      // The copy's place among the copies of its template (uid order, as the list runs): a restore
+      // makes them again in any order and gives each the state of its own index.
+      BlockWriter w;
+      w.U32(copyIndex[ent.GetEditorId().Value()]++);
+      obj.blocks.push_back({kTagGenerated, w.bytes});
     }
     out.objects.push_back(std::move(obj));
   });
+  if (!out.objects.empty()) {
+    // The state manager's generator: AI choices (hover heights, step directions, attack gaps) draw
+    // from it, so a restore that left it elsewhere would pick other ones.
+    BlockWriter w;
+    w.U32(static_cast< uint32_t >(mgr.Random()->GetSeed()));
+    out.objects.front().blocks.push_back({kTagRng, w.bytes});
+    if (CPlayer* player = mgr.GetPlayer(0)) {
+      float v[4];
+      player->PortGetDarkAir(v);
+      BlockWriter pw;
+      for (float f : v) {
+        pw.F32(f);
+      }
+      out.objects.front().blocks.push_back({kTagPlayer, pw.bytes});
+    }
+  }
   size_t copies = 0;
   for (const RoomObject& obj : out.objects) {
     copies += FindBlock(obj, kTagGenerated) != nullptr ? 1 : 0;
@@ -762,6 +871,8 @@ void CaptureRoomState(CStateManager& mgr, RoomState& out) {
   std::fprintf(stderr, "[savestate] room: captured %zu objects (%zu generated copies) in %zu areas\n",
                out.objects.size(), copies, out.areas.size());
 }
+
+static bool sSkipUpdate = false;
 
 // The running timers ApplyObject restored stopped, started once the last saved area is in.
 static void StartHeldTimers(CStateManager& mgr, RoomApplyProgress& progress) {
@@ -774,7 +885,17 @@ static void StartHeldTimers(CStateManager& mgr, RoomApplyProgress& progress) {
   progress.held.clear();
 }
 
-int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress& progress) {
+bool ConsumeSkipUpdate() {
+  const bool skip = sSkipUpdate;
+  sSkipUpdate = false;
+  return skip;
+}
+
+// Ticks a restore waits for the doors the save had open to leave WaitingForArea.
+constexpr int kDoorSettleTicks = 120;
+
+int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress& progress,
+                   bool force) {
   const CWorld* world = mgr.World();
   if (world == nullptr) {
     return static_cast< int >(room.areas.size());
@@ -816,7 +937,29 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
   if (waiting == 0) {
     StartHeldTimers(mgr, progress);
   }
-  if (now.empty()) {
+  // One pass for every area, once all are back: an area applied while another still loads would run
+  // on from its saved clocks (platforms, rotations, AI timers) for the whole wait. `force` is the
+  // give-up pass, which restores the areas that did come back.
+  if (now.empty() || (waiting != 0 && !force)) {
+    if (waiting == 0 && !progress.openDoors.empty()) {
+      // Every area is restored; hold the restore open while a door is still opening (bounded).
+      std::vector< uint32_t > still;
+      for (uint32_t uid : progress.openDoors) {
+        const CScriptDoor* door = TCastToConstPtr< CScriptDoor >(mgr.GetObjectById(TUniqueId(uid)));
+        if (door != nullptr && PortRoomState::DoorWaitingForArea(*door)) {
+          still.push_back(uid);
+        }
+      }
+      if (!still.empty() && ++progress.doorTicks <= kDoorSettleTicks) {
+        progress.openDoors = still;
+        return static_cast< int >(still.size());
+      }
+      if (!still.empty()) {
+        std::fprintf(stderr, "[savestate] room: %d doors still waiting for their area after %d ticks\n",
+                     static_cast< int >(still.size()), kDoorSettleTicks);
+      }
+      progress.openDoors.clear();
+    }
     return waiting;
   }
 
@@ -857,6 +1000,14 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
     mgr.DeleteObjectRequest(d.first);
     ++stats.removed;
   }
+  if (!doomed.empty()) {
+    // The ids of what is gone are free again before the copies are made, as they are after an update.
+    mgr.DispatchScriptMessages();
+    mgr.ClearGraveyard();
+  }
+  std::vector< DeferredFields > later;
+  int dropsRestored = 0;
+  int dropsRemoved = 0;
   std::vector< const RoomObject* > copies;
   for (const RoomObject& obj : room.objects) {
     if (now.count(TEditorId(obj.editorId).AreaNum()) == 0) {
@@ -872,7 +1023,7 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
       ++unmatchedLayers[LayerKey(obj.editorId)];
       continue;
     }
-    if (ApplyObject(mgr, *ent, obj, log, waiting > 0, progress.held)) {
+    if (ApplyObject(mgr, *ent, obj, log, waiting > 0, progress.held, later)) {
       ++stats.changed;
     }
     ++stats.applied;
@@ -881,20 +1032,143 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
   // templates in the generated-object buffer, so each is made again the way the generator does
   // and given the copy's saved state (ApplyObject sends the Activate the generator sent).
   int generatedCopies = 0;
+  // Per template: the saved copies in their saved index, made again, then the made ones, in the
+  // object list's order as capture walked it, take the states in that order.
+  std::map< uint32_t, std::vector< const RoomObject* > > byTemplate;
   for (const RoomObject* obj : copies) {
-    const CScriptObjectLoaderHelper::SGeneratedObject made =
-        mgr.ScriptObjectLoaderHelper().GenerateScriptObject(TEditorId(obj->editorId), mgr);
-    CEntity* ent = made.mUniqueId != kInvalidUniqueId ? mgr.ObjectById(made.mUniqueId) : nullptr;
-    if (ent == nullptr) {
-      ++stats.unmatched;
+    byTemplate[obj->editorId].push_back(obj);
+  }
+  std::vector< std::pair< TUniqueId, const RoomObject* > > pairs;
+  for (auto& group : byTemplate) {
+    std::vector< const RoomObject* >& saved = group.second;
+    std::stable_sort(saved.begin(), saved.end(), [](const RoomObject* a, const RoomObject* b) {
+      return CopyIndex(*a) < CopyIndex(*b);
+    });
+    std::vector< TUniqueId > made;
+    for (size_t i = 0; i < saved.size(); ++i) {
+      const CScriptObjectLoaderHelper::SGeneratedObject m =
+          mgr.ScriptObjectLoaderHelper().GenerateScriptObject(TEditorId(group.first), mgr);
+      if (m.mUniqueId != kInvalidUniqueId && mgr.ObjectById(m.mUniqueId) != nullptr) {
+        made.push_back(m.mUniqueId);
+      } else {
+        ++stats.unmatched;
+      }
+    }
+    // Capture numbered the copies in list order; so are the made ones (a uid is a slot index that
+    // can be reused, not the order they were made in).
+    std::set< uint32_t > madeUids;
+    for (const TUniqueId& id : made) {
+      madeUids.insert(id.Value());
+    }
+    made.clear();
+    ForEachObject(mgr, [&](CEntity& e) {
+      if (madeUids.count(e.GetUniqueId().Value()) != 0) {
+        made.push_back(e.GetUniqueId());
+      }
+    });
+    for (size_t i = 0; i < made.size(); ++i) {
+      if (CEntity* ent = mgr.ObjectById(made[i])) {
+        NoteFor(mgr, made[i]).generated = true;
+        // Awake as the generator left it, so the first Think below sets up what the saved fields
+        // are applied to (a patterned enemy's state machine exists only after it).
+        if (saved[i]->active) {
+          mgr.SendScriptMsg(ent, kInvalidUniqueId, kSM_Activate);
+          // A debris drops its pickup on this Activate: two of one template in one dispatch
+          // would be handed the same uid, so each runs alone.
+          if (TCastToPtr< CScriptDebris >(ent) != nullptr) {
+            mgr.DispatchScriptMessages();
+            mgr.ThinkNewObjects(1.f / 60.f);
+          }
+        }
+        pairs.push_back({made[i], saved[i]});
+      }
+    }
+  }
+  if (!pairs.empty()) {
+    mgr.DispatchScriptMessages();
+    // The copies' first Think, one frame long (the fields then overwrite what it moved).
+    mgr.ThinkNewObjects(1.f / 60.f);
+    for (const auto& pr : pairs) {
+      CEntity* ent = mgr.ObjectById(pr.first);
+      if (ent == nullptr) {
+        ++stats.unmatched;
+        continue;
+      }
+      const RoomObject* obj = pr.second;
+      if (ApplyObject(mgr, *ent, *obj, log, waiting > 0, progress.held, later)) {
+        ++stats.changed;
+      }
+      ++stats.applied;
+      ++generatedCopies;
+    }
+  }
+  // Every object's own messages have run: the saved fields go in.
+  mgr.DispatchScriptMessages();
+  // Doors the save had open that the Open message left waiting for their area: the caller keeps
+  // ticking until the door's own Think opens them (retail path), so the restored room shows them open.
+  for (const RoomObject& obj : room.objects) {
+    if (now.count(TEditorId(obj.editorId).AreaNum()) == 0) {
       continue;
     }
-    NoteFor(mgr, made.mUniqueId).generated = true;
-    if (ApplyObject(mgr, *ent, *obj, log, waiting > 0, progress.held)) {
-      ++stats.changed;
+    const RoomBlock* b = FindBlock(obj, kTagDoor);
+    if (b == nullptr) {
+      continue;
     }
-    ++stats.applied;
-    ++generatedCopies;
+    BlockReader r(b->data);
+    const bool open = r.U32() != 0;
+    CScriptDoor* door =
+        TCastToPtr< CScriptDoor >(mgr.ObjectById(mgr.GetIdForScript(TEditorId(obj.editorId))));
+    if (r.ok && open && door != nullptr && PortRoomState::DoorWaitingForArea(*door)) {
+      progress.openDoors.push_back(door->GetUniqueId().Value());
+    }
+  }
+  for (const DeferredFields& d : later) {
+    CEntity* ent = mgr.ObjectById(d.uid);
+    if (ent == nullptr) {
+      continue;
+    }
+    // The saved fields carry the debris' drop link as a uid of the saved world; the drop its
+    // Activate made now is the one that counts.
+    CScriptDebris* debris = TCastToPtr< CScriptDebris >(ent);
+    const TUniqueId liveDrop = debris != nullptr ? debris->PortGeneratedObject() : kInvalidUniqueId;
+    if (const RoomBlock* fieldsBlock = FindBlock(*d.obj, kTagFields)) {
+      if (const int set = ApplyEntityFields(mgr, *ent, fieldsBlock->data)) {
+        stats.fields += set;
+        log.Note(d.obj->editorId, "fields restored");
+        ++stats.changed;
+      }
+    }
+    if (debris != nullptr && FindBlock(*d.obj, kTagDrop) != nullptr) {
+      debris->PortSetGeneratedObject(liveDrop);
+    }
+    // The pickup this debris dropped again on its Activate takes the saved drop's fields, or goes
+    // when the save had none (collected or expired before it).
+    const RoomBlock* dropBlock = FindBlock(*d.obj, kTagDrop);
+    if (dropBlock != nullptr && debris != nullptr && mgr.ObjectById(d.uid) == ent) {
+      CScriptPickup* drop = DebrisDrop(mgr, *debris);
+      if (drop != nullptr) {
+        if (!dropBlock->data.empty() && dropBlock->data[0] != 0) {
+          const int set = ApplyEntityFields(mgr, *drop, dropBlock->data.substr(1));
+          if (set) {
+            stats.fields += set;
+            log.Note(d.obj->editorId, "dropped pickup fields restored");
+            drop->SetTranslation(debris->GetTranslation());
+            ++dropsRestored;
+            ++stats.changed;
+          }
+        } else {
+          mgr.DeleteObjectRequest(drop->GetUniqueId());
+          debris->PortClearGeneratedObject();
+          log.Note(d.obj->editorId, "dropped pickup removed (none in the state)");
+          ++dropsRemoved;
+          ++stats.changed;
+        }
+      }
+    }
+  }
+  if (dropsRestored != 0 || dropsRemoved != 0) {
+    std::fprintf(stderr, "[savestate] room: debris drops: %d restored, %d removed\n", dropsRestored,
+                 dropsRemoved);
   }
   if (generatedCopies != 0) {
     std::fprintf(stderr, "[savestate] room: %d generated copies made again\n", generatedCopies);
@@ -914,6 +1188,34 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
                  "object)\n",
                  l.first >> 8, l.first & 0xff, l.second);
   }
+  for (const RoomObject& obj : room.objects) {
+    if (const RoomBlock* b = FindBlock(obj, kTagRng)) {
+      BlockReader r(b->data);
+      const uint32_t seed = r.U32();
+      if (r.ok) {
+        mgr.Random()->SetSeed(seed);
+      }
+      break;
+    }
+  }
+  for (const RoomObject& obj : room.objects) {
+    if (const RoomBlock* b = FindBlock(obj, kTagPlayer)) {
+      BlockReader r(b->data);
+      float v[4];
+      for (float& f : v) {
+        f = r.F32();
+      }
+      CPlayer* player = mgr.GetPlayer(0);
+      if (r.ok && player != nullptr && std::isfinite(v[0]) && std::isfinite(v[1]) &&
+          std::isfinite(v[2]) && std::isfinite(v[3])) {
+        player->PortSetDarkAir(v);
+      }
+      break;
+    }
+  }
+  // The rest of this update would run the restored room one step on (timers, AI clocks, random
+  // picks): the hook in CStateManager::Update drops it, so the room is exactly as saved.
+  sSkipUpdate = true;
   for (int area : now) {
     progress.done.push_back(area);
     std::fprintf(stderr, "[savestate] room: area %d restored\n", area);
@@ -921,7 +1223,7 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
   if (waiting == 0) {
     StartHeldTimers(mgr, progress);
   }
-  return waiting;
+  return waiting != 0 ? waiting : static_cast< int >(progress.openDoors.size());
 }
 
 namespace {
@@ -930,6 +1232,7 @@ struct SpawnOverride {
   uint32_t world = 0;
   int area = 0;
   uint64_t spawn = 0;
+  uint64_t saved = 0; // layers the state has an object of
   uint64_t live = 0;
   uint64_t applied = 0;
   bool swapped = false;
@@ -968,13 +1271,27 @@ void NoteAreaSpawnBegin(CWorldLayerState& layers, int area) {
       // state from a fresh game) would spawn its objects again, and the restore activates those the
       // saved room had that the stream lacked (TickRoom) anyway. What goes is the layers the live
       // stream switched on after the saved room was built.
-      o.applied = o.spawn & o.live;
+      // A spawn layer the stream has off but the state still has objects of (a layer the room
+      // switched off after it ran, such as a boss intro) is rebuilt too, or those objects are gone.
+      o.applied = (o.spawn & o.live) | (o.spawn & o.saved);
       SetLayerMask(layers, area, o.applied);
       o.swapped = true;
       o.layers = &layers;
       return;
     }
   }
+}
+
+bool LayerHeld(int area, int layer) {
+  // Until the restore ends the rebuilt room's scripts run on their own (a boss intro's timer
+  // unloads its cinematic layer within a few frames), and an unloaded layer takes the saved
+  // objects with it before they are applied.
+  for (const SpawnOverride& o : sOverrides) {
+    if (o.area == area && o.swapped && layer >= 0 && layer < 64 && ((o.saved >> layer) & 1) != 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void NoteAreaSpawnEnd(CWorldLayerState& layers, int area) {
@@ -996,7 +1313,15 @@ void ArmSpawnLayers(const RoomState& room, uint32_t worldId) {
   sOverrides.clear();
   for (const RoomArea& ra : room.areas) {
     if (ra.hasSpawn) {
-      sOverrides.push_back({worldId, ra.area, ra.spawnLayers, 0, 0, false, nullptr});
+      uint64_t saved = 0;
+      for (const RoomObject& obj : room.objects) {
+        const uint32_t layer = TEditorId(obj.editorId).LayerNum();
+        if (TEditorId(obj.editorId).AreaNum() == ra.area && layer < 64 &&
+            FindBlock(obj, kTagGenerated) == nullptr) {
+          saved |= uint64_t(1) << layer;
+        }
+      }
+      sOverrides.push_back({worldId, ra.area, ra.spawnLayers, saved, 0, 0, false, nullptr});
     }
   }
 }
@@ -1034,6 +1359,63 @@ void NoteScriptMsg(CStateManager& mgr, uint16_t dest, uint16_t sender, uint32_t 
       (journal.empty() || journal.back().msg != e.msg || journal.back().sender != e.sender)) {
     journal.push_back(e);
   }
+}
+
+// Read-only views of what the room save keeps, for the statedump console command
+// (platform/port_statedump.cpp, tools/statecheck.py): the same members CaptureObject writes, as
+// JSON members (each starting with a comma) rather than as a block.
+bool IsScriptGeneratedCopy(const CStateManager& mgr, CEntity& ent) { return IsGeneratedCopy(mgr, ent); }
+
+std::string RoomStateJson(CStateManager& mgr, CEntity& ent) {
+  std::string out;
+  char buf[160];
+  auto add = [&](const char* fmt, auto... args) {
+    std::snprintf(buf, sizeof(buf), fmt, args...);
+    out += buf;
+  };
+  if (CScriptTimer* timer = TCastToPtr< CScriptTimer >(&ent)) {
+    add(",\"timer\":%.4f,\"timing\":%d", PortRoomState::TimerTime(*timer), timer->IsTiming() ? 1 : 0);
+  }
+  if (CScriptCounter* counter = TCastToPtr< CScriptCounter >(&ent)) {
+    add(",\"counter\":%d", counter->GetCurrent());
+  }
+  if (CScriptDoor* door = TCastToPtr< CScriptDoor >(&ent)) {
+    add(",\"door_open\":%d,\"door_lock\":%d", door->IsOpen() ? 1 : 0,
+        static_cast< int >(PortRoomState::DoorLock(*door)));
+  }
+  if (CScriptPlatform* plat = TCastToPtr< CScriptPlatform >(&ent)) {
+    add(",\"plat_time\":%.4f,\"plat_delay\":%.4f,\"plat_flags\":%u", PortRoomState::PlatMotionTime(*plat),
+        PortRoomState::PlatMoveDelay(*plat), PortRoomState::PlatFlags(*plat));
+  }
+  if (CScriptActorRotate* rot = TCastToPtr< CScriptActorRotate >(&ent)) {
+    add(",\"rot_time\":%.4f,\"rot_playing\":%d,\"rot_actors\":%d", PortRoomState::RotTime(*rot),
+        PortRoomState::RotPlaying(*rot) ? 1 : 0, static_cast< int >(PortRoomState::RotActors(*rot).size()));
+  }
+  if (CScriptDock* dock = TCastToPtr< CScriptDock >(&ent)) {
+    const CWorld* world = mgr.GetWorld();
+    const int area = dock->GetAreaId().Value();
+    if (area >= 0 && area < world->GetNumAreas() &&
+        dock->GetDockId() < world->GetAreaAlways(TAreaId(area)).GetDockCount()) {
+      const IGameArea::Dock& d = world->GetAreaAlways(TAreaId(area)).GetDock(dock->GetDockId());
+      add(",\"dock_refs\":%d", static_cast< int >(d.GetReferenceCount()));
+      out += ",\"dock_load\":\"";
+      for (int i = 0; i < static_cast< int >(d.GetDockRefs().size()); ++i) {
+        out += d.GetShouldLoadOther(i) ? '1' : '0';
+      }
+      out += '"';
+    }
+  }
+  if (const CScriptStreamedMusic* music = TCastToConstPtr< CScriptStreamedMusic >(&ent)) {
+    add(",\"music\":%d", music->PortPlaying() ? 1 : 0);
+  }
+  if (TCastToPtr< CScriptCamera >(&ent) != nullptr) {
+    const CCameraManager* cameras = mgr.CameraManager(0);
+    const CCinematicCamera* cine = cameras != nullptr ? cameras->GetCinematicCamera() : nullptr;
+    if (cine != nullptr && cameras->IsInCinematicCamera() && cine->GetScriptCameraId() == ent.GetUniqueId()) {
+      add(",\"cine\":%.4f", cine->PortElapsed());
+    }
+  }
+  return out;
 }
 
 } // namespace PortSaveState

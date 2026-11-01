@@ -96,10 +96,12 @@ Branches: `OpenXR` holds the VR work; `master` tracks upstream's `port` branch.
 - Aurora (`extern/aurora`), MusyX (`extern/musyx-port`) and the other third-party components keep
   their own licences; release packages carry them in `licenses/`.
 
-`LICENSE` (MIT) covers this project's own work: the platform layer, the VR layer (`platform/vr`,
+`LICENSE` restores the original PrimeDecomp CC0 dedication, unchanged. The native port's MIT licence is preserved in
+[`packaging/licenses/native-port-MIT.txt`](packaging/licenses/native-port-MIT.txt)
+and covers this project's own work: the platform layer, the VR layer (`platform/vr`,
 the stereo renderer files in `extern/aurora`, the launchers), the build and packaging scripts. It
 does **not** cover the game code under `src/` and `include/`, which comes from the decompilation and
-remains Nintendo's. See `NOTICE` for the exact scope and the third-party terms. `LICENSE-decomp` is
+remains Nintendo's. See `NOTICE` for the exact scope and the third-party terms. `LICENSE` is
 upstream PrimeDecomp's dedication, kept as it was.
 
 Metroid Prime 2: Echoes is a trademark of Nintendo. This project is unaffiliated with Nintendo and

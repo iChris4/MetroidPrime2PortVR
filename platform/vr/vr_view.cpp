@@ -348,6 +348,12 @@ void VrBeginBallCamera(const CTransform4f& firstPersonXf) noexcept {
 
 CVector3f VrBallCameraEntryDirection() noexcept { return s_ballEntryDirection; }
 
+CTransform4f VrBallCameraEntryTransform(const CTransform4f& camera) noexcept {
+    if (!ImmersiveNow() || !s_ballEntryDirection.CanBeNormalized()) return camera;
+    return CTransform4f::LookAt(camera.GetTranslation(), camera.GetTranslation() + s_ballEntryDirection,
+                               CVector3f::Up());
+}
+
 CTransform4f VrBallCameraBaseTransform(const CTransform4f& camera, float weight) noexcept {
     if (!ImmersiveNow()) {
         return camera;

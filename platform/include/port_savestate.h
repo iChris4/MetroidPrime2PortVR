@@ -4,7 +4,13 @@
 #include <string>
 #include <vector>
 
+struct PortSchemaClass;
+struct PortSchemaField;
+class CEntity;
+class CStateManager;
+
 class CGameArea;
+class CEntity;
 class CStateManager;
 class CWorldLayerState;
 
@@ -47,11 +53,16 @@ Info SlotInfo(int slot);
 int SelectedSlot();          // 1..kSlotCount, the slot F5/F9 act on
 void SetSelectedSlot(int slot);
 void SelectNextSlot();
+void SelectPrevSlot();
 
 // Queue a save or load of `slot` (0..kSlotCount); the game thread runs it on its next Tick.
-// A load of the undo slot does not overwrite the undo slot first.
-void RequestSave(int slot);
-void RequestLoad(int slot);
+// A load of the undo slot does not overwrite the undo slot first. `toast` also shows the result
+// on screen (the F5/F9 hotkeys).
+void RequestSave(int slot, bool toast = false);
+void RequestLoad(int slot, bool toast = false);
+// The next load holds the simulation (PortOverlay::SetTickHold) on the tick its room state is
+// restored, so a harness can read the world exactly as restored (tools/statecheck.py).
+void HoldAfterLoad();
 
 // Reload the mods folder and rebuild the room: the current state is written to the undo slot and
 // loaded back, and between the old world and the new one every PAK is closed and opened again over
@@ -62,6 +73,10 @@ void RequestModReload();
 // she stands (the overlay's Reload): the current state, without its room objects, loaded back.
 void RequestRoomReload();
 bool ModReloadActive();
+// A state load is waiting for the rebuilt world: a cinematic that world starts (the opening one, for a
+// state saved after skipping it in a fresh game) is skipped like START does, as the state was
+// captured with it over. Without it the placement waits on the cinematic until its timeout.
+bool LoadAwaitsCinematic();
 bool ReloadModsNow();
 // The pause menu's share: the pause screen holds the suit model, no room is running and Tick does not
 // run, so the request cannot take the world-restart route. Returns true once, on the frame it reopened
@@ -162,6 +177,7 @@ struct RoomApplyStats {
   int unmatched = 0; // saved objects not in the rebuilt area
   int otherLayer = 0; // live objects of a layer the state has none of, left alone
   int skipped = 0;   // areas left alone: another area asset at the index
+  int fields = 0;    // schema fields restored (kTagFields)
 };
 
 // A restore in progress: areas already applied, and areas seen loaded on an earlier tick (an
@@ -170,6 +186,8 @@ struct RoomApplyProgress {
   std::vector< int32_t > done;
   std::vector< int32_t > seen;
   std::vector< uint32_t > held; // running timers restored stopped, started with the last area
+  std::vector< uint32_t > openDoors; // doors the save had open, still waiting for their area to open
+  int doorTicks = 0;
   RoomApplyStats stats;
 };
 
@@ -182,9 +200,28 @@ void NoteRemoved(CStateManager& mgr, uint16_t uid);
 void NoteScriptMsg(CStateManager& mgr, uint16_t dest, uint16_t sender, uint32_t msg);
 
 void CaptureRoomState(CStateManager& mgr, RoomState& out);
-// Applies the saved areas that are ready now and not yet done; returns how many saved areas are
-// still waiting to load.
-int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress& progress);
+// True once after a room restore applied its areas: CStateManager::Update then ends before the
+// world update, so the restored room does not run a step before anyone sees it.
+bool ConsumeSkipUpdate();
+// Debug views (port_statedump.cpp): a script generator's copy; the room-saved state of a timer,
+// counter, door, platform, rotator, dock, music or cinematic camera as JSON members.
+bool IsScriptGeneratedCopy(const CStateManager& mgr, CEntity& ent);
+// Entity fields (port_savestate_fields.cpp): for statedump, whether `ent` gets a kTagFields block,
+// and whether the block keeps a schema field.
+bool EntityFieldsSaved(const CStateManager& mgr, CEntity& ent);
+bool SchemaFieldSaved(const PortSchemaClass& cls, const PortSchemaField& f);
+// Captures `ent`'s schema fields into a kTagFields block (false: not an entity that gets one);
+// applies one, returning the fields set; whether it covers every class of `ent` (the script
+// messages that woke the enemy need no replay then).
+// `any` skips the which-entities gate (a debris' dropped pickup).
+bool CaptureEntityFields(const CStateManager& mgr, CEntity& ent, std::string& out, bool any = false);
+int ApplyEntityFields(CStateManager& mgr, CEntity& ent, const std::string& data);
+bool EntityFieldsCover(CEntity& ent, const std::string& data);
+std::string RoomStateJson(CStateManager& mgr, CEntity& ent);
+// Applies the saved areas once all of them are ready (or, with `force`, those that are ready now);
+// returns how many saved areas are still waiting to load.
+int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress& progress,
+                   bool force = false);
 
 // Spawn layers, game thread. CGameArea::VerifyTokenList calls NoteAreaSpawn{Begin,End} around
 // listing the layers an area spawns: Begin swaps in the recorded bits of an armed area, End puts
@@ -194,6 +231,8 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
 // whatever is still armed.
 void NoteAreaSpawnBegin(CWorldLayerState& layers, int area);
 void NoteAreaSpawnEnd(CWorldLayerState& layers, int area);
+// True while a room restore is pending and the saved room has objects of this layer: its unload waits.
+bool LayerHeld(int area, int layer);
 void ArmSpawnLayers(const RoomState& room, uint32_t worldId);
 void DisarmSpawnLayers();
 // CStateManager::AreaLoaded: true while a pending room restore is going to apply this area, whose

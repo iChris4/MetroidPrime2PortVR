@@ -400,6 +400,11 @@ CHECK_SIZEOF(CBCCoverCmd, 0x24)
 
 class CBCWallHangCmd : public CBodyStateCmd {
 public:
+#ifdef TARGET_PC
+  // Port save state: mWpId is the one body command id, so it is saved by identity, not as a slot
+  // number (platform/port_savestate_fields.cpp, PortStateCodec::PutBody).
+  friend struct PortStateCodec;
+#endif
   explicit CBCWallHangCmd(TUniqueId uid) : CBodyStateCmd(kBSC_WallHang), mWpId(uid) {}
 
   TUniqueId GetTarget() const { return mWpId; }
@@ -508,6 +513,9 @@ private:
 CHECK_SIZEOF(CBCLocomotionCmd, 0x1c)
 
 class CBodyStateCmdMgr {
+#ifdef TARGET_PC
+  friend struct PortStateCodec; // port save state (port_savestate_fields.cpp)
+#endif
 public:
   CBodyStateCmdMgr();
   ~CBodyStateCmdMgr();

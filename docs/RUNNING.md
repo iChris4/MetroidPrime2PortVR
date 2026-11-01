@@ -1,13 +1,15 @@
 # Running the port (desktop)
 
 Moved out of AGENTS.md to keep the per-turn prompt small. `T` is the toolchain dir from AGENTS.md
-Commands; all runs need `Xvfb :86 -screen 0 1280x720x24 -ac` (check with `pgrep -x Xvfb` + `xdpyinfo`).
+Commands; the run scripts below start their own `Xvfb` (default `:86`, `-screen 0 1280x720x24 -ac`),
+so a hand-started one (`pgrep -x Xvfb` + `xdpyinfo` to check) is only for a bare binary, as in the
+`gdb` boot below.
 
 ## Boot under gdb (from build-port-link)
 
     DISPLAY=:86 SDL_VIDEODRIVER=x11 MESA_VK_WSI_DEBUG=sw SDL_AUDIODRIVER=dummy \
       MP2_DISC="/run/media/odran/Leo/Portable/roms/gc/Metroid Prime 2 - Echoes.iso" \
-      MP2_USER_PATH=/tmp/mp2u MP2_CACHE_PATH=/tmp/mp2c MP_PORT_FRAMES=300 \
+      MP2_USER_PATH=/tmp/mp2u MP2_CACHE_PATH=/tmp/mp2c \
       timeout -k 5 120 gdb -q -batch -ex run -ex bt ./metroid_prime2_port > /tmp/mp2boot.log 2>&1
     grep -n 'reach-stub\|signal\|^#[0-9]\|exited\|ssert\|fatal' /tmp/mp2boot.log
 
@@ -86,7 +88,7 @@ at once (the machine is back where it was) says `entered and left at once; now X
 whose machine was never set up (it was not created yet) says `the actor has no state machine state
 (is it active?)`), `place`,
 `send`, `damage` (direct, no projectile; also the combos `darkburst`/`sunburst`/`sonicboom` and
-`powerbomb`, which knockback rule sets tell apart) and `shoot <id> [charged] [d] [dir x y z]` (a real beam projectile
+`powerbomb`, which knockback rule sets tell apart) and `shoot <id> [charged|missile] [d] [dir x y z]` (a real beam projectile
 from d units, travelling along dir, for modules that only count projectile hits on a joint; `missile`
 instead of `charged` fires a real player missile through the launcher's own path
 (`CPlayerGun::FireSecondary`: weapon type kWT_Missile, the missile's damage, aimed at the actor the
@@ -137,6 +139,16 @@ guardian's crystals need), `gren.crystal` (crystal state; 4 = ForceGrapple), `gr
 `gren.grappledmg`, `gren.tailhp`, `gren.action` (read-only attack state), `gren.tail` (1 runs DestroyTail).
 The guardian grapple chain: `var <id> gren.scanned 1; var <id> gren.crystal 4; fsm <id> Pursue`
 (`tools/cov/specs/grenchler_grapple*.con`).
+Quadraxis knees: `var <CDigitalGuardian> dg.kneecol0..3` reads the knee collider uids (u0580..u0583 in
+Sanctuary 09_cliff_temple_dark), `dg.killknee0..3 1` sets that collider's HP to 0 and gives the body its
+XDMG (fn_14_5838/5470): the boss-bar counter (e0035005f) drops 9 -> 8, IS07 runs and the FSM goes to
+KneeDestroyedReaction. `damage` on the colliders cannot (they forward hits and lose no HP); boot
+`1baa96c2,09_cliff_temple_dark`, then `layer 3`, `layer 11`, `send e00350060 Activate`, `send e0035000f Activate`.
+Engaged CPuffer (Torvus 07_swamp_shaft): there is none. Retail's Puffer has no aggro: its FSM is
+Start/Patrol/Dead with no triggers, so `fsm PathFind` returns to Patrol (CPatterned::PathFind needs a
+search path). The states it has: roaming Patrol, and `send e002801f0 Action` (dies and is deleted).
+Statecheck of a dead Puffer (Torvus 07_swamp_shaft, boot `3dfd2249,07_swamp_shaft`): `statecheck.py --setup 'send e002801f0 Action; objs CPuffer'`
+(`;` chains work in one --setup); the area's generators respawn it, 0 strict over 2 runs.
 `gameevent <score|kill|generic|scan|damage|stop|spawn> [src] [tgt] [value] [as <proxyType>]` delivers a
 multiplayer game event (CGMMultiplayer::NotifyListeners) to every CScriptPlayerProxy listener whose mask
 holds tgt (0), which CGMSinglePlayer never registers: CListener::OnGameEvent -> OnGameEvent, and through it
@@ -174,6 +186,24 @@ the Activate that wakes it: `spawn COIN 3 inactive model u<actor> prop 54a8c481 
 then `send e<area>ff00 Activate`.
 Ids may be `e<editor id>` (unique ids are reused across layer loads); `covdump` writes a coverage build's gcov counters mid-run (runs that hang in shutdown keep them).
 
+## Save-state round-trip check
+
+`tools/statecheck.py --userdir <dir with the card> --area 5 --area 12 [--headless] [--post-wait N]`
+starts `run_gameplay.sh` with a console, and per room (first area = TELEPORT, later ones `warp`)
+does: `hold 1`, `statedump A`, `state save`, `step 1`, `statedump A1` (natural one-tick drift),
+`state load N hold` + `hold 0` (a load only advances while the game runs; `hold` makes the game hold
+itself on the tick `[savestate] room state restored` shows, so nothing runs past it), `statedump B`. A diff A→B is STRICT only if B also differs
+from A1 (so tick drift is filtered); the rest are warnings. `--post-wait N` also steps N ticks and
+dumps C. Dumps land in `--out` (`<n>-area_<a>-A.jsonl`); `--detail`/`--all` list more. An empty
+card runs as a new game (`MP2_NEW_GAME=1`). Use a copy of the card: the run saves slot 8 and loads it.
+`--world <id|MLVL name part>` direct-boots that world (`WORLD=<world>,<first area>`); the areas are then
+MLVL names (`--world 42b935e4 --area 06_sand_alamofront --area 0b_sand_hall`), never a slot for the first.
+The player is held safe by default: every room runs `god 1` and `nodarkair 1` before its `--setup`
+commands (then `--wait` unheld ticks to let the room settle), so an enemy hit or a dark-aether drain
+is not a strict player hp diff; `--unsafe-player` leaves the player as the room found it.
+What a save keeps of each enemy (the `kTagFields` block) is in `docs/SAVESTATE_SCHEMA.md`;
+`MP_SAVESTATE_FIELDS=0` turns that block off, to tell its diffs from the rest.
+
 ## Driving pads 1-3 (multiplayer)
 
 `MP2_INPUT` entries take a pad prefix: `p1.A@300`, `P2:START@320+4` (`p0.`-`p3.`, `.` or `:`); no
@@ -192,9 +222,11 @@ Without `WORLD` the sweep walks the save's world (Temple Grounds, 63 slots) by `
 `WORLD=<id|agon|torvus|sanctuary|great temple|temple grounds|MLVL name part|all>` sweeps that world:
 `tools/world_areas.py` reads its slot list from the disc (`--list` shows every MLVL), `COUNT`
 defaults to its slot count and each shard boots with `MP2_WORLD="<world>,<first slot's MREA>"`.
-`AREAS=<first>:<count> SHARD=0` re-runs one slice. Temple Grounds' ending (slots 47/50/53/56/58)
-rolls the credits and ends a shard, so slots 48, 49, 54, 55, 57, 59-62 need their own `AREAS=`
-runs, and 58 (`game_end_part5`) stops on its save prompt.
+`AREAS=<first>:<count> SHARD=0` re-runs one slice. Temple Grounds' ending starts at slot 53
+(`game_end_part3`): the game hands over to 56 (`game_end_part4`, the only area with the credits
+script) and the credits end a shard, so 54, 55 and 57-62 need their own `AREAS=` runs
+(`54:2`, `57:1`, `59:4`). `COUNT=53` sweeps slots 0-52, everything before the ending. Slots 47 and 50
+(`game_end_part1/2`) are ordinary walks, no credits; 58 (`game_end_part5`) stops on its save prompt.
 
 Parallel software-Vulkan shards can lose the device; confirm verdicts with lone runs.
 
@@ -235,46 +267,44 @@ console scripts in `tools/smoke/cmd_*.txt`; `--list` prints the family table. Re
 reach-stub, stand-in and gameplay seconds per family, failing when a family regressed.
 The generic console.py families run in fast mode by default (`MP2_FRAME_LIMIT=0 MP2_TICKS_PER_FRAME=8`,
 ~2-3 s each instead of ~45 s); ing, ep and darksamus (wall-clock drivers) stay capped and bound the
-batch (~4.6 min, ing ~266 s), and so do the `NC` families (emp1, ingswarm, darktrooper, bacteriaswarm,
-tryclops, wisptentacle, octapede, amt, spa, wallwalker, isbg, spor, scriptgui, kral, pssm, stod,
-pbug, szone, rptl, chog, drkc, plac, plct, ming, snak, eyeb, kroc, atma, atmb, shrd, fsw, iss, ibs, mree, puff, rubk, cball, fobj, skyr, isg and spp): their areas
-boot so quickly that 2400 unpaced updates end in 0.3 s, before console.py's 0.5 s retry gets a console
-connection, so nothing would be driven (~40-50 s each capped, ~95 s for isbg's 5700, ~110 s for
-wisptentacle's 6200, spor's 2000 updates leave only ~100 ms of uncapped run after the connect and
-kral's 1300 are over (0.3 s) before it, while scriptgui's front end reads a widget's state
-differently at the two update rates, and pbug's PillBug fsm reads differ the same way (FastPatrol
-vs Turn)).
+batch (~4.6 min, ing ~266 s), and so do the 16 `NC` families in `run.sh`'s `declare -A NC` table
+(darktrooper, bacteriaswarm, tryclops, octapede, spa, wallwalker, spor, scriptgui, pssm, pbug, chog,
+plac, atmb, shrd, fsw and rubk): their fast and capped transcripts differ, so they stay capped (~40-50
+s each) - fsm state/timing (darktrooper, tryclops, pbug), object count or ids (bacteriaswarm 3 vs 1,
+octapede 5 vs 6, pssm's 23 vs 17 boids, fsw 6 vs 2, rubk, plac's hp checks), a layer the fast stream
+does not load (spa's layer 10, atmb's layer 0, wallwalker's trailing layer 3), spor's run too short,
+scriptgui's Gui widget active vs inactive (its state follows the update rate), and chog's hp/fsm and
+shrd's kill behaviour.
+`MP2_CONSOLE_WAIT=120` (`tools/smoke/fam.sh`) holds the boot until console.py connects, which retired
+the 25 thin-margin families that had been capped only because their unpaced updates ended before the
+connect (emp1, ingswarm, amt, wisptentacle, isbg, kral, stod, szone, rptl, drkc, plct, spp, ming,
+snak, eyeb, kroc, iss, ibs, puff, cball, fobj, skyr, isg, atma, mree); they run fast now.
 `--capped` or `SMOKE_FAST=0` runs everything capped.
-Forty of the families keep a checked module's actors loading: grenchler (Torvus
-Thirty-one of the families keep a checked module's actors loading: grenchler (Torvus
-01_swamp_entrance), grenguard (the Grapple Guardian's 08_swamp_grappleguardian_dark), flyingpirate
-(Agon 02_sand_sandfalls), mediuming (area 46), metroid (Agon 08_sand_casualpirates), sporb (Torvus
-0e_swamp_hall), blogg (Torvus 07_swamp_shaft), swarm (Agon 01_sand_entrance), gunturret (Agon
-0i_sand_hall), rezbit (Sanctuary 02_cliff_reactorcore), parasite (Agon 02_sand_sandfalls layer 9),
-lumite (Agon 0a_sand_hall), shrieker (Torvus 02_swamp_greatbridge), ingswarm (Temple Grounds
-10_temple_pathofeyes), darktrooper (Temple Grounds 04_temple_unknownenemies), bacteriaswarm
-(Temple Grounds 04_temple_unknownenemies_dark), tryclops (Sanctuary Fortress 0f_cliff_hall),
-wisptentacle (Temple Grounds 0t_temple_hall_dark), octapede (Sanctuary Fortress 0p_cliff_hall),
-amt (Agon 06_sand_alamofront), dbar (Agon 08_sand_casualpirates, whose fifteen barriers no area
-places: the family spawns them), sjguard (Agon 02_sand_sandfalls_dark), fishcloud (Temple Grounds
-06_temple_sacredpath), spa (Agon 03_sand_temple_dark), wallwalker (Sanctuary Fortress
-09_cliff_temple layer 3), isbg (Sanctuary Fortress 06_cliff_spiderballguardian layer 13), spp
-(Temple Grounds dark 01_temple_landingsite_dark), mysf (Temple Grounds 0e_temple_hall), spor (Torvus
-dark 0d_swamp_hall_dark), scriptgui (the FrontEnd world 69802220, which is the one family that needs
-the front end and so sets `SKIP_FRONTEND=0` in `run.sh`'s per-family environment table), kral (Temple
+Forty-six of the 80 families in `run.sh`'s table keep a checked module's actors loading: grenchler
+(Torvus 01_swamp_entrance), grenguard (the Grapple Guardian's 08_swamp_grappleguardian_dark),
+flyingpirate (Agon 02_sand_sandfalls), mediuming (area 46), metroid (Agon 08_sand_casualpirates),
+sporb (Torvus 0e_swamp_hall), blogg (Torvus 07_swamp_shaft), swarm (Agon 01_sand_entrance), gunturret
+(Agon 0i_sand_hall), rezbit (Sanctuary 02_cliff_reactorcore), parasite (Agon 02_sand_sandfalls layer
+9), lumite (Agon 0a_sand_hall), shrieker (Torvus 02_swamp_greatbridge), ingswarm (Temple Grounds
+10_temple_pathofeyes), darktrooper (Temple Grounds 04_temple_unknownenemies), bacteriaswarm (Temple
+Grounds 04_temple_unknownenemies_dark), tryclops (Sanctuary Fortress 0f_cliff_hall), wisptentacle
+(Temple Grounds 0t_temple_hall_dark), octapede (Sanctuary Fortress 0p_cliff_hall), amt (Agon
+06_sand_alamofront), dbar (Agon 08_sand_casualpirates, whose fifteen barriers no area places: the
+family spawns them), sjguard (Agon 02_sand_sandfalls_dark), fishcloud (Temple Grounds
+06_temple_sacredpath), spa (Agon 03_sand_temple_dark), wallwalker (Sanctuary Fortress 09_cliff_temple
+layer 3), isbg (Sanctuary Fortress 06_cliff_spiderballguardian layer 13), spp (Temple Grounds dark
+01_temple_landingsite_dark), mysf (Temple Grounds 0e_temple_hall), spor (Torvus dark
+0d_swamp_hall_dark), scriptgui (the FrontEnd world 69802220, which is the one family that needs the
+front end and so sets `SKIP_FRONTEND=0` in `run.sh`'s per-family environment table), kral (Temple
 Grounds 0b_temple_hall), gbug (Great Temple 0i_temple_hall), pssm (Torvus Bog 0g_swamp_hall), stod
 (Torvus Bog dark 09_swamp_catacombs_dark), pbug (Agon Wastes 0b_sand_hall), szone (Agon Wastes dark
 02_sand_sandfalls_dark), splinter (Temple Grounds 02_temple_exploration), rptl (Temple Grounds
 12_temple_finalgate), chog (Agon Wastes 08_sand_casualpirates, which spawns two ChozoGhosts with a
-borrowed SpacePirate body and drives every state) and drkc (Temple Grounds dark
-06_temple_sacredpath_dark)
-dark 0d_swamp_hall_dark) and scriptgui (the FrontEnd world 69802220, which is the one family that
-needs the front end and so sets `SKIP_FRONTEND=0` in `run.sh`'s per-family environment table)
-and plct (Agon Wastes 05_portalpuzzle)
-06_temple_sacredpath_dark), atma (Great Temple 0l_temple_hall,
-two AtomicAlphas), atmb (Sanctuary Fortress 0b_cliff_hall layer 3, AtomicBetas), fsw (Agon
-Wastes 0e_sand_hall, FlyerSwarms), iss (Temple Grounds 10_temple_pathofeyes, IngSnatchingSwarm)
-and isg (Sanctuary Fortress 06_cliff_spiderballguardian layer 13, IngSpiderballGuardian)
+borrowed SpacePirate body and drives every state), drkc (Temple Grounds dark 06_temple_sacredpath_dark),
+plct (Agon Wastes 05_portalpuzzle), atma (Great Temple 0l_temple_hall, two AtomicAlphas), atmb
+(Sanctuary Fortress 0b_cliff_hall layer 3, AtomicBetas), fsw (Agon Wastes 0e_sand_hall, FlyerSwarms),
+iss (Temple Grounds 10_temple_pathofeyes, IngSnatchingSwarm) and isg (Sanctuary Fortress
+06_cliff_spiderballguardian layer 13, IngSpiderballGuardian)
 boot the area the module lanes' coverage driver used and repeat its console steps
 (`tools/cov/specs/*.con`, `tools/drivers/`), with a kill near the end - the console `kill` where a
 weapon cannot take the actor (the Sporb base's vulnerability, the Grenguard's reflected weapons),
@@ -317,7 +347,7 @@ god-mode player in from the far end of 0t_temple_hall_dark, which takes tentacle
 Sleep through Patrol and Search to Attack, stands at the arm end for the contact hit, shoots it
 (Withdraw -> Sleep, `orbit` printing the live GetAimPosition), sends `Alert` for Grab/Pull, re-walks
 the approach and forces the re-issue and Decrement arms with `statecall` before killing it (its
-health is deliberately 1,000,000, `CWispTentacle.cpp:560`, so `damage` cannot show a hit - the state
+health is deliberately 1,000,000, `CWispTentacle.cpp:565`, so `damage` cannot show a hit - the state
 does); octapede attacks the four wall chains of Sanctuary 0p_cliff_hall (16 segments, `objs
 Octapede` printing each one's wall position), takes the shared Damage arms (power 8 -> 7, light ->
 6.5, dark 8 -> 6), kills a head with a charged shot (left at hp -42 in fsm Dead), forces `fsm Dead`
@@ -529,7 +559,8 @@ What differs from a normal run (render side only; the game logic is the same):
   false, so the game keeps its own "nothing read yet" values (Splitter beam length at the far
   plane, scan target 0xFF) and `CVisorFlare::UpdateOcclusion` takes its retail `GXCopyTex` path
   (console `status` shows ~30 copies and ~47 draws a frame instead of 1-2).
-- No copy destination is ever recorded, so `perf` counters describe recording, not rendering.
+- No copy destination is ever recorded, so the `status` line's `perf` counters describe recording,
+  not rendering.
 
 Measured 2026-10-23 (agon54, one game): Aurora init 0.53 s -> 0.01 s, input probe 0.6 s -> 0,
 first game update 5.2 s -> 4.1 s wall. "Gameplay reached" stays ~9.1 s: it is a frame-count wait

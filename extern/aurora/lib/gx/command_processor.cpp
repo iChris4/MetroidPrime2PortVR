@@ -141,6 +141,9 @@ u32 list_index_count(GXPrimitive prim, u16 vtxCount) noexcept {
 }
 
 void write_list_indices(u16* out, GXPrimitive prim, u16 vtxStart, u16 vtxCount) noexcept {
+  // Match the reserved index count: incomplete primitives have no trailing indices.
+  const u32 count = list_index_count(prim, vtxCount);
+  if (count == 0) return;
   switch (prim) {
   case GX_QUADS:
     for (u32 v = 0; v + 4 <= vtxCount; v += 4) {
@@ -154,7 +157,7 @@ void write_list_indices(u16* out, GXPrimitive prim, u16 vtxStart, u16 vtxCount) 
     }
     break;
   case GX_TRIANGLES:
-    for (u32 v = 0; v < vtxCount; ++v) {
+    for (u32 v = 0; v < count; ++v) {
       *out++ = static_cast<u16>(vtxStart + v);
     }
     break;

@@ -21,6 +21,8 @@ typedef struct PortMusyxVoice {
   int32_t rms;
   uint16_t volL;
   uint16_t volR;
+  uint32_t srcPos;
+  uint32_t loopLength;
 } PortMusyxVoice;
 #pragma pack(pop)
 
@@ -29,6 +31,9 @@ int MusyxPortCopyVoices(PortMusyxVoice* out, int maxVoices);
 int MusyxPortIsSampleMuted(unsigned smpId);
 void MusyxPortSetSampleMuted(unsigned smpId, int muted);
 void MusyxPortClearSampleMutes(void);
+// The port's volume boost: a linear factor (1.0 = none) on the music path (a streamed voice) and
+// on every other voice, applied to each voice's decoded samples in the mix.
+void MusyxPortSetVolumeBoost(float music, float sfx);
 // Copies the muted sample ids (up to maxIds) and returns the count.
 int MusyxPortGetMutedSamples(unsigned* out, int maxIds);
 

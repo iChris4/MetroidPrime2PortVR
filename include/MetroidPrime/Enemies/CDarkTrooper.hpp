@@ -25,6 +25,9 @@ class CPFArea;
 // Guessed class: a Dark Trooper, a bipedal Ing-possessed trooper that melees, fires small shots
 // or missiles, and can be a sleeper that rises when alerted.
 class CDarkTrooper : public CPatterned {
+#ifdef TARGET_PC
+  friend struct PortEntitySchema; // save-state field schema (platform/include/port_entity_schema.h)
+#endif
 public:
   CDarkTrooper(TUniqueId uid, const rstl::string& name, const CEntityInfo& info,
                const CTransform4f& xf, const CModelData& modelData,
@@ -94,6 +97,9 @@ public:
   virtual void SmallShotAttack(CStateManager& mgr, EStateMsg msg, float dt);
 
 private:
+#ifdef TARGET_PC
+  friend struct PortRoomState; // save states' room state (platform/port_savestate_room.cpp)
+#endif
   // Guessed name: the projectile fired by a ranged attack.
   class CAttackProjectile {
   public:

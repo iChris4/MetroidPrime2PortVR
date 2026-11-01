@@ -1,5 +1,46 @@
 # PrimedGun Echoes: engineering notes
 
+## Local morph/unmorph heading correction (2026-11-01)
+
+Match Prime 1's separation of the first-person tracking base and the captured
+Morph Ball entry heading. Echoes previously applied the entry heading directly
+to the first-person camera before the handoff, so stereo could add tracked yaw
+to a camera that already contained it. Ball transition setup and every later
+ball-camera seed now use the captured heading without changing the first-person
+camera. The spline look endpoint uses that same heading. At unmorph completion,
+reset the first-person follow transform too, preventing its zero-dt update from
+retaining an old heading. Limited to immersive player 0.
+
+Windows rebuilt; 22 focused checks passed. An OpenXR gameplay smoke run completed
+with four scripted morph button presses and normal shutdown. Headset confirmation
+while looking sideways/behind is still required. Changes remain local/unpushed.
+
+
+## Local upstream 0.7.0 integration (2026-11-01)
+
+Local test branch: `codex/echoes-upstream-local`. Integrates upstream `port`
+`96e40291185b` (0.7.0), 225 commits beyond the previously merged baseline.
+
+Merge resolutions preserve stereo replay, per-eye EFB/depth copies, multiview
+clears, Quest Compatibility depth pipelines, and the head-locked scan route.
+Upstream empty-pass and partial-clear elimination remain restricted to non-stereo
+passes. Scan throttling updates pick metadata only when a readback is issued;
+index/mask eye copies use nearest filtering. The full-screen Dark Visor option
+also respects the existing immersive path.
+
+The FIFO regressions exposed an existing mismatch between the number of indices
+reserved and written for incomplete triangle lists. Index generation now writes
+only complete primitives; the existing incomplete-triangle regression passes.
+
+Windows validation: full launcher/game build; 57 port checks passed with two
+platform/toolchain skips; 142 renderer tests passed, including Vulkan MSAA scan
+readback; 287 FIFO tests passed in a single process. An isolated new-game OpenXR
+smoke run with the USA Echoes disc reached gameplay, submitted immersive projection
+layers, and exited at its frame limit. This does not replace headset checks of
+Scan/Dark/Echo visors, Morph Ball effects, HUD/map, roomscale and save/load.
+No Quest APK was rebuilt for this integration.
+
+
 PrimedGun Echoes is the VR layer of PrimedGun v2 (iChris4/MetroidPrimePortVR, the Metroid Prime
 VR fork) carried onto this port of Metroid Prime 2: Echoes. This file is the fork's own log,
 newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges never conflict on it.

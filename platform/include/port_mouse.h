@@ -279,6 +279,11 @@ bool UiActive();
 // Mouse aim holds the pointer (cursor hidden, motion turns the view). Our own state, not
 // SDL's relative mode, which Android can report off while its pointer capture is on.
 bool Captured();
+// Once per loop iteration: hides the desktop cursor after a few seconds without mouse input
+// (a controller player in full screen) and shows it again on the next motion, click or wheel.
+// Never while the overlay or `keepVisible` (photo mode's panel) wants it, nor while captured
+// (capture hides it already).
+void UpdateIdleCursor(bool mouseInput, bool keepVisible);
 // Relative motion as it arrives from SDL's event queue, and the once-per-loop latch that
 // turns the pending deltas into this tick's deltas.
 void AddMotion(float dx, float dy);
@@ -337,6 +342,8 @@ bool PointerAimPosition(float& x, float& y);
 // The console's `pointeraim <x> <y>` (MP1's PortDebug::SetPointerAimPosition): moves the pointer
 // there from the centre, clamped to -1..1. A tick that does not leave it free re-centres it.
 void SetPointerAimPosition(float x, float y);
+// The console holds a pointer it placed there (free, the view not turned) until it is placed at 0 0.
+void SetPointerAimHold(bool hold);
 void Synchronize(float x, float y, float z);
 // The console's `aim <yaw_deg> <pitch_deg>`: place the aim outright instead of turning it from
 // travel, which is the only way a run with no stick can aim at a low target. yawDeg is the

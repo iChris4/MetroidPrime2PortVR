@@ -11,10 +11,10 @@
 #include "port_debug.h"
 #include "port_disc_verify.h"
 #include "port_discord.h"
+#include "port_entry.h"
 #include "port_freecam.h"
 #include "port_photo.h"
 #include "port_input_remap_ui.h"
-#include "port_livesplit.h"
 #include "port_mods.h"
 #include "port_logfile.h"
 #include "port_overlay.h"
@@ -83,8 +83,6 @@ void DrawGameSection() {
     sVisible = false;
   }
   ImGui::EndDisabled();
-  ItemHelp("Leaves the game for the title screen, as the pause menu's Quit does. Progress since the "
-           "last save station is lost.");
   ImGui::SameLine();
   if (ImGui::Button("Exit game")) {
     ImGui::OpenPopup("Exit game?");
@@ -117,103 +115,19 @@ static void DrawUnlocksSection() {
   if (ImGui::Checkbox("Hard mode", &hardMode)) {
     PortOverlay::SetUnlockHardMode(hardMode);
   }
-  ImGui::SetItemTooltip("Offered when starting a file, as after finishing the game.");
   ImGui::SameLine();
   bool galleries = sUnlockGalleries;
   if (ImGui::Checkbox("Image galleries", &galleries)) {
     PortOverlay::SetUnlockGalleries(galleries);
   }
-  ImGui::SetItemTooltip("All of them.");
-  bool stackBeams = sStackBeams;
-  if (ImGui::Checkbox("Stack beams", &stackBeams)) {
-    PortOverlay::SetStackBeams(stackBeams);
-  }
-  ImGui::SetItemTooltip("Each shot also fires the other beams you own, at no extra ammo cost.");
-  ImGui::BeginDisabled(!sStackBeams);
-  bool skipDark = sStackBeamsSkipDark;
-  if (ImGui::Checkbox("Leave out Dark Beam", &skipDark)) {
-    PortOverlay::SetStackBeamsSkipDark(skipDark);
-  }
-  ImGui::SetItemTooltip("Stacked shots skip the Dark Beam unless it's the one in hand, so they "
-                        "don't drain light beacons and crystals.");
   ImGui::EndDisabled();
-  ImGui::EndDisabled();
-  ImGui::TextDisabled("What finishing the game unlocks. Not written into the save.");
-  ItemHelp("Turning an option off locks it again.");
 }
 
 void DrawCutscenesSection() {
   ImGui::SeparatorText("Cutscenes");
   Changed(ImGui::Checkbox("Original experience", &sOriginalExperience));
-  ItemHelp("The game as it shipped: skippable cutscenes, world name, walk speed, hint delay, scan "
-           "speed, elevator ride and the Controls page's charge, lock-on, morph ball and auto-aim "
-           "tweaks all act as retail while this is on. Your values are kept and return when it is "
-           "off.");
   const bool locked = PortOverlay::OriginalExperience();
   ImGui::BeginDisabled(locked);
-  // The game reads this every frame in its cinematic flow state.
-  Changed(ImGui::Checkbox("Skippable cutscenes", &sSkipCinematics));
-  ItemHelp("START or A skips any cutscene and the new game's intro text, seen or not. Off: START skips "
-           "only the ones already seen.");
-  ImGui::EndDisabled();
-  // One row for the boot logos (read by CSplashScreen at launch) and the world name card (read by
-  // CMFGameLoader at the next load); the keys stay separate. Original experience shows the card.
-  int splash = sBootLogos;
-  if (ImGui::Combo("Skip splash screens", &splash, "No\0" "With A or Start\0" "Always\0")) {
-    sBootLogos = std::clamp(splash, PortOverlay::kScreen_Show, PortOverlay::kScreen_Off);
-    sWorldNameCard = sBootLogos;
-    Changed(true);
-  }
-  ItemHelp("The health warning and the Nintendo, Retro and Dolby logos at launch, and the world's name "
-           "typed out while a save loads. The logos change from the next launch. The new game's intro "
-           "text follows Skippable cutscenes.");
-  ImGui::BeginDisabled(locked);
-  int walkSpeed = sWalkSpeed;
-  if (ImGui::SliderInt("Walk speed", &walkSpeed, PortOverlay::kWalkSpeedMin,
-                       PortOverlay::kWalkSpeedMax, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
-    sWalkSpeed = walkSpeed;
-    Changed(true);
-  }
-  ItemHelp("How fast Samus moves on foot, walking, strafing and circle-strafing, in percent of "
-           "the original speed. Jumps, dashes, turning and the Morph Ball are unchanged.");
-  int scanSpeed = sScanSpeed;
-  if (ImGui::SliderInt("Scan speed", &scanSpeed, PortOverlay::kScanSpeedMin,
-                       PortOverlay::kScanSpeedMax, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
-    sScanSpeed = scanSpeed;
-    Changed(true);
-  }
-  ItemHelp("How fast a scan fills, in percent of the original speed. 200 takes half the time.");
-  // Elevator and portal share a row: their choices are short.
-  const float rideWidth = ImGui::GetFontSize() * 6.f;
-  int elevatorRide = sElevatorRide;
-  ImGui::SetNextItemWidth(rideWidth);
-  if (ImGui::Combo("Elevator ride", &elevatorRide, "Original\0" "Fast\0" "Skip\0")) {
-    sElevatorRide = std::clamp(elevatorRide, static_cast< int >(PortOverlay::kElevatorRide_Original),
-                               static_cast< int >(PortOverlay::kElevatorRide_Skip));
-    Changed(true);
-  }
-  ItemHelp("The ride between worlds. Fast plays it at double speed; Skip leaves as soon as the next "
-           "world has loaded. Applies from the next ride.");
-  int rotatingRooms = sRotatingRooms;
-  ImGui::SetNextItemWidth(rideWidth);
-  if (ImGui::Combo("Rotating rooms", &rotatingRooms, "Original\0" "Fast\0")) {
-    sRotatingRooms = std::clamp(rotatingRooms, static_cast< int >(PortOverlay::kRotatingRooms_Original),
-                                static_cast< int >(PortOverlay::kRotatingRooms_Fast));
-    Changed(true);
-  }
-  ItemHelp("The energy controller rooms' bomb-slot cutscene, where the room turns. Fast plays it at "
-           "double speed.");
-  SameLineAfterHelp();
-  int portalTransition = sPortalTransition;
-  ImGui::SetNextItemWidth(rideWidth);
-  if (ImGui::Combo("Portal transition", &portalTransition, "Original\0" "Fast\0" "Skip\0")) {
-    sPortalTransition = std::clamp(portalTransition,
-                                   static_cast< int >(PortOverlay::kPortalTransition_Original),
-                                   static_cast< int >(PortOverlay::kPortalTransition_Skip));
-    Changed(true);
-  }
-  ItemHelp("The ride through a light/dark world portal. Fast plays it at double speed; Skip leaves as "
-           "soon as the other world has loaded. Applies from the next portal.");
   int language = sLanguage;
   if (ImGui::Combo("Language", &language,
                    "English\0" "German\0" "French\0" "Spanish\0" "Italian\0" "Dutch\0"
@@ -221,48 +135,62 @@ void DrawCutscenesSection() {
     sLanguage = std::clamp(language, 0, static_cast< int >(PortOverlay::kLanguageMax));
     Changed(true);
   }
-  ItemHelp("The language of the game's text, changed while the game runs (a screen that is already open "
-           "keeps its text until it is reopened). A PAL disc carries English, French, German, Spanish, "
-           "Italian and Japanese; a language the disc lacks shows English.");
-  int hintDelay = sHintDelay;
-  if (ImGui::SliderInt("Hint delay", &hintDelay, PortOverlay::kHintDelayMin,
-                       PortOverlay::kHintDelayMax, hintDelay == 0 ? "Game default" : "%d min",
-                       ImGuiSliderFlags_AlwaysClamp)) {
-    sHintDelay = hintDelay;
-    Changed(true);
-  }
-  ItemHelp("The longest a hint waits before it first shows. Game default keeps the game's own "
-           "timing; a shorter wait also applies to hints already waiting in your save. Needs the "
-           "in-game hint system on.");
   ImGui::EndDisabled();
-  ImGui::BeginDisabled(gpGameState == nullptr ||
-                       !gpGameState->GameOptions().GetIsHintSystemEnabled());
-  if (ImGui::Button("Show current hint")) {
-    PortOverlay::RequestShowHint();
-  }
-  ImGui::EndDisabled();
-  ItemHelp("Shows the hint the game would show next, now: the one on screen again, or the one "
-           "due soonest. Needs the in-game hint system on.");
   DrawUnlocksSection();
 }
 
 // The game's own volumes, the same as the pause menu's two sliders. Echoes clamps both to 0x69
 // (`CGameOptions::SetSfxVolume`/`SetMusicVolume`), not Prime 1's 0x7F, and 0x69 is also the
 // default, so 100% here is the retail maximum. Scaling by 127 capped the slider at 83% (#14).
+// Above 100% the game stays at 0x69 and the port's mixer boosts that path instead (#41), so the
+// row goes on to kVolumeBoostMax.
 constexpr int kGameVolumeMax = 0x69;
+
+// A row's value for one of the game's volumes: the game's own volume in percent, or the port's
+// boost once the game's volume is at its maximum.
+int VolumeSliderPercent(int gameVolume, int boost) {
+  if (gameVolume >= kGameVolumeMax) {
+    return boost;
+  }
+  return (gameVolume * 100 + kGameVolumeMax / 2) / kGameVolumeMax;
+}
+
+// One row: up to 100 the game's own volume, above it the game at its maximum and the port's boost
+// in its place; back at 100 or under the boost returns to 1.0.
+void GameVolumeRow(const char* label, int gameVolume, int boost, bool music) {
+  int percent = VolumeSliderPercent(gameVolume, boost);
+  if (!ImGui::SliderInt(label, &percent, 0, PortOverlay::kVolumeBoostMax, "%d%%",
+                        ImGuiSliderFlags_AlwaysClamp) ||
+      gpGameState == nullptr) {
+    return;
+  }
+  const bool boosted = percent > PortOverlay::kVolumeBoostDefault;
+  const int volume = boosted ? kGameVolumeMax : (percent * kGameVolumeMax + 50) / 100;
+  if (music) {
+    gpGameState->GameOptions().SetMusicVolume(volume, true);
+    sMusicBoost = boosted ? percent : PortOverlay::kVolumeBoostDefault;
+  } else {
+    gpGameState->GameOptions().SetSfxVolume(volume, true);
+    sSfxBoost = boosted ? percent : PortOverlay::kVolumeBoostDefault;
+  }
+  // The mixer takes it now; DrawUI writes the file once the drag is over, as the other rows do.
+  ApplyVolumeBoosts();
+  Changed(true);
+}
+
 void DrawGameAudio() {
   ImGui::SeparatorText("Audio");
   ImGui::BeginDisabled(gpGameState == nullptr);
-  int music = gpGameState != nullptr ? static_cast< int >(gpGameState->GameOptions().GetMusicVolume()) : 0;
-  int musicPct = (music * 100 + kGameVolumeMax / 2) / kGameVolumeMax;
-  if (ImGui::SliderInt("Music volume", &musicPct, 0, 100, "%d%%") && gpGameState != nullptr) {
-    gpGameState->GameOptions().SetMusicVolume((musicPct * kGameVolumeMax + 50) / 100, true);
-  }
-  int sfx = gpGameState != nullptr ? static_cast< int >(gpGameState->GameOptions().GetSfxVolume()) : 0;
-  int sfxPct = (sfx * 100 + kGameVolumeMax / 2) / kGameVolumeMax;
-  if (ImGui::SliderInt("Sound effects volume", &sfxPct, 0, 100, "%d%%") && gpGameState != nullptr) {
-    gpGameState->GameOptions().SetSfxVolume((sfxPct * kGameVolumeMax + 50) / 100, true);
-  }
+  GameVolumeRow("Music volume",
+                gpGameState != nullptr
+                    ? static_cast< int >(gpGameState->GameOptions().GetMusicVolume())
+                    : 0,
+                PortOverlay::MusicBoost(), true);
+  GameVolumeRow("Sound effects volume",
+                gpGameState != nullptr
+                    ? static_cast< int >(gpGameState->GameOptions().GetSfxVolume())
+                    : 0,
+                PortOverlay::SfxBoost(), false);
   // Sound mode: Mono / Stereo / Dolby Surround
   int soundMode = gpGameState != nullptr ? static_cast< int >(gpGameState->GameOptions().GetSurroundMode())
                                          : CAudioSys::kSM_Stereo;
@@ -272,56 +200,11 @@ void DrawGameAudio() {
     gpGameState->GameOptions().SetSurroundMode(static_cast< CAudioSys::ESurroundModes >(soundMode), true);
   }
   ImGui::EndDisabled();
-  ImGui::SetItemTooltip("The game's own options: the next save writes them, as the pause menu's do.");
 }
 
 void DrawSpeedrunSection() {
   ImGui::SeparatorText("Speedrun");
   Changed(ImGui::Checkbox("On-screen in-game time", &sIgtTimer));
-  ItemHelp("The save file's play time in the bottom-right corner while a game runs. It stops in "
-           "cutscenes, menus and loads.");
-  bool liveSplit = PortLiveSplit::Enabled();
-  if (ImGui::Checkbox("LiveSplit", &liveSplit)) {
-    PortLiveSplit::SetEnabled(liveSplit);
-    Changed(true);
-  }
-  ItemHelp("In LiveSplit: right-click, Control > Start TCP Server (port 16834), and compare "
-           "against Game Time. A new file starts the timer; it splits on the final blow.");
-  SameLineAfterHelp();
-  switch (PortLiveSplit::Status()) {
-  case PortLiveSplit::kStatus_Off:
-    ImGui::TextDisabled("off");
-    break;
-  case PortLiveSplit::kStatus_Connecting:
-    ImGui::TextUnformatted("connecting...");
-    break;
-  case PortLiveSplit::kStatus_Connected:
-    ImGui::TextColored(ThemeGoodColor(), "connected");
-    break;
-  case PortLiveSplit::kStatus_Failed:
-    ImGui::TextColored(ThemeBadColor(), "%s", PortLiveSplit::LastError().c_str());
-    break;
-  }
-  // Applied when the field loses focus; until then the text is left alone.
-  static char address[128];
-  static bool editingAddress = false;
-  if (!editingAddress) {
-    std::snprintf(address, sizeof(address), "%s", PortLiveSplit::Address().c_str());
-  }
-  ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.f);
-  ImGui::InputText("Server (host:port)", address, sizeof(address));
-  editingAddress = ImGui::IsItemActive();
-  if (ImGui::IsItemDeactivatedAfterEdit()) {
-    PortLiveSplit::SetAddress(address);
-    Changed(true);
-  }
-  ImGui::SameLine();
-  bool splitUpgrades = PortLiveSplit::SplitUpgrades();
-  if (ImGui::Checkbox("Split on upgrades", &splitUpgrades)) {
-    PortLiveSplit::SetSplitUpgrades(splitUpgrades);
-    Changed(true);
-  }
-  ImGui::SetItemTooltip("Also splits on each new suit, beam, visor, ball part, key or other upgrade.");
 }
 
 // The texture pack import's progress: set from the Java copy thread on Android, from the zip
@@ -463,7 +346,7 @@ void DrawTexturesSection() {
   ImGui::SeparatorText("Textures");
   ImGui::Text("HD texture set: %s", PortTextures::DeviceName());
   ImGui::SetItemTooltip("Follows the input last used (xbox, playstation, switch,\n"
-                        "gamecube, standard, keyboard); set MP_TEXTURE_DEVICE to override.");
+                        "gamecube, standard, keyboard); set MP2_TEXTURE_DEVICE to override.");
   const char* root = PortTextures::UserRoot();
   if (root[0] == '\0') {
     ImGui::TextUnformatted("No user texture folder.");
@@ -483,10 +366,22 @@ void DrawTexturesSection() {
   if (!enabled) {
     ImGui::TextUnformatted("Texture pack off.");
   } else if (count > 0) {
-    ImGui::Text("%zu replacements loaded, over the built-in set.", count);
+    // Registered files say nothing about the disc: a pack dumped from another version loads in
+    // full and matches almost nothing, so the count that matters is the matched one.
+    const PortTextures::UserPackUsage usage = PortTextures::UserPackMatches();
+    ImGui::Text("%zu of %zu textures in the pack used so far.", usage.matched, count);
+    ImGui::SetItemTooltip("Counted as the game loads textures, so it grows as you play.\n"
+                          "A pack for all three games only ever matches this game's part.");
+    if (usage.failed > 0) {
+      ImGui::Text("%zu of them could not be loaded (see the log).", usage.failed);
+    }
   } else {
     ImGui::TextUnformatted("No texture pack loaded.");
   }
+  const bool trilogy = port::entry::IsTrilogy(port::entry::CurrentDiscVersion());
+  ImGui::TextWrapped("Your disc is %s. A pack only works on the disc version it was made from: "
+                     "Dolphin packs for this game are in a %s folder.",
+                     port::entry::CurrentGameCode(), trilogy ? "R3M" : "G2M");
 #if defined(__ANDROID__)
   const std::string status = TexturePackStatus();
   if (!status.empty()) {
@@ -533,7 +428,7 @@ void DrawOverlaySection() {
     sUiTheme = theme;
     Changed(true);
   }
-  ItemHelp("The overlay's look. Auto is the Metroid Prime pause-screen style; Plain is stock Dear "
+  ItemHelp("The overlay's look. Auto is the Echoes style; Plain is stock Dear "
            "ImGui.");
   // Multiplies the display's own scale (UpdateUiScale); the product is clamped to 1..4, so on a
   // desktop at scale 1 only values above 100% make the window larger.

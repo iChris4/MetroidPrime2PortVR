@@ -1467,7 +1467,10 @@ void CPlayer::PrepareToEnterMorphBallState(float dt, CStateManager& mgr) {
       SetCameraState(kCS_MorphBallTransition, mgr);
       mCameraManager->TransferCameraState(*mCameraManager->FirstPersonCamera(),
                                           *mCameraManager->BallCamera(), mgr);
-      const CTransform4f xf = mCameraManager->GetFirstPersonCamera()->GetTransform();
+      CTransform4f xf = mCameraManager->GetFirstPersonCamera()->GetTransform();
+#ifdef TARGET_PC
+      if (mgr.GetPlayer(0) == this) xf = PortVr::VrBallCameraEntryTransform(xf);
+#endif
       ballCamera->SetTransform(xf);
       ballCamera->ResetLookAtPosition();
       ballCamera->TeleportCamera(xf.GetTranslation(), mgr);
@@ -1497,7 +1500,10 @@ void CPlayer::PrepareToEnterMorphBallState(float dt, CStateManager& mgr) {
     SetCameraState(kCS_MorphBallTransition, mgr);
     mCameraManager->TransferCameraState(*mCameraManager->FirstPersonCamera(),
                                         *mCameraManager->BallCamera(), mgr);
-    const CTransform4f xf = mCameraManager->GetFirstPersonCamera()->GetTransform();
+    CTransform4f xf = mCameraManager->GetFirstPersonCamera()->GetTransform();
+#ifdef TARGET_PC
+    if (mgr.GetPlayer(0) == this) xf = PortVr::VrBallCameraEntryTransform(xf);
+#endif
     ballCamera->SetTransform(xf);
     ballCamera->ResetLookAtPosition();
     ballCamera->TeleportCamera(xf.GetTranslation(), mgr);
@@ -1512,7 +1518,10 @@ void CPlayer::PrepareToEnterMorphBallState(float dt, CStateManager& mgr) {
     SetCameraState(kCS_MorphBallTransition, mgr);
     mCameraManager->TransferCameraState(*mCameraManager->FirstPersonCamera(),
                                         *mCameraManager->BallCamera(), mgr);
-    const CTransform4f xf = mCameraManager->GetFirstPersonCamera()->GetTransform();
+    CTransform4f xf = mCameraManager->GetFirstPersonCamera()->GetTransform();
+#ifdef TARGET_PC
+    if (mgr.GetPlayer(0) == this) xf = PortVr::VrBallCameraEntryTransform(xf);
+#endif
     ballCamera->SetTransform(xf);
     ballCamera->ResetLookAtPosition();
     ballCamera->TeleportCamera(xf.GetTranslation(), mgr);
@@ -1536,11 +1545,8 @@ void CPlayer::BeginMorphTransition(float dt, CStateManager& mgr, EPlayerMorphBal
       // Her first visible transition frame already faces the headset's way; the render blend
       // must not ease from the old, hidden heading.
       PortSnapshotRenderTransform();
-      // The ball camera starts from the first-person camera's transform (SetState, the to-ball
-      // spline): give it the same heading.
-      CFirstPersonCamera* firstPerson = mCameraManager->FirstPersonCamera();
-      const CVector3f eye = firstPerson->GetTranslation();
-      firstPerson->SetTransform(CTransform4f::LookAt(eye, eye + facing, CVector3f::Up()));
+      // Leave the first-person view in its tracking base. Only the ball camera
+      // receives this heading: stereo still adds the HMD rotation to both views.
     }
   }
 #endif
@@ -1737,6 +1743,13 @@ void CPlayer::LeaveMorphBallState(CStateManager& mgr) {
   mCameraManager->BallCamera()->SetState(CBallCamera::kBCS_Default, mgr);
   mCameraManager->BallCamera()->SetFovAndTarget(CCameraManager::GetDefaultThirdPersonVerticalFOV());
   SetCameraState(kCS_FirstPerson, mgr);
+#ifdef TARGET_PC
+  if (PortVr::VrImmersive() && mgr.GetPlayer(0) == this) {
+    // Reset the internal follow transform as well as the actor transform. A zero-dt
+    // Think below cannot rotate an old follow heading to the unmorph endpoint.
+    mCameraManager->FirstPersonCamera()->Reset(GetTransform(), mgr);
+  }
+#endif
   mCameraManager->FirstPersonCamera()->DeferBallTransitionProcessing();
   mCameraManager->FirstPersonCamera()->Think(0.f, mgr);
   ForceGunOrientation(GetTransform(), mgr);

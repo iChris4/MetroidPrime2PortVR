@@ -200,10 +200,6 @@ const SettingKey kSettingKeys[] = {
     BoolKey< &sUnlockBeamDoors >("unlock_beam_doors"),
     BoolKey< &sStackBeams >("stack_beams"),
     BoolKey< &sStackBeamsSkipDark >("stack_beams_skip_dark"),
-    IntKey< &sBootLogos, PortOverlay::kScreen_Show, PortOverlay::kScreen_Off >(
-        "boot_logos", "0", "2"),
-    IntKey< &sWorldNameCard, PortOverlay::kScreen_Show, PortOverlay::kScreen_Off >(
-        "world_name_card", "0", "2"),
     BoolKey< &sFastMorph >("fast_morph"),
     BoolKey< &sPointerMenus >("pointer_menus"),
     BoolKey< &sMapSwapFingers >("map_swap_fingers"),
@@ -213,6 +209,28 @@ const SettingKey kSettingKeys[] = {
                                                                                   "200"),
     IntKey< &sScanSpeed, PortOverlay::kScanSpeedMin, PortOverlay::kScanSpeedMax >("scan_speed", "50",
                                                                                   "400"),
+    // The F1 Game > Audio rows' part above 100 percent: the mixer reads a boost, so a loaded value
+    // is handed to it here as well as by the rows (a plain IntKey could not).
+    {"music_boost",
+     [](const std::string& value) {
+       int parsed = 0;
+       if (ParseInt(value, parsed) && parsed >= PortOverlay::kVolumeBoostMin &&
+           parsed <= PortOverlay::kVolumeBoostMax) {
+         sMusicBoost = parsed;
+         ApplyVolumeBoosts();
+       }
+     },
+     [](std::ostream& out) { out << sMusicBoost; }, false, "100", "200"},
+    {"sfx_boost",
+     [](const std::string& value) {
+       int parsed = 0;
+       if (ParseInt(value, parsed) && parsed >= PortOverlay::kVolumeBoostMin &&
+           parsed <= PortOverlay::kVolumeBoostMax) {
+         sSfxBoost = parsed;
+         ApplyVolumeBoosts();
+       }
+     },
+     [](std::ostream& out) { out << sSfxBoost; }, false, "100", "200"},
     IntKey< &sElevatorRide, PortOverlay::kElevatorRide_Original, PortOverlay::kElevatorRide_Skip >(
         "elevator_ride", "0", "2"),
     IntKey< &sRotatingRooms, PortOverlay::kRotatingRooms_Original, PortOverlay::kRotatingRooms_Fast >(
@@ -245,8 +263,6 @@ const SettingKey kSettingKeys[] = {
      "2",
      "20"},
     BoolKey< &sQuickResume >("quick_resume"),
-    BoolKey< &sSaveStateHotkeys >("savestate_hotkeys"),
-    BoolKey< &sSaveStateRoomState >("savestate_room_state"),
     BoolKey< &sLockOnToggle >("lockon_toggle"),
     BoolKey< &sStickyCharge >("sticky_charge"),
     BoolKey< &sRapidCharge >("rapid_charge"),
@@ -374,6 +390,9 @@ const SettingKey kSettingKeys[] = {
     BoolKey< &sHideVisorEffects >("no_visor_fx"),
     BoolKey< &sCinemaBars >("cinema_bars"),
     BoolKey< &sSecondaryCrosshairs >("secondary_crosshairs"),
+    BoolKey< &sDarkVisorFull >("dark_visor_full"),
+    IntKey< &sDarkVisorStatic, 0, PortOverlay::kDarkVisorStaticMax >("dark_visor_static", "50", "100"),
+    BoolKey< &sInfiniteBeamAmmo >("infinite_beam_ammo"),
     IntKey< &sHudOpacityEcho, PortOverlay::kHudOpacityVisor, PortOverlay::kHudOpacityMax >(
         "hud_opacity_echo", "-1", "40"),
     IntKey< &sHudOpacityDark, PortOverlay::kHudOpacityVisor, PortOverlay::kHudOpacityMax >(
@@ -699,7 +718,10 @@ std::string SettingsText() {
   std::ostringstream file;
   file << "# Metroid Prime 2 native port settings: <user>/settings.cfg. Written by the F1 "
           "overlay.\n";
-  file << "# Environment variables (MP2_<KEY>) override these for a single run.\n";
+  file << "# Most keys read an MP2_<KEY> environment variable, which overrides this file for one "
+          "run;\n";
+  file << "# the file-only keys (mouse_dpi, texture_pack, ...) read none (docs/SETTINGS.md names "
+          "them).\n";
   for (const SettingKey& entry : kSettingKeys) {
     if (entry.write == nullptr) {
       continue;

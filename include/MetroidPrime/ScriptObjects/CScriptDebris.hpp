@@ -11,7 +11,16 @@
 class CElementGen;
 
 class CScriptDebris : public CPhysicsActor {
+#ifdef TARGET_PC
+  friend struct PortEntitySchema; // save-state field schema (platform/include/port_entity_schema.h)
+#endif
 public:
+#ifdef TARGET_PC
+  // The pickup its Activate dropped (save states carry that drop's fields: port_savestate_room.cpp).
+  TUniqueId PortGeneratedObject() const { return mGeneratedObject; }
+  void PortClearGeneratedObject() { mGeneratedObject = kInvalidUniqueId; }
+  void PortSetGeneratedObject(TUniqueId id) { mGeneratedObject = id; }
+#endif
   enum EOrientationType {
     kOT_NotOriented,
     kOT_AlongVelocity,

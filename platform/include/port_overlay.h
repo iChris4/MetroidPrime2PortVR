@@ -75,15 +75,14 @@ const int kScreen_Skippable = 1;
 const int kScreen_Off = 2;
 // The health warning and the Nintendo, Retro and Dolby logos at launch (CSplashScreen,
 // `MP2_BOOT_LOGOS=show|skip|off`): Skippable ends the current one with its 0.5 s fade on A or
-// Start; Off goes straight from the progressive check to the front end.
+// Start (the default; Original experience shows them); Off goes straight from the progressive
+// check to the front end.
 int BootLogos();
-void SetBootLogos(int mode);
 // The world-name card while a game loads (CMFGameLoader/CWorldTransManager,
 // `MP2_WORLD_NAME=show|skip|off`): Skippable types it out at once on A or Start, so it fades as
 // soon as the load is done; Off loads behind the plain black transition. The first boot's intro
 // text follows SkipCinematics (A or Start, seen or not), else the game's rule (Start once seen).
 int WorldNameCard();
-void SetWorldNameCard(int mode);
 // Cheat (`MP2_GODMODE=1`, F1 > Cheats): the player takes no damage, so a hazard cannot end a
 // test run in the lose-game screen (CStateManager::ApplyLocalDamage). Never saved.
 bool GodMode();
@@ -103,12 +102,14 @@ enum : unsigned {
 };
 // The kInfAmmo bit of a CPlayerState::EItemType, 0 for an item that is not ammo.
 unsigned InfiniteAmmoKind(int itemType);
-// True when every kind in `kinds` is infinite.
+// True when every kind in `kinds` is infinite, by the cheat or by InfiniteBeamAmmo.
 bool InfiniteAmmo(unsigned kinds);
+// Enhancement (F1 > Enhancements, saved, env `MP2_INFINITE_BEAM_AMMO`): Light and Dark Ammo are
+// infinite, whatever the cheat's bits say. Original experience turns it off.
+bool InfiniteBeamAmmo();
 void SetInfiniteAmmo(unsigned kinds, bool enabled);
-// Gameplay tweaks (F1 > Gameplay, the pause menu's Options > Controller, and one console command
-// each), off by default. Never saved - there is no settings file, and these are preference rather
-// than state, so a restart goes back to the untouched game.
+// Gameplay tweaks (F1 > Enhancements, the pause menu's Options > Controller, and one console command
+// each), off by default and saved in the settings file.
 //
 // Fast Morph (`MP2_FAST_MORPH=1`): the morph and unmorph transitions take kFastMorphDuration
 // seconds instead of the game's one, so rolling is not a second of animation each way
@@ -158,6 +159,17 @@ const int kScanSpeedMax = 400;
 const int kScanSpeedDefault = 100;
 int ScanSpeed();
 void SetScanSpeed(int percent);
+// Music and sound-effects boost in percent (`MP2_MUSIC_BOOST`, `MP2_SFX_BOOST`, 100 = no boost):
+// the port's mixer scales the music path (the streamed voices) or every other voice, so 150 plays
+// that path louder than the game's own volume maximum alone. The F1 Game > Audio sliders use it
+// for their part above 100 percent (#41).
+const int kVolumeBoostMin = 100;
+const int kVolumeBoostMax = 200;
+const int kVolumeBoostDefault = 100;
+int MusicBoost();
+void SetMusicBoost(int percent);
+int SfxBoost();
+void SetSfxBoost(int percent);
 // Glyph set the on-screen prompts are forced to (`MP2_PROMPT_GLYPHS`: 0 follow the input in use,
 // 1 Xbox, 2 PlayStation, 3 Switch, 4 GameCube, 5 keyboard); PromptGlyphs() is the device name or
 // nullptr to follow the input. Original experience shows the GameCube art.
@@ -410,6 +422,17 @@ bool CinemaBars();
 // reticle in combat and the seeker ring it shares; the lock-on reticle and the scan box stay. On
 // by default; Original experience keeps them. Read by CCompoundTargetReticle::DrawSeeker.
 bool SecondaryCrosshairs();
+// Full-screen Dark Visor (`dark_visor_full`, env `MP2_DARK_VISOR_FULL`): the visor reveals and
+// highlights over the whole view, as the game's own split-screen does, instead of the lens
+// (FRME_DarkVisorMask) inside the tweak frame. Off by default; Original experience keeps the lens.
+// Read by CStateManager::DrawDarkVisor; CSamusHud hides the centre gear, spinner and rings.
+bool DarkVisorFullScreen();
+// Dark Visor static (`dark_visor_static`, env `MP2_DARK_VISOR_STATIC`), in percent: how much of
+// the grey static image covers the scene; below 100 the scene's own colours show through, 0 keeps
+// only the highlights. 100 (the game's look) by default and under Original experience. Read by
+// CCubeRenderer::DrawDarkWorldTransition through CStateManager::DrawDarkVisor.
+const int kDarkVisorStaticMax = 100;
+int DarkVisorStatic();
 // HUD opacity per visor (`hud_opacity_echo/dark/scan`), in percent, or kHudOpacityVisor for the
 // game's Visor Opacity (Options > Visor). The Combat and Ball HUDs always use the option. Original
 // experience ignores these. Read by CGameOptions::GetVisorHudAlpha.

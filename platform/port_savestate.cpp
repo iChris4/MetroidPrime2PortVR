@@ -16,6 +16,7 @@
 
 #include <algorithm>
 
+#include "port_debug.h"
 #include "port_mods.h"
 #include "port_overlay.h"
 #include "port_resume_logic.h"
@@ -106,6 +107,8 @@ struct State {
 
 std::atomic< int > sSaveRequest{-1};
 std::atomic< int > sLoadRequest{-1};
+std::atomic_bool sSaveToast{false}; // the request came from a hotkey: toast its result
+std::atomic_bool sLoadToast{false};
 // Mods reload: Tick turns the request into a load of the current state; CMainFlow calls
 // ReloadModsNow once the old world is gone, before the new one starts loading.
 std::atomic< bool > sModReloadRequest{false};
@@ -142,10 +145,17 @@ struct RoomRestore {
   size_t nextLayer = 0;
 };
 RoomRestore sRoom;
+std::atomic< bool > sHoldAfterRestore{false};
 CGameState* sRetired = nullptr; // the game state a load replaced, deleted once the world restarted
+
+// True while a hotkey save or load runs: its messages also show as a toast.
+bool sToastMessages = false;
 
 void SetMessage(const std::string& message) {
   std::fprintf(stderr, "[savestate] %s\n", message.c_str());
+  if (sToastMessages) {
+    PortDebug::ShowNote(message);
+  }
   std::lock_guard< std::mutex > lock(sMessageMutex);
   sMessage = message;
 }
@@ -505,6 +515,12 @@ void SwapGameState(const State& s) {
 void DoSave(CStateManager& mgr, int slot) {
   State s;
   std::string error;
+  // The title and file select run a CMFGame in the 'FRND' front-end world: a state of it is useless
+  // and would overwrite the slot. Loads stay allowed there.
+  if (gpGameState != nullptr && gpGameState->GetGameMode().GetGameModeType() == 'FRND') {
+    SetMessage("save to slot " + std::to_string(slot) + " failed: no game running (title screen)");
+    return;
+  }
   if (!Capture(mgr, s, error) || !WriteSlot(slot, s, error)) {
     SetMessage("save to slot " + std::to_string(slot) + " failed: " + error);
     return;
@@ -830,6 +846,10 @@ void TickResume(CStateManager& mgr) {
 void TickPlacement(CStateManager& mgr) {
   if (++sPlace.waited > kPlaceTimeoutFrames) {
     sPlace.active = false;
+    std::fprintf(stderr, "[savestate] load wait ended: quit=%d full=%d state=%d warp=%d cinematic=%d\n",
+                 mgr.mQuitGame, mgr.IsFullyInitialized(), static_cast< int >(mgr.GetGameState()),
+                 PortWarp::Pending(),
+                 mgr.CameraManager(0) != nullptr && mgr.CameraManager(0)->IsInCinematicCamera());
     DisarmSpawnLayers();
     SetMessage("load timed out before the world came back; Samus stays at the area's spawn");
     return;
@@ -958,7 +978,14 @@ void TickRoom(CStateManager& mgr) {
   // A reload comes up with ~1008 of the 1024 object ids taken and purges a few hundred frames later;
   // a layer streamed in before that runs the pool dry (AllocateUniqueId aborts). Wait, as
   // PortWarpSettle does, without counting the wait as idle.
-  const bool idsTight = mgr.PortFreeObjectIds() < kRoomMinFreeIds;
+  // Only a layer that has to stream in allocates ids: one already active (or switched off) is
+  // passed without waiting, or a world that stays under the floor (749 objects in Agon's two
+  // areas) would never get past its first entry.
+  const bool nextStreams =
+      sRoom.nextLayer < sRoom.layers.size() &&
+      mgr.PortLayerNeedsStream(TAreaId(sRoom.layers[sRoom.nextLayer].first),
+                               sRoom.layers[sRoom.nextLayer].second);
+  const bool idsTight = nextStreams && mgr.PortFreeObjectIds() < kRoomMinFreeIds;
   if (sRoom.nextLayer < sRoom.layers.size() || mgr.PortLayerRequestPending()) {
     if (sRoom.nextLayer < sRoom.layers.size() && !mgr.PortLayerRequestPending() && !idsTight) {
       const std::pair< int, int >& want = sRoom.layers[sRoom.nextLayer++];
@@ -988,9 +1015,8 @@ void TickRoom(CStateManager& mgr) {
     std::fprintf(stderr, "[savestate] room: giving up after %d frames, the last %d with nothing "
                          "changing\n",
                  sRoom.waited, sRoom.idle);
-    if (waiting < 0) {
-      waiting = ApplyRoomState(mgr, sRoom.state, sRoom.progress); // the layers never settled
-    }
+    // the layers never settled, or an area never came back: restore the areas that are ready
+    waiting = ApplyRoomState(mgr, sRoom.state, sRoom.progress, true);
   }
   sRoom.active = false;
   DisarmSpawnLayers();
@@ -1001,6 +1027,9 @@ void TickRoom(CStateManager& mgr) {
              std::to_string(st.removed) + " removed, " + std::to_string(st.unmatched) +
              " unmatched, " + std::to_string(st.otherLayer) + " on other layers" +
              (waiting > 0 ? ", " + std::to_string(waiting) + " areas never loaded" : ""));
+  if (sHoldAfterRestore.exchange(false)) {
+    PortOverlay::SetTickHold(true);
+  }
 }
 
 } // namespace
@@ -1040,17 +1069,23 @@ void SetSelectedSlot(int slot) {
 
 void SelectNextSlot() { sSelected.store(sSelected.load() % kSlotCount + 1); }
 
-void RequestSave(int slot) {
+void SelectPrevSlot() { sSelected.store((sSelected.load() + kSlotCount - 2) % kSlotCount + 1); }
+
+void RequestSave(int slot, bool toast) {
   if (slot >= 0 && slot <= kSlotCount) {
+    sSaveToast.store(toast);
     sSaveRequest.store(slot);
   }
 }
 
-void RequestLoad(int slot) {
+void RequestLoad(int slot, bool toast) {
   if (slot >= 0 && slot <= kSlotCount) {
+    sLoadToast.store(toast);
     sLoadRequest.store(slot);
   }
 }
+
+void HoldAfterLoad() { sHoldAfterRestore.store(true); }
 
 std::string LastMessage() {
   std::lock_guard< std::mutex > lock(sMessageMutex);
@@ -1267,6 +1302,8 @@ void Forget(const CStateManager* mgr) {
 
 void RequestModReload() { sModReloadRequest.store(true); }
 void RequestRoomReload() { sRoomReloadRequest.store(true); }
+bool LoadAwaitsCinematic() { return sPlace.active; }
+
 bool ModReloadActive() {
   return sModReloadRequest.load() || sModReloadPending.load() || sModReloadWorldStale.load();
 }
@@ -1334,11 +1371,15 @@ void Tick(CStateManager& mgr) {
   }
   const int save = sSaveRequest.exchange(-1);
   if (save >= 0) {
+    sToastMessages = sSaveToast.exchange(false);
     DoSave(mgr, save);
+    sToastMessages = false;
   }
   const int load = sLoadRequest.exchange(-1);
   if (load >= 0) {
+    sToastMessages = sLoadToast.exchange(false);
     DoLoad(mgr, load);
+    sToastMessages = false;
   }
 }
 
