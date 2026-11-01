@@ -2,8 +2,7 @@
 
 ## Original licences and scope
 
-`LICENSE` restores PrimeDecomp's original CC0 dedication verbatim, also retained
-in `LICENSE-decomp`. It speaks for its authors' work, not Nintendo's assets or
+`LICENSE` restores PrimeDecomp's original CC0 dedication verbatim. It speaks for its authors' work, not Nintendo's assets or
 retail code.
 
 `packaging/licenses/native-port-MIT.txt` preserves the native port's MIT grant over **this project's own work**: the platform layer
@@ -19,7 +18,7 @@ recompiled here for the host. That material derives from Nintendo's retail
 executable, no permission to redistribute it is asserted here, and the MIT
 grant above deliberately stops at this project's own code rather than sweeping
 those directories in. Upstream PrimeDecomp's own dedication of its work is kept
-as `LICENSE-decomp`; it speaks for the decompilation's authors, not for
+as `LICENSE`; it speaks for the decompilation's authors, not for
 Nintendo. Anyone who obtained this repository obtained a working copy; that is
 a separate question from what may be redistributed, and it is one only the
 copyright holder can answer.

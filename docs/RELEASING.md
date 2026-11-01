@@ -11,7 +11,7 @@ The binary and the port's own files, nothing of the game's: no disc image, no DO
 extracted PAK/STRG data, no bytes copied out of the executable. The port reads the user's own disc
 at run time. `LICENSE` (MIT) covers only this project's own work; `NOTICE` says what it does not
 cover (`src/`, `include/`, `extern/sdk/`, `config/`) and lists the third-party terms.
-`LICENSE-decomp` is upstream PrimeDecomp's dedication, kept as it was.
+`LICENSE` is upstream PrimeDecomp's dedication, kept as it was.
 
 Every package carries `LICENSE`, `NOTICE` and the third-party notices:
 `share/licenses/metroid-prime2-port/` in the AppImage and the tarball (`tools/collect_licenses.sh`,
