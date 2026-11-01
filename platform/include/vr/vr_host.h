@@ -12,6 +12,10 @@
 
 class CStateManager;
 
+namespace PortVr::VrMenu {
+struct View;
+}
+
 namespace PortVrHost {
 
 // The live game, published by CStateManager::Update and cleared by its
@@ -66,6 +70,20 @@ bool QuickResume();
 void SetQuickResume(bool on);
 bool DrawTags();
 void SetDrawTags(bool on);
+
+// The DEBUG tab's TELEPORT pages: the F1 overlay's Teleport block (the Cheats page). The lists
+// are its room lists (named once an area's name table loads, Light or Dark Aether once its map
+// does) and the card's named worlds; the requests are the same PortWarp ones.
+void AddTeleportPlaces(PortVr::VrMenu::View& view);
+void TeleportCycleArea(int delta);
+void TeleportCycleWorld(int delta);
+void TeleportCrossDimension();
+// The last crossing's outcome once the game has tried it: 0 none since the last call, 1 crossed,
+// -1 no twin room.
+int TakeDimensionResult();
+void TeleportReloadRoom();
+void TeleportToRoom(uint32_t area);
+void TeleportToWorld(uint32_t world);
 
 // The save states (the F1 overlay's page).
 struct StateSlotInfo {

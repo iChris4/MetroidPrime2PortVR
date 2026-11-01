@@ -7,25 +7,31 @@
 #include "vr/vr_host.h"
 
 #include "vr/prime_vr_policy.h"
+#include "vr/vr_menu.h"
 #include "vr/vr_pad.h"
 #include "vr/vr_view.h"
 #include "MetroidPrime/CCameraManager.hpp"
+#include "MetroidPrime/CMemoryCard.hpp"
 #include "MetroidPrime/CStateManager.hpp"
 #include "MetroidPrime/Player/CGameState.hpp"
 
+#include "debug_ui/debug_ui_internal.h"
 #include "port_debug.h"
 #include "port_logfile.h"
 #include "port_overlay.h"
 #include "port_overlay_internal.h"
 #include "port_savestate.h"
 #include "port_textures.h"
+#include "port_warp.h"
 
 #include <aurora/aurora.h>
 #include <aurora/gfx.h>
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <ctime>
+#include <vector>
 
 namespace PortDebug {
 // platform/debug_ui/cheats.cpp, the Cheats page's buttons.
@@ -199,6 +205,62 @@ void SetQuickResume(bool on) { PortOverlay::SetQuickResume(on); }
 // The Metroid Prime port's draw tags (a debug overlay of draw names) have no counterpart here.
 bool DrawTags() { return sDrawTags; }
 void SetDrawTags(bool on) { sDrawTags = on; }
+
+// The overlay's room lists (PortOverlay::SetGameState copies them from the live world every
+// update, on this thread): real rooms only, cutscene stages left out, a room whose map has not
+// said yet listed with Light Aether's. Its world list keeps the card's named worlds; the arenas
+// and front ends, which the overlay names from a table of its own, are not offered in the headset.
+void AddTeleportPlaces(PortVr::VrMenu::View& view) {
+  if (StateManager() == nullptr) {
+    return;
+  }
+  using PortDebug::SRoomEntry;
+  view.area = PortDebug::sAreaId;
+  view.world = PortDebug::sWorldId;
+  for (int i = 0; i < static_cast< int >(PortDebug::sRooms.size()); ++i) {
+    const SRoomEntry& room = PortDebug::sRooms[i];
+    if (!room.real || room.dimension == SRoomEntry::EDimension::kCutscene) {
+      continue;
+    }
+    (room.dimension == SRoomEntry::EDimension::kDark ? view.dark_rooms : view.rooms)
+        .push_back({static_cast< uint32_t >(i), room.name});
+  }
+  // Rebuilt when the card's table changes size, as the overlay's.
+  static size_t sWorldCount = 0;
+  static std::vector< PortVr::VrMenu::TeleportPlace > sWorlds;
+  if (gpMemoryCard != nullptr && gpMemoryCard->GetMemoryWorlds().size() != sWorldCount) {
+    const rstl::vector< CMemoryCard::MemoryWorld >& worlds = gpMemoryCard->GetMemoryWorlds();
+    sWorldCount = worlds.size();
+    sWorlds.clear();
+    for (int i = 0; i < worlds.size(); ++i) {
+      std::string name = PortDebug::PlainWorldName(worlds[i].second.GetFrontEndName());
+      if (!name.empty()) {
+        sWorlds.push_back({static_cast< uint32_t >(worlds[i].first), std::move(name)});
+      }
+    }
+  }
+  view.worlds = sWorlds;
+}
+
+void TeleportCycleArea(int delta) { PortWarp::CycleArea(delta); }
+void TeleportCycleWorld(int delta) { PortWarp::CycleWorld(delta); }
+void TeleportCrossDimension() { PortWarp::Dimension(); }
+int TakeDimensionResult() { return PortWarp::TakeDimensionResult(); }
+// The overlay's Reload: the save-state route rebuilds the room and keeps Samus where she stands
+// (a warp to the room would put her at its spawn point).
+void TeleportReloadRoom() { PortSaveState::RequestRoomReload(); }
+
+void TeleportToRoom(uint32_t area) {
+  char text[16];
+  std::snprintf(text, sizeof(text), "%u", static_cast< unsigned >(area));
+  PortWarp::Area(text);
+}
+
+void TeleportToWorld(uint32_t world) {
+  char text[16];
+  std::snprintf(text, sizeof(text), "%08x", static_cast< unsigned >(world));
+  PortWarp::World(text, "");
+}
 
 int SelectedStateSlot() { return PortSaveState::SelectedSlot(); }
 void SetSelectedStateSlot(int slot) { PortSaveState::SetSelectedSlot(slot); }

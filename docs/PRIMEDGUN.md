@@ -9,6 +9,26 @@ newest first, kept apart from `PORT_NOTES.md` (upstream's) so upstream merges ne
 - The Metroid Prime VR fork (`../MetroidPrimePortVR`, branch `OpenXR`) is the reference for every
   VR file; keep the shared files byte-identical where possible and list the deltas here.
 
+## VR menu: the Teleport block on DEBUG (2026-10-31)
+
+From the user: the F1 overlay's Teleport block (Cheats page) in the headset's VR menu, in both games.
+- DEBUG has pages now (PREVIOUS / NEXT): its switches and readouts, then TELEPORT: PREVIOUS AREA,
+  NEXT AREA, PREVIOUS WORLD, NEXT WORLD, LIGHT / DARK WORLD (NO TWIN ROOM when the game found none,
+  until the next press), RELOAD ROOM, and WORLDS, LIGHT ROOMS and DARK ROOMS, which open lists on the
+  pages after it, twelve to a page, at the page that holds where the player is (HERE on that row; a
+  click there does nothing). The overlay's combos and their filter become these lists: the headset
+  has no keyboard. The page's headline names it, TELEPORT the current world.
+- The requests are the overlay's: `PortWarp` (`CycleArea`, `CycleWorld`, `Dimension`, `Area`,
+  `World`) and `PortSaveState::RequestRoomReload`, through new `PortVrHost` calls
+  (`vr_host_echoes.cpp`). The lists are the overlay's room table (`PortDebug::sRooms`, which
+  `PortOverlay::SetGameState` refreshes every update: real rooms, cutscene stages left out, a room
+  whose map has not loaded listed with Light Aether's) and the card's world table.
+- Delta from the overlay: WORLDS keeps the card's named worlds. The six multiplayer arenas and the
+  front ends, which the overlay names from a table of its own in `debug_ui/cheats.cpp`, are left out;
+  PREVIOUS / NEXT WORLD still step through the whole table, as the overlay's buttons do.
+- Shared with the Metroid Prime fork: `vr_menu.h` and `tests/port_vr_menu.cpp` carry the same change
+  (`View`'s lists and `dimensions`, the six teleport calls of `Actions`, `Row::label` a string).
+
 ## Headset culling of portal rooms (2026-10-31)
 
 From the user, after the Dolphin build's Echoes wide-culling patch

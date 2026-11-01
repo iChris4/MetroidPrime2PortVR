@@ -148,6 +148,25 @@ public:
     }
     void SetDrawTags(bool on) override { PortVrHost::SetDrawTags(on); }
 
+    // DEBUG's TELEPORT pages: the F1 overlay's Teleport block.
+    void CycleArea(int direction) override { PortVrHost::TeleportCycleArea(direction); }
+    void CycleWorld(int direction) override { PortVrHost::TeleportCycleWorld(direction); }
+    void CrossDimension() override {
+        m_no_twin_room = false;
+        PortVrHost::TeleportCrossDimension();
+    }
+    void ReloadRoom() override { PortVrHost::TeleportReloadRoom(); }
+    void GoToRoom(uint32_t area) override { PortVrHost::TeleportToRoom(area); }
+    void GoToWorld(uint32_t world) override { PortVrHost::TeleportToWorld(world); }
+    // LIGHT / DARK WORLD's outcome, which the game gives a frame later; it stays until the
+    // next press, as the overlay's line does.
+    bool NoTwinRoom() {
+        if (const int result = PortVrHost::TakeDimensionResult(); result != 0) {
+            m_no_twin_room = result < 0;
+        }
+        return m_no_twin_room;
+    }
+
     // After the click's settings are stored: the requested save, then the exit
     // the way closing the window exits (the F1 overlay's Exit game).
     void Flush() {
@@ -173,6 +192,7 @@ private:
 
     bool m_save = false;
     bool m_exit = false;
+    bool m_no_twin_room = false;
 };
 
 // The game's frame rate, from its own frames: aurora_get_fps counts the
@@ -300,6 +320,13 @@ VrMenu::View BuildView(Menu& menu, const PortVrSettings& settings, double now) {
     const OpenXREyeResolution eye = OpenXRGetEyeResolution(settings.render_scale);
     view.eye_width = eye.scaled_width;
     view.eye_height = eye.scaled_height;
+    // Light and Dark Aether: LIGHT / DARK WORLD and a room list for each.
+    view.dimensions = true;
+    // Only DEBUG shows the lists, and they are a few dozen names to copy.
+    if (menu.state.tab == VrMenu::kDebugTab) {
+        PortVrHost::AddTeleportPlaces(view);
+        view.no_twin_room = menu.actions.NoTwinRoom();
+    }
     return view;
 }
 
