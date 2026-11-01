@@ -16,16 +16,13 @@ package or release built from it.
 
 ## Features
 
-- Native OpenXR VR on PC (Direct3D 12, or Vulkan for SteamVR headsets such as PSVR2) and standalone
-  Meta Quest (tested on Quest 3).
+- Native OpenXR VR on PC (Direct3D 12, or Vulkan for SteamVR headsets such as PSVR2) and standalone Meta Quest (tested on Quest 3).
 - Room-scale movement with a modern VR control scheme, snap or smooth turning.
-- 6DOF arm cannon tracking for aiming, grapple and lock-on; left-handed play.
-- Head-locked HUD and helmet, visors in both eyes, look to scan.
-- Beam wheel and visor gestures, the 3D map held in your hand, pause screens and message boxes in
-  the headset.
+- 6DOF arm cannon tracking for aiming, grapple, lock-on and left-handed play.
 - One-click height calibration and adjustable cannon position and rotation.
-- In-headset VR menu for controls, calibration, graphics and more.
-- A PC launcher (`PrimedGunEchoes.exe`) and a Quest launcher panel for every PrimedGun setting.
+- Beam wheel and visor gestures configurations.
+- 3D map, pause screens and message boxes in the headset.
+- In-headset settings for controls, calibration, graphics, and more.
 
 ## Getting started
 
