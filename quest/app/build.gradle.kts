@@ -270,6 +270,7 @@ val syncLicenseNotices by tasks.registering(Sync::class) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from(File(portRoot, "LICENSE")) { into("licenses"); rename { "port-license.txt" } }
     from(File(portRoot, "NOTICE")) { into("licenses"); rename { "port-notice.txt" } }
+    from(File(portRoot, "packaging/licenses")) { into("licenses"); include("*.txt") }
     from(File(portRoot, "extern/aurora/LICENSE")) { into("licenses"); rename { "aurora.txt" } }
     from(File(portRoot, "extern/musyx-port/LICENSE")) { into("licenses"); rename { "musyx.txt" } }
     listOf(
@@ -299,6 +300,8 @@ tasks.matching { it.name.matches(Regex("""merge\w*Assets""")) || it.name.lowerca
 // The launcher panel (PrimedGun's Quest launcher widgets); the game activity uses
 // none of these.
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20250517")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.fragment:fragment-ktx:1.8.9")

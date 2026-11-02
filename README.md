@@ -72,7 +72,18 @@ file, else the release's `SHA256SUMS.txt`); a package that cannot be verified is
 **Install and restart launcher** then waits for the game and the launcher to close, copies the new
 files over the installation, keeps the replaced ones in a backup folder and puts them back if
 anything fails, then starts the new launcher. The `user` folder is never touched. Nothing is
-installed until you ask. The Quest has no updater yet: install the new APK over the old one.
+installed until you ask.
+
+## Updating on Quest
+
+From alpha.4, open **Setup > Check for updates...** in the Quest launcher. It checks
+this Echoes repository, shows release notes and downloads the Quest APK. Alpha/beta
+releases are included by default while running a preview; draft releases are hidden.
+The download must pass its SHA-256 check and match this app's package and signing key.
+Close the game and Port Options, then choose **Install update** and approve the Quest
+installer. Quest may first ask you to allow this launcher to install apps. Updates
+preserve saves and settings; never uninstall to update. Older versions can be updated
+by sideloading the APK over the existing installation.
 
 ## Not done yet
 

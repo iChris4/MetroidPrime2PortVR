@@ -7,8 +7,9 @@
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
     <!-- SDL's haptics call Vibrator.cancel() unconditionally. -->
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- The Archipelago client's WebSocket (ws:// only in this build). -->
+    <!-- GitHub release updates and the Archipelago client's WebSocket. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Select Game copies the disc image in a foreground service that keeps the CPU awake. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
@@ -122,6 +123,15 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+        <!-- Shares only verified APKs from the updater cache with the system installer. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
+        </provider>
     </application>
 
 </manifest>

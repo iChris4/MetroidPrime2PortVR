@@ -87,3 +87,11 @@ The separate PrimeDecomp **GPL** recompilation toolchain is not part of this
 native link and nothing here is derived from its output. If GPL-covered code
 ever does end up in the combined work, the corresponding source and build
 material must be provided under the applicable GPL terms.
+
+## Quest updater
+
+`quest/app/src/main/java/org/primedgun/echoes/launcher/ReleaseUpdates.kt` and
+`QuestUpdateController.kt` are adapted from PrimedGun
+(https://github.com/iChris4/MetroidPrimePortVR) and retain their GPL-3.0-or-later
+licence headers. The GPL text is included in
+`packaging/licenses/quest-updater-GPL-3.0.txt` and the APK notices.
