@@ -230,11 +230,14 @@ void LauncherWindow::BuildSetupTab(QTabWidget* tabs) {
   auto* art = new QLabel;
   art->setAlignment(Qt::AlignLeft | Qt::AlignBottom);
   art->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-  const QPixmap samus(QStringLiteral(":/samus.png"));
+  const QPixmap samus(QStringLiteral(":/light_suit.png"));
   if (!samus.isNull()) {
-    const QPixmap scaled = samus.scaled(208, 126, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    art->setPixmap(scaled);
-    art->setFixedHeight(scaled.height());
+    // Twice the previous figure size, with only the upper half above the
+    // bottom edge: the lower body is clipped rather than shrinking the art.
+    const QPixmap scaled = samus.scaledToHeight(360, Qt::SmoothTransformation);
+    const QPixmap upperHalf = scaled.copy(0, 0, scaled.width(), scaled.height() / 2);
+    art->setPixmap(upperHalf);
+    art->setFixedSize(upperHalf.size());
   }
   layout->addWidget(art, 0, Qt::AlignLeft | Qt::AlignBottom);
 

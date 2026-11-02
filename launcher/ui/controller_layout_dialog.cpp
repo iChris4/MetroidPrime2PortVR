@@ -41,7 +41,7 @@ void ShowControllerLayout(TabContext& ctx) {
       "Movement speed, turning, handedness and rumble settings still apply. Choose only controls your controllers have. "
       "Changing controller type translates standard bindings and keeps custom assignments. "
       "Headset system buttons may be reserved by the runtime."));
-  note->setStyleSheet("color: #f0a12a;");
+  note->setStyleSheet("color: #c49aff;");
   note->setWordWrap(true); body->addWidget(note);
   auto* family = new QComboBox;
   family->setObjectName("controllerFamily");
@@ -99,10 +99,10 @@ void ShowControllerLayout(TabContext& ctx) {
   mode->addItem("Physical D-pad / assigned visor buttons only", 2);
   auto* visorNote = new QLabel(QObject::tr("Direct visor bindings below work in every mode. With Hold selected, moving "
       "the visor stick changes visors only while its selector button is held. Its movement, turn and jump inputs are suppressed meanwhile."));
-  visorNote->setStyleSheet("color: #f0a12a;");
+  visorNote->setStyleSheet("color: #c49aff;");
   visorNote->setWordWrap(true); group("Visors")->addRow(visorNote);
   auto* beamNote = new QLabel(QObject::tr("Hold Beam select and swing the weapon controller to choose a beam."));
-  beamNote->setStyleSheet("color: #f0a12a;");
+  beamNote->setStyleSheet("color: #c49aff;");
   beamNote->setWordWrap(true); group("On foot")->addRow(beamNote);
   std::map<std::string, QSlider*> thresholds;
   const auto thresholdRow = [&](const char* key, const char* label) {
@@ -124,7 +124,7 @@ void ShowControllerLayout(TabContext& ctx) {
   auto* thresholdNote = new QLabel(QObject::tr("Lower values activate sooner; higher values require more travel or pressure. "
       "The stick threshold controls stick-up jump and other assigned stick directions, without changing movement or turning. "
       "Controllers that expose only a digital click use that click instead of an adjustable pressure threshold."));
-  thresholdNote->setStyleSheet("color: #f0a12a;");
+  thresholdNote->setStyleSheet("color: #c49aff;");
   thresholdNote->setWordWrap(true); group("Input sensitivity")->addRow(thresholdNote);
   const auto relabel = [&] {
     for (auto* combo : inputRows) {
