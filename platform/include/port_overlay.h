@@ -292,6 +292,14 @@ float SpringBallFlickRate();
 const float kStickyChargeAfter = 0.35f;
 bool LockOnToggle();
 void SetLockOnToggle(bool enabled);
+// Aim Lock-On: lock onto the target nearest the crosshair instead of the retail pick, which
+// prefers a nearer target (CPlayer::FindBestOrbitableObject). Off under Original Experience.
+// Toggle Spider Ball: an R press on a Spider Ball track clings until the next press. Off under
+// Original Experience.
+bool SpiderToggle();
+void SetSpiderToggle(bool enabled);
+bool AimLockOn();
+void SetAimLockOn(bool enabled);
 bool StickyCharge();
 void SetStickyCharge(bool enabled);
 // Auto-aim (`MP2_AUTO_AIM=0` turns it off, default on): off, the arm cannon aims only at a
@@ -350,6 +358,10 @@ float GyroSensitivityY();
 // moves a crosshair over the view and shots follow it, with or without pointer aim
 // (`MP2_LOCK_ON_FREE_AIM`). CPlayer::PortLockFreeAim reads it.
 bool LockOnFreeAim();
+// Hand on cannon (Trilogy, PrimeHack): under direct aim, after a second standing still on the
+// ground Samus rests her left hand on the cannon (R's free-look pose); `MP2_HAND_ON_CANNON`.
+// CPlayerGun::UpdateFreeLook reads it.
+bool HandOnCannon();
 // The Reset aim binding recentres the pointer under pointer aim, else levels the camera;
 // `MP2_RESET_AIM_BOTH` makes it do both either way.
 bool ResetAimBoth();
@@ -368,6 +380,41 @@ float GyroCursorAngle();
 // fires two quick shots, then charges faster (CPlayerGun::PortRapidChargeShot).
 bool RapidCharge();
 void SetRapidCharge(bool enabled);
+// Per-player settings for a match: players 1-3 (P2-P4) may override these of Player 1's settings
+// one by one (settings.cfg `p2.lockon_toggle=` etc.); an unset one follows Player 1's value,
+// Original Experience included. Bools and ints are stored as floats.
+enum PlayerSetting {
+  kPlayer_LockOnToggle,
+  kPlayer_StickyCharge,
+  kPlayer_RapidCharge,
+  kPlayer_AutoAim,
+  kPlayer_LockOnFreeAim,
+  kPlayer_GyroAim,
+  kPlayer_GyroMode,
+  kPlayer_GyroSensitivity,
+  kPlayer_GyroSplit,
+  kPlayer_GyroSensitivityY,
+  kPlayerSettingCount,
+};
+const int kSettingPlayers = 4;
+bool PlayerSettingSet(int player, PlayerSetting key);
+// Player 0 sets Player 1's own setting; players 1-3 set their override. Both persist.
+void SetPlayerSetting(int player, PlayerSetting key, float value);
+// Player 1-3 follows Player 1 again for `key`, or for all of them.
+void ClearPlayerSetting(int player, PlayerSetting key);
+void ClearPlayerSettings(int player);
+// The effective values for `player` (0-3).
+bool LockOnToggle(int player);
+bool StickyCharge(int player);
+bool RapidCharge(int player);
+bool AutoAim(int player);
+bool LockOnFreeAim(int player);
+bool GyroAim(int player);
+int GyroMode(int player);
+float GyroSensitivity(int player);
+bool GyroSplit(int player);
+// GyroSensitivityY when the player's split is on, else their GyroSensitivity.
+float GyroSensitivityYEffective(int player);
 // Back up the card before the game writes it (`MP2_CARD_BACKUP=1`, F1 > Saves): each write to the
 // memory card copies the file as it is on disk first, into `<user>/save-backups`, so a save that
 // goes wrong can be imported back (console `save import latest`). Off by default; never saved.
@@ -422,6 +469,15 @@ bool CinemaBars();
 // reticle in combat and the seeker ring it shares; the lock-on reticle and the scan box stay. On
 // by default; Original experience keeps them. Read by CCompoundTargetReticle::DrawSeeker.
 bool SecondaryCrosshairs();
+// Whether the aiming crosshair (and Trilogy's aiming cursor) shows in a visor (a
+// CPlayerState::EPlayerVisor). Combat and Scan follow the game; Dark and Echo can be turned off
+// (`crosshair_dark`, `crosshair_echo`, env `MP2_CROSSHAIR_DARK`/`MP2_CROSSHAIR_ECHO`, off by
+// default). On under Original experience. Read by CCompoundTargetReticle.
+bool CrosshairInVisor(int visor);
+// Morph ball black bars (`ball_bars`, env `MP2_BALL_BARS`, off by default): the ball view's
+// narrowed viewport (tweak BallViewportYReduction). Off, the world fills the screen in ball mode;
+// the ball HUD stays put. On under Original experience. Read by CSamusHud::Update.
+bool BallBars();
 // Full-screen Dark Visor (`dark_visor_full`, env `MP2_DARK_VISOR_FULL`): the visor reveals and
 // highlights over the whole view, as the game's own split-screen does, instead of the lens
 // (FRME_DarkVisorMask) inside the tweak frame. Off by default; Original experience keeps the lens.

@@ -147,6 +147,11 @@ void UpdateMenuSounds(bool visible);
 
 // window.cpp
 bool TouchScrolling(); // a finger drag is scrolling a page, taken from the widget it began on
+#if defined(__ANDROID__)
+// port_touch_jni.cpp: the cutout and visible system bars, in pixels; false until the activity has
+// sent them.
+bool DrawInsetsPx(int& left, int& top, int& right, int& bottom);
+#endif
 void DrawUI();
 // The port's own hotkeys, named by what is bound.
 std::string HotkeyHint();
@@ -215,6 +220,7 @@ void DrawRandomizerTab();
 void DrawGameTab();
 void DrawModsTab();
 void DrawControlsTab();
+void DrawMultiplayerTab();
 void DrawVideoTab();
 void DrawEnhancementsTab();
 void DrawSystemTab();

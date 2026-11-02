@@ -1063,8 +1063,8 @@ static void PortCrashAfterReport(int sig, const void* faultAddress) {
 
 int main(int argc, char** argv) {
 #if defined(_WIN32)
-  if ((argc == 4 || argc == 5) && std::strcmp(argv[1], "--log-copy") == 0) {
-    return PortLogFile::RunCopy(argv[2], argv[3], argc == 5 ? argv[4] : nullptr);
+  if (argc == 6 && std::strcmp(argv[1], "--log-copy") == 0) {
+    return PortLogFile::RunCopy(argv[2], argv[3], argv[4], argv[5]);
   }
   PortLogFile::AttachParentConsole();
 #endif
@@ -1231,6 +1231,9 @@ int main(int argc, char** argv) {
     std::error_code cacheError;
     std::filesystem::create_directories(optionsCache, cacheError);
   }
+  // The pipeline cache seed (tools/pipeline_seed.py), built into the executable on desktop and
+  // Android alike (CMakeLists.txt); a build without it starts from the cache alone.
+  const std::span<const uint8_t> embeddedSeed = PortEmbedded::Find("initial_pipeline_cache.db");
   AuroraConfig config = {
       .appName = kAppName,
       .userPath = EnvOrFallback("MP2_USER_PATH", appPaths.user),
@@ -1248,6 +1251,11 @@ int main(int argc, char** argv) {
       .windowHeight = 720u,
       .mem1Size = MEM1_DEFAULT_SIZE,
       .mem2Size = ARAM_DEFAULT_SIZE,
+      // An embedded seed wins over a stale initial_pipeline_cache.db beside the executable.
+      .pipelineCacheSeedData = embeddedSeed.data(),
+      .pipelineCacheSeedSize = embeddedSeed.size(),
+      // MP2_PIPELINE_SEED=0: start from an empty cache (tools/pipeline_seed.py record runs with it).
+      .pipelineCacheNoSeed = !port::EnvFlag("MP2_PIPELINE_SEED", true),
   };
 #if !defined(__ANDROID__)
   // The window icon, for a bare binary that no desktop entry describes. Android takes its icon

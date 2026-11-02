@@ -222,10 +222,10 @@ const CColor kPortTriScanLockedColor(uchar(0x49), uchar(0xC3), uchar(0xF6), ucha
 uchar PortTriAlphaU8(float a) { return static_cast< uchar >(CMath::Clamp(0.f, a, 255.f)); }
 
 // The pointer ray (screen centre without a pointer) in world space.
-CVector3f PortTriPointerDir(const CTransform4f& camXf, const CGameCamera& cam) {
+CVector3f PortTriPointerDir(const CTransform4f& camXf, const CGameCamera& cam, int playerIndex) {
   float x = 0.f;
   float y = 0.f;
-  if (!PortMouse::PointerAimPosition(x, y) || (x == 0.f && y == 0.f)) {
+  if (!PortMouse::PointerAimPosition(x, y, playerIndex) || (x == 0.f && y == 0.f)) {
     return camXf.GetForward();
   }
   float yaw = 0.f, pitch = 0.f, rx = 0.f, ry = 1.f, rz = 0.f;
@@ -239,7 +239,7 @@ void CCompoundTargetReticle::PortTriUpdateScanPointer(const CStateManager& mgr) 
   const CCameraManager* camMgr = mgr.GetCameraManager(mPlayerIndex);
   const CTransform4f camXf = camMgr->GetCurrentCameraTransform(mgr, true);
   const CVector3f start = camXf.GetTranslation();
-  CVector3f dir = PortTriPointerDir(camXf, *camMgr->GetCurrentCamera(mgr, true));
+  CVector3f dir = PortTriPointerDir(camXf, *camMgr->GetCurrentCamera(mgr, true), mPlayerIndex);
   if (!dir.CanBeNormalized()) {
     return;
   }
@@ -247,7 +247,7 @@ void CCompoundTargetReticle::PortTriUpdateScanPointer(const CStateManager& mgr) 
   const CMaterialFilter filter = CMaterialFilter::MakeIncludeExclude(
       CMaterialList(kMT_Solid, kMT_Character, kMT_NonSolidDamageable),
       CMaterialList(kMT_ProjectilePassthrough, kMT_Player));
-  rstl::reserved_vector< TUniqueId, 1024 > nearList;
+  rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
   mgr.BuildNearList(nearList, start, dir, 100.f, filter, mgr.GetPlayer(mPlayerIndex));
   TUniqueId hitId = kInvalidUniqueId;
   const CRayCastResult result = mgr.RayWorldIntersection(hitId, start, dir, 100.f, filter, nearList);
@@ -423,7 +423,7 @@ void CCompoundTargetReticle::PortTriDrawScan(const CMatrix3f& rotation,
   const CGameCamera& cam = *camMgr->GetCurrentCamera(mgr, true);
   float ringDist = 224.f / static_cast< float >(player->GetTweakPlayer()->PortTriTargetingHalfHeight());
   ringDist /= static_cast< float >(tan(cam.GetRenderFov() * 0.5f * (1.f / 360.f) * (2.f * M_PIF)));
-  const CVector3f ringPos = camXf.GetTranslation() + ringDist * PortTriPointerDir(camXf, cam);
+  const CVector3f ringPos = camXf.GetTranslation() + ringDist * PortTriPointerDir(camXf, cam, mPlayerIndex);
 
   CColor ringColor =
       CColor::Lerp(kPortTriScanRingColor, kPortTriScanLockedColor, mPortTriScanFade);
@@ -534,8 +534,8 @@ CColor PortTriXhairColor(const CColor& color) {
 float PortTriXhairAlpha(float alpha) {
   return alpha * static_cast< float >(PortOverlay::CrosshairOpacity()) / 100.f;
 }
-float PortTriXhairSize() {
-  return PortMouse::Aiming() ? static_cast< float >(PortOverlay::CrosshairSize()) / 100.f : 1.f;
+float PortTriXhairSize(int playerIndex) {
+  return PortMouse::Aiming(playerIndex) ? static_cast< float >(PortOverlay::CrosshairSize()) / 100.f : 1.f;
 }
 } // namespace
 
@@ -584,7 +584,8 @@ void CCompoundTargetReticle::PortTriUpdateCombat(float dt, const CStateManager& 
   mPortTriAimCenterAlpha = 1.f;
   const CPlayerGun* gun = player.GetPlayerGun();
   if ((gun && gun->GetGunHolsterState() == CPlayerGunBase::kGHS_Holstered) ||
-      !PortTriReticle::AimVisible(mPreviousState)) {
+      !PortTriReticle::AimVisible(mPreviousState) ||
+      !PortOverlay::CrosshairInVisor(mgr.GetPlayerState(mPlayerIndex)->GetCurrentVisor())) {
     mPortTriAimArmAlpha = mPortTriAimCenterAlpha = 0.f;
   }
 
@@ -754,9 +755,9 @@ void CCompoundTargetReticle::PortTriDrawAiming(const CMatrix3f& rotation,
   }
   const CCameraManager* camMgr = mgr.GetCameraManager(mPlayerIndex);
   const CTransform4f cam = camMgr->GetCurrentCameraTransform(mgr, true);
-  const CVector3f dir = PortTriPointerDir(cam, *camMgr->GetCurrentCamera(mgr, true));
+  const CVector3f dir = PortTriPointerDir(cam, *camMgr->GetCurrentCamera(mgr, true), mPlayerIndex);
   const CVector3f pos = cam.GetTranslation() + dir * (1.25f / CVector3f::Dot(dir, cam.GetForward()));
-  const CTransform4f base = CTransform4f(rotation, pos) * CTransform4f::Scale(PortTriXhairSize());
+  const CTransform4f base = CTransform4f(rotation, pos) * CTransform4f::Scale(PortTriXhairSize(mPlayerIndex));
   PortTriDrawModel(mPortTriAimCenter, base * CTransform4f::Scale(.45f * mPortTriAimCenterScale),
                    PortTriXhairColor(mPortTriAimCenterColor),
                    PortTriXhairAlpha(mPortTriAimCenterAlpha));
@@ -1270,7 +1271,8 @@ void CCompoundTargetReticle::UpdateOrbitZoneGroup(float dt, const CStateManager&
   const bool vrCannonCrosshair =
       mPlayerIndex == 0 && PortVr::VrCannonTargetPoint(mgr, vrCannonPoint);
   if ((player->GetDrawCrosshairs() || vrCannonCrosshair) &&
-      player->GetPlayerState()->GetCurrentVisor() != CPlayerState::kPV_Scan) {
+      player->GetPlayerState()->GetCurrentVisor() != CPlayerState::kPV_Scan &&
+      PortOverlay::CrosshairInVisor(player->GetPlayerState()->GetCurrentVisor())) {
 #else
   if (player->GetDrawCrosshairs() &&
       player->GetPlayerState()->GetCurrentVisor() != CPlayerState::kPV_Scan) {
@@ -2071,7 +2073,7 @@ void CCompoundTargetReticle::DrawCrosshairs(const CMatrix3f& rotation,
     return;
   }
   float scale = mCrosshairsDrawScale;
-  if (PortMouse::Aiming()) {
+  if (PortMouse::Aiming(mPlayerIndex)) {
     scale *= static_cast< float >(PortOverlay::CrosshairSize()) / 100.f;
   }
   // PortVr cannon targeting: the crosshair sits where the cannon's ray hits, found this frame
@@ -2128,7 +2130,7 @@ void CCompoundTargetReticle::DrawCrosshairs(const CMatrix3f& rotation,
     // Pointer aim: the cursor is the pointer, on the same plane where the ray through it meets.
     float pointerX = 0.f;
     float pointerY = 0.f;
-    if (PortMouse::PointerAimPosition(pointerX, pointerY) && (pointerX != 0.f || pointerY != 0.f)) {
+    if (PortMouse::PointerAimPosition(pointerX, pointerY, mPlayerIndex) && (pointerX != 0.f || pointerY != 0.f)) {
       float yaw = 0.f, pitch = 0.f, rayX = 0.f, rayY = 1.f, rayZ = 0.f;
       PortMouse::PointerAim::RayAngles(pointerX, pointerY, cam->GetFov(), cam->GetAspectRatio(),
                                        yaw, pitch);
@@ -2169,7 +2171,7 @@ void CCompoundTargetReticle::DrawCrosshairs(const CMatrix3f& rotation,
     const CTransform4f cam = camMgr->GetCurrentCameraTransform(mgr, true);
     const CVector3f eye = cam.GetTranslation();
     xf = CTransform4f::LookAt(
-        eye, eye + PortTriPointerDir(cam, *camMgr->GetCurrentCamera(mgr, true)), cam.GetUp());
+        eye, eye + PortTriPointerDir(cam, *camMgr->GetCurrentCamera(mgr, true), mPlayerIndex), cam.GetUp());
   }
   gpRender->SetModelMatrix(xf * CTransform4f::Scale(scale));
   model->Draw(CModelFlags::Additive(color).DepthCompareUpdate(false, false));
@@ -2193,7 +2195,7 @@ void CCompoundTargetReticle::PortUpdateRemasteredCrosshair(float dt, const CStat
   // Pointer aim: what is under the pointer, not under the screen centre.
   float pointerX = 0.f;
   float pointerY = 0.f;
-  if (PortMouse::PointerAimPosition(pointerX, pointerY) && (pointerX != 0.f || pointerY != 0.f)) {
+  if (PortMouse::PointerAimPosition(pointerX, pointerY, mPlayerIndex) && (pointerX != 0.f || pointerY != 0.f)) {
     const CGameCamera* cam = camMgr->GetCurrentCamera(mgr, true);
     float yaw = 0.f, pitch = 0.f, rayX = 0.f, rayY = 1.f, rayZ = 0.f;
     PortMouse::PointerAim::RayAngles(pointerX, pointerY, cam->GetFov(), cam->GetAspectRatio(), yaw,
@@ -2208,7 +2210,7 @@ void CCompoundTargetReticle::PortUpdateRemasteredCrosshair(float dt, const CStat
     dir.Normalize();
     static const CMaterialFilter filter = CMaterialFilter::MakeIncludeExclude(
         CMaterialList(kMT_Solid), CMaterialList(kMT_Player, kMT_ProjectilePassthrough));
-    rstl::reserved_vector< TUniqueId, 1024 > nearList;
+    rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
     mgr.BuildNearList(nearList, eye, dir, kRange, filter, mgr.GetPlayer(mPlayerIndex));
     TUniqueId hitId = kInvalidUniqueId;
     const CRayCastResult hit = mgr.RayWorldIntersection(hitId, eye, dir, kRange, filter, nearList);

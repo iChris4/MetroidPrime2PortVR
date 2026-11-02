@@ -193,7 +193,7 @@ void VrRoomScaleUpdate(CStateManager& mgr, CPlayer& player, float dt) noexcept {
     const CVector3f margin(0.2f, 0.2f, 0.2f);
     CAreaCollisionCache cache(CAABox(bounds.GetMinPoint() - margin, bounds.GetMaxPoint() + margin));
     CGameCollision::BuildAreaCollisionCache(mgr, cache);
-    rstl::reserved_vector< TUniqueId, 1024 > nearList;
+    rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
     mgr.BuildColliderList(nearList, player, cache.GetCacheBounds());
     // Sweep the full player bounds, then slide along the blocking surface.
     // Do not alter stick velocity, gravity, jump state or player orientation.
