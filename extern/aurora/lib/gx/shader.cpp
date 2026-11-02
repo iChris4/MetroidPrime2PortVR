@@ -945,7 +945,9 @@ auto lighting_func(const ShaderConfig& config, const ColorChannelConfig& cc, u8 
           var cosine = max(0.0, dot(ldir, light.dir));
           var cos_attn = dot(light.cos_att, vec3f(1.0, cosine, cosine * cosine));
           var dist_attn = dot(light.dist_att, vec3f(1.0, dist, dist2));
-          attn = max(0.0, cos_attn / dist_attn);)""");
+          // GX clamps the angular numerator, not the quotient. A negative distance
+          // polynomial intentionally subtracts light (Echoes' bouncing Dark Beam blobs).
+          attn = max(0.0, cos_attn) / dist_attn;)""");
   } else if (cc.attnFn == GX_AF_SPEC) {
     std::string_view normal = config.perPixelLight ? "pp_nrm"sv : "mv_nrm"sv;
     std::string dist_attn = diffFn != GX_DF_NONE

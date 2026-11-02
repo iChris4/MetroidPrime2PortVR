@@ -75,6 +75,8 @@
 #include "port_power_charge_release.h"
 #include "port_presentation_rules.h"
 #include "vr/vr_model_mirror.h"
+#include "vr/vr_look_scan.h"
+#include "vr/vr_settings.h"
 #include "vr/vr_view.h"
 #endif
 
@@ -2115,6 +2117,24 @@ void CPlayerGun::UpdateSeeker(float dt, CStateManager& mgr) {
   bool allowMissileFire = true;
   CPlayer* player = GetPlayer(mgr);
   CPlayerState* playerState = player->GetPlayerState();
+#ifdef TARGET_PC
+  CVector3f vrOrigin = player->GetEyePosition();
+  CVector3f vrDirection = player->GetTransform().GetForward();
+  const bool vrSeeker = player == mgr.GetPlayer(0) && PortVr::VrImmersive() &&
+      PortVr::GetVrSettings().CannonTargetingForVisor(false) &&
+      !player->GetCameraManager()->IsInCinematicCamera() &&
+      PortVr::VrCannonAim(*player, player->GetCameraManager()->GetCurrentCameraTransform(mgr, false),
+                          vrOrigin, vrDirection);
+  const auto inVrSeekerCircle = [&](const CVector3f& point) {
+    PortVr::LookScan::Metrics metrics;
+    return PortVr::LookScan::MetricsForPoint(
+        {{vrOrigin.GetX(), vrOrigin.GetY(), vrOrigin.GetZ()},
+         {vrDirection.GetX(), vrDirection.GetY(), vrDirection.GetZ()}},
+        {point.GetX(), point.GetY(), point.GetZ()}, 100.f, metrics) &&
+        PortVr::LookScan::SeekerAimCircle(metrics, player->GetCameraManager()->FirstPersonCamera()->GetRenderFov(),
+                                         CGraphics::GetViewport().mHeight);
+  };
+#endif
   if (playerState->HasPowerUp(CPlayerState::kIT_SeekerLauncher)) {
     if (mSeekerChargeState == kSCS_NotCharging) {
       mSeekerChargeFactor = CMath::Clamp(0.f, mSeekerChargeFactor - kChargeDtFactor * dt, 1.f);
@@ -2191,6 +2211,14 @@ void CPlayerGun::UpdateSeeker(float dt, CStateManager& mgr) {
 
       bool allowDuplicate = false;
       TUniqueId targetId = GetTargetId(mgr);
+#ifdef TARGET_PC
+      if (vrSeeker) {
+        const CActor* orbitTarget = TCastToConstPtr< CActor >(mgr.GetObjectById(targetId));
+        if (!orbitTarget || !inVrSeekerCircle(orbitTarget->GetAimPosition(mgr, 0.f))) {
+          targetId = kInvalidUniqueId;
+        }
+      }
+#endif
       if (CSwarmBasics* swarm =
               TCastToPtr< CSwarmBasics >(const_cast< CEntity* >(mgr.GetObjectById(targetId)))) {
         const TUniqueId swarmTarget = swarm->GetSeekerTargetLockedOn();
@@ -2198,7 +2226,11 @@ void CPlayerGun::UpdateSeeker(float dt, CStateManager& mgr) {
           targetId = swarmTarget;
         }
       }
-      const CVector3f eyePosition = player->GetEyePosition();
+      const CVector3f eyePosition =
+#ifdef TARGET_PC
+          vrSeeker ? vrOrigin :
+#endif
+          player->GetEyePosition();
       if (targetId != kInvalidUniqueId) {
         if (CActor* target =
                 TCastToPtr< CActor >(const_cast< CEntity* >(mgr.GetObjectById(targetId)))) {
@@ -2227,8 +2259,14 @@ void CPlayerGun::UpdateSeeker(float dt, CStateManager& mgr) {
       }
 
       if (targetId == kInvalidUniqueId) {
-        const CTransform4f xf =
+        CTransform4f xf =
             mPointBlankWorldSurface ? mElbowWorldXf : mGunWorldXf * mBeamLocalXf;
+#ifdef TARGET_PC
+        if (vrSeeker) {
+          const CVector3f up = fabsf(vrDirection.GetZ()) > .99f ? CVector3f(0.f, 1.f, 0.f) : CVector3f(0.f, 0.f, 1.f);
+          xf = CTransform4f::LookAt(vrOrigin, vrOrigin + vrDirection, up);
+        }
+#endif
         rstl::reserved_vector< TUniqueId, 1024 > nearList;
         CAABox bounds(CVector3f(-1.f, 0.f, -1.f), CVector3f(1.f, 100.f, 1.f));
         bounds = bounds.GetTransformedAABox(xf);
@@ -2288,10 +2326,19 @@ void CPlayerGun::UpdateSeeker(float dt, CStateManager& mgr) {
               continue;
             }
             const CVector3f orbitPosition = target->GetOrbitPosition(mgr);
-            const CVector3f screenPosition = camera->ConvertToScreenSpace(orbitPosition);
-            const float screenY = screenPosition.GetY() * CGraphics::GetViewport().mHeight * 0.5f;
-            const float screenX = screenPosition.GetX() * CGraphics::GetViewport().mWidth * 0.5f;
-            if (screenX * screenX + screenY * screenY < 2500.f &&
+            bool inAimCircle;
+#ifdef TARGET_PC
+            if (vrSeeker) {
+              inAimCircle = inVrSeekerCircle(orbitPosition);
+            } else
+#endif
+            {
+              const CVector3f screenPosition = camera->ConvertToScreenSpace(orbitPosition);
+              const float screenY = screenPosition.GetY() * CGraphics::GetViewport().mHeight * 0.5f;
+              const float screenX = screenPosition.GetX() * CGraphics::GetViewport().mWidth * 0.5f;
+              inAimCircle = screenX * screenX + screenY * screenY < 2500.f;
+            }
+            if (inAimCircle &&
                 mgr.RayCollideWorld(eyePosition, orbitPosition, nearList, skWeaponCollisionFilter,
                                     target)) {
               targetId = *it;

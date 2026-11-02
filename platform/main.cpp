@@ -24,6 +24,7 @@
 #include <aurora/main.h>
 
 #include <aurora/aurora.h>
+#include <aurora/event.h>
 #include <aurora/dvd.h>
 #include <dolphin/dvd.h>
 #include <dolphin/gx/GXAurora.h>
@@ -1073,6 +1074,7 @@ int main(int argc, char** argv) {
                 MP_BUILD_VERSION, MP_BUILD_REVISION);
     return 0;
   }
+  const bool optionsOnly = argc == 2 && std::strcmp(argv[1], "--options") == 0;
   // Android first, before anything can print: from here on fd 1 and fd 2 reach logcat, which
   // is the only place a device run leaves a record. A no-op on the desktop.
   PortLogBegin();
@@ -1142,10 +1144,10 @@ int main(int argc, char** argv) {
   // keeps the resolution it always had, below.
 #if defined(__ANDROID__)
   const std::string androidDiscImage =
-      EnsureDiscImage(port::entry::ResolveDiscPath(argc, argv, EnvOrFallback("MP2_DISC", appPaths.disc),
+      optionsOnly ? std::string() : EnsureDiscImage(port::entry::ResolveDiscPath(argc, argv, EnvOrFallback("MP2_DISC", appPaths.disc),
                                                    ExecutableDir(argc > 0 ? argv[0] : nullptr)),
                       appPaths.disc);
-  if (androidDiscImage.empty()) {
+  if (!optionsOnly && androidDiscImage.empty()) {
     // Nothing was picked, so there is nothing to boot: exiting here, before Aurora is up,
     // rather than at the disc check below, which would bring the renderer up only to close it.
     std::fprintf(stderr, "metroid_prime2_port: no disc image to boot\n");
@@ -1177,7 +1179,7 @@ int main(int argc, char** argv) {
   // MP2_VR_LOG and MP2_FOVEATION override them for this run. The VR menu's cannon texture library
   // and log file live in the user folder.
   PortVrHost::SetUserFolder(touchUser != nullptr ? touchUser : std::string());
-  PortVr::ApplyVrEnvironmentOverrides();
+  if (!optionsOnly) PortVr::ApplyVrEnvironmentOverrides();
   PortVr::PushVrSettingsToAurora();
 
   // The log file (platform/port_logfile.cpp) starts here, before aurora_initialize below, so
@@ -1223,14 +1225,20 @@ int main(int argc, char** argv) {
   // 720p by default, as the Prime 1 port: 16:9 unless the aspect setting is 4:3. The render mode
   // follows the setting (PortOverlay::ApplyAspect); Aurora upscales to the window either way.
   const bool widescreen = PortOverlay::AspectMode() != PortOverlay::kAspect_4_3;
+  // The options panel shares settings with :game, but never its live GPU cache.
+  const std::string optionsCache = appPaths.user + "/port_options_cache";
+  if (optionsOnly) {
+    std::error_code cacheError;
+    std::filesystem::create_directories(optionsCache, cacheError);
+  }
   AuroraConfig config = {
       .appName = kAppName,
       .userPath = EnvOrFallback("MP2_USER_PATH", appPaths.user),
-      .cachePath = EnvOrFallback("MP2_CACHE_PATH", appPaths.cache),
+      .cachePath = optionsOnly ? optionsCache.c_str() : EnvOrFallback("MP2_CACHE_PATH", appPaths.cache),
       .resourcesPath = nullptr,
       .desiredBackend = BACKEND_AUTO,
       .vsync = false, // the `vsync` setting (platform/port_overlay.cpp) is the source of truth
-      .startFullscreen = PortOverlay::Fullscreen(),
+      .startFullscreen = !optionsOnly && PortOverlay::Fullscreen(),
       // MP2_DUMP_TEXTURES=1 writes every texture the game loads to <cache>/texture_dumps, named
       // as a replacement pack must name it.
       .allowTextureDumps = port::EnvFlag("MP2_DUMP_TEXTURES"),
@@ -1350,7 +1358,8 @@ int main(int argc, char** argv) {
   // device, so the eyes are copied on the compositor's own GPU (D3D12 on Windows; a renderer
   // chosen in F1 other than Auto or D3D12 leaves the headset off for the run). A runtime that is
   // not there falls back to the desktop unless vr_required is set.
-  const PortVr::OpenXRStartupResult vrStartup = PortVr::OpenXRPrepareAurora(config);
+  const PortVr::OpenXRStartupResult vrStartup = optionsOnly
+      ? PortVr::OpenXRStartupResult::Disabled : PortVr::OpenXRPrepareAurora(config);
   if (vrStartup == PortVr::OpenXRStartupResult::Unavailable) {
     std::fprintf(stderr, "port: OpenXR unavailable: %s\n", PortVr::OpenXRLastError().c_str());
     if (PortVr::GetVrSettings().required) {
@@ -1424,6 +1433,39 @@ int main(int argc, char** argv) {
     PortTextures::Initialize(textures.empty() ? nullptr : textures.c_str(),
                              userTextures.empty() ? nullptr : userTextures.c_str());
     PortPrompts::Initialize(textures.empty() ? nullptr : textures.c_str());
+  }
+
+  if (optionsOnly) {
+    SDL_SetWindowTitle(auroraInfo.window, "PrimedGun Echoes Port Options");
+    SDL_ShowWindow(auroraInfo.window);
+    if (!PortOverlay::Visible()) PortOverlay::Toggle();
+    const char* testFrames = std::getenv("MP2_OPTIONS_FRAMES");
+    const int frameLimit = testFrames ? std::max(0, std::atoi(testFrames)) : 0;
+    int frames = 0;
+    bool quit = false;
+    std::fprintf(stderr, "port: options-only panel started (no disc, no OpenXR session)\n");
+    while (!quit) {
+      for (const AuroraEvent* event = aurora_update(); event && event->type != AURORA_NONE; ++event) {
+        if (event->type == AURORA_EXIT ||
+            (event->type == AURORA_SDL_EVENT && event->sdl.type == SDL_EVENT_KEY_DOWN &&
+             (event->sdl.key.scancode == SDL_SCANCODE_AC_BACK || event->sdl.key.scancode == SDL_SCANCODE_ESCAPE))) {
+          quit = true;
+        }
+      }
+      if (quit) break;
+      if (aurora_begin_frame()) {
+        PortOverlaySettings::PollSettingsFile(false);
+        PortDebug::DrawUI();
+        aurora_end_frame();
+        if (!PortOverlay::Visible() || (frameLimit > 0 && ++frames >= frameLimit)) break;
+      }
+      SDL_Delay(16);
+    }
+    PortOverlaySettings::SaveSettings();
+    PortVr::OpenXRShutdownBeforeAurora();
+    aurora_shutdown();
+    PortLogDrain();
+    return 0;
   }
 
   std::string discImage =

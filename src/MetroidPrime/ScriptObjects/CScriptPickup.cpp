@@ -329,15 +329,22 @@ void CScriptPickup::Think(float dt, CStateManager& mgr) {
       if (playerState->GetChargeBeamFactor() > playerState->GetChargeAnimStart()) {
         const CFirstPersonCamera* camera = player->GetCameraManager()->GetFirstPersonCamera();
         const CVector3f posDelta = GetTranslation() - camera->GetTransform().GetTranslation();
+#ifndef TARGET_PC
         const CVector3f cameraFront = camera->GetTransform().GetForward();
         const float dot = CVector3f::Dot(cameraFront, posDelta.AsNormalized());
         const float fovCos = cosine(CAbsAngle::FromDegrees(camera->GetFov()));
-        if (dot > fovCos && posDelta.MagSquared() < drawInDistanceSquared &&
-            posDelta.MagSquared() < closestDistance) {
+        if (!(dot > fovCos)) {
+          continue;
+        }
+#endif
+        // Native: charging attracts pickups all around the player, independently
+        // of the body camera, headset gaze or cannon direction.
+        const float distanceSquared = posDelta.MagSquared();
+        if (distanceSquared < drawInDistanceSquared && distanceSquared < closestDistance) {
           mEnableTractorTest = true;
           mInTractor = true;
           mHomingPlayerIndex = i;
-          closestDistance = posDelta.MagSquared();
+          closestDistance = distanceSquared;
         }
       }
     }

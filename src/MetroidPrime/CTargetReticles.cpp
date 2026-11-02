@@ -2335,17 +2335,32 @@ void CCompoundTargetReticle::DrawNextLockOnGroup(const CMatrix3f& rotation,
     if (CModel* const crosshair = mSeekerMissileCrosshair.GetObject()) {
       float factor = (chargeFactor - 0.75f) / 0.25f;
 #ifdef TARGET_PC
-      const CVector3f portTarget = PortPresentedTarget(mgr);
+      CVector3f portTarget = PortPresentedTarget(mgr);
+      CMatrix3f portRotation = rotation;
+      float portScale = 1.f;
+      CVector3f cannonPoint;
+      if (mPlayerIndex == 0 && PortVr::VrCannonTargetPoint(mgr, cannonPoint)) {
+        const CTransform4f camera = mgr.GetCameraManager(0)->GetCurrentCameraTransform(mgr, true);
+        const CVector3f head = PortVr::VrHeadViewTransform(camera).GetTranslation();
+        const float idleDistance = (portTarget - head).Magnitude();
+        if (idleDistance > .001f) portScale = (cannonPoint - head).Magnitude() / idleDistance;
+        portRotation = CTransform4f::LookAt(head, cannonPoint, rotation.GetColumn(kDZ)).BuildMatrix3f();
+        portTarget = cannonPoint;
+      }
 #endif
-      gpRender->SetModelMatrix(CTransform4f(rotation,
+      gpRender->SetModelMatrix(CTransform4f(
 #ifdef TARGET_PC
-                                       portTarget
+                                       portRotation, portTarget
 #else
-                                       mTargetPosition
+                                       rotation, mTargetPosition
 #endif
                                        ) *
                                CTransform4f::RotateY(CRelAngle::FromRadians(mSeekerRotationAngle)) *
-                               CTransform4f::Scale(0.25f * factor));
+                               CTransform4f::Scale(0.25f * factor
+#ifdef TARGET_PC
+                                                    * portScale
+#endif
+                                                    ));
       crosshair->Draw(CModelFlags::Additive(seekingColor.WithAlphaModulatedBy(factor))
                           .DepthCompareUpdate(false, false));
     }

@@ -142,6 +142,16 @@ inline bool PhysicsAabbUsableForAim(const Aabb& box, float targetingRadius) noex
     return AabbUsableForAim(box, targetingRadius, 6.0f, 10.0f);
 }
 
+// Retail Seeker acquisition uses a 50-pixel circle. Express that aperture around
+// the tracked cannon ray, not the body camera's screen centre.
+inline bool SeekerAimCircle(const Metrics& metrics, float verticalFovDegrees, float viewportHeight) noexcept {
+    if (!metrics.valid || metrics.along <= 0.0001f || !std::isfinite(viewportHeight) || viewportHeight <= 0.f ||
+        !std::isfinite(verticalFovDegrees) || verticalFovDegrees <= 0.f || verticalFovDegrees >= 180.f) return false;
+    const float pixels = metrics.perp / metrics.along * viewportHeight /
+                         (2.f * std::tan(verticalFovDegrees * 0.00872664626f));
+    return std::isfinite(pixels) && pixels < 50.f;
+}
+
 // PrimedGun RayIntersectsAabb (slabs): the entry distance, zero from inside.
 inline bool RayHitsAabb(const Ray& ray, const Aabb& box, float maxAlong, float& hitAlong) noexcept {
     float tMin = 0.0f;

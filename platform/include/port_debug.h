@@ -13,6 +13,9 @@ class CStateManager;
 
 namespace PortDebug {
 
+// Full settings UI, also usable before a game/disc exists in the standalone options panel.
+void DrawUI();
+
 // Live game state for the debug menu (set every simulation tick by
 // CStateManager::Update). Null before gameplay starts.
 void SetStateManager(CStateManager* mgr);

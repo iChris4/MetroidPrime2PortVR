@@ -840,9 +840,9 @@ void SaveSettings() {
 // PrimedGun Echoes: a key another program (PrimedGun Echoes' launcher) changed in the file while
 // the game runs, stored as LoadSettings stores it; the overlay's per-frame appliers
 // (port_overlay.cpp Draw: vsync, MSAA, anisotropy, render scale) pick it up, and the vr_* keys go
-// to Aurora at once (vr_enabled waits for the next start). Only the keys the launcher edits; any
-// other keeps the game's value, which its next save writes back. False when the key was not
-// applied. (The Metroid Prime VR port's debug_ui/window.cpp ApplyChangedSetting.)
+// to Aurora at once (vr_enabled waits for the next start). The full Quest options panel can
+// edit every registered key; startup-only values still wait for a restart. Unknown keys are
+// ignored. (The Metroid Prime VR port's debug_ui/window.cpp ApplyChangedSetting.)
 static bool ApplyChangedSetting(const std::string& key, const std::string& value) {
   if (key == "cannon_textures_applied") {
     // A request rather than a setting (no save writes it back): the launcher copied cannon
@@ -862,7 +862,10 @@ static bool ApplyChangedSetting(const std::string& key, const std::string& value
       key == "quick_resume") {
     return ApplySetting(key, value);
   }
-  return false;
+  // The Quest full-options panel can change any registered setting, not just
+  // the launcher's small key table. Startup-only options retain their usual
+  // restart semantics; unknown keys are still ignored by ApplySetting.
+  return ApplySetting(key, value);
 }
 
 void PollSettingsFile(bool now) {

@@ -23,6 +23,20 @@ bool Near(float a, float b) { return std::fabs(a - b) < 0.0001f; }
 int main() {
   using namespace PortVr::LookScan;
 
+  // Seeker sweep is relative to the controller, including when it points behind the body.
+  for (const Ray ray : {Ray{{0.f, 0.f, 0.f}, {0.f, 1.f, 0.f}},
+                        Ray{{2.f, 3.f, 1.f}, {-1.f, 0.f, 0.f}},
+                        Ray{{2.f, 3.f, 1.f}, {0.f, -1.f, 0.f}}}) {
+    Metrics m;
+    Check(MetricsForPoint(ray, Along(ray, 10.f), 100.f, m) && SeekerAimCircle(m, 90.f, 480.f),
+          "Seeker picks along the controller even sideways/behind the body");
+    Check(!MetricsForPoint(ray, Along(ray, -10.f), 100.f, m), "Seeker rejects targets behind its own ray");
+  }
+  Check(SeekerAimCircle({{},10.f,2.f,0.f,true},90.f,480.f), "48-pixel offset stays inside retail aperture");
+  Check(!SeekerAimCircle({{},10.f,2.2f,0.f,true},90.f,480.f), "off-axis target outside aperture is rejected");
+  Check(!SeekerAimCircle({{},0.f,0.f,0.f,true},90.f,480.f), "zero-depth target cannot produce an invalid aim");
+  Check(!SeekerAimCircle({{},10.f,0.f,0.f,true},90.f,0.f), "uninitialized viewport cannot select a target");
+
   // World sprites must face the head's position even to either side of the
   // body's camera, at the poles, or with a translated tracking origin.
   const PortVr::billboard_math::Vec3 viewer{3.f, 4.f, 5.f};

@@ -45,6 +45,13 @@ To bring over your VR settings from PrimedGun v2 (Metroid Prime) or from PrimedG
 game can share or mirror a Dolphin or PrimeHack card itself (in game, F1 > System > Memory card, PC
 only).
 
+## Full port options on Quest
+
+In **Port Config**, tap **Open Full Port Options (F1)...** to open the native
+settings in a touch-enabled Quest 2D panel. It needs no disc and shares settings
+with the game. Close the panel to return to the launcher; graphics backend and
+other startup-only changes take effect after restarting the game.
+
 ## Where your data is
 
 - **PC:** the `user` folder next to the executables: settings (`settings.cfg`), memory cards, save
