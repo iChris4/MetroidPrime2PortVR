@@ -2338,7 +2338,7 @@ TUniqueId CPlayer::FindScanTargetId(const CStateManager& mgr) const {
             const CMaterialFilter filter = CMaterialFilter::MakeIncludeExclude(
                 CMaterialList(kMT_Solid),
                 CMaterialList(kMT_ProjectilePassthrough, kMT_ScanPassthrough, kMT_Player));
-            rstl::reserved_vector< TUniqueId, 1024 > nearList;
+            rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
             mgr.BuildNearList(nearList, origin, unit, length, filter, this);
             TUniqueId hitId = kInvalidUniqueId;
             const CRayCastResult hit = mgr.RayWorldIntersection(hitId, origin, unit, length, filter, nearList);
