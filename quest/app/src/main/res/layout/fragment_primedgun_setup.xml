@@ -18,7 +18,7 @@
         android:paddingStart="12dp"
         android:paddingTop="10dp"
         android:paddingEnd="12dp"
-        android:paddingBottom="8dp">
+        android:paddingBottom="0dp">
 
         <TextView
             style="@style/PrimedGunSectionLabel"
@@ -169,13 +169,23 @@
             android:layout_weight="1"
             android:minHeight="12dp" />
 
-        <ImageView
-            android:layout_width="208dp"
-            android:layout_height="126dp"
+        <!-- Match the desktop artwork: full figure scaled to 360 high, with only
+             the upper half peeking above the panel edge. Clip the view, not the asset. -->
+        <FrameLayout
+            android:layout_width="209dp"
+            android:layout_height="180dp"
             android:layout_gravity="start|bottom"
             android:layout_marginTop="12dp"
-            android:contentDescription="@string/primedgun_samus_art"
-            android:scaleType="fitStart"
-            android:src="@drawable/primedgun_samus" />
+            android:clipChildren="true"
+            android:clipToPadding="true">
+
+            <ImageView
+                android:layout_width="209dp"
+                android:layout_height="360dp"
+                android:layout_gravity="top|start"
+                android:contentDescription="@string/primedgun_samus_art"
+                android:scaleType="fitStart"
+                android:src="@drawable/primedgun_light_suit" />
+        </FrameLayout>
     </LinearLayout>
 </ScrollView>
