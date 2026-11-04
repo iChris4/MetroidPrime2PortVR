@@ -42,7 +42,7 @@ CHomingBlob::CHomingBlob(const TToken< CGenDescription >& particle, TUniqueId ui
           CMaterialList(kMT_Projectile), damage, kPA_None, CModelData())
 , mCollisionBounds(bounds)
 , mParticleGen(rs_new CElementGen(particle, CElementGen::kMOT_One, CElementGen::kOSF_One))
-, mCollisionCache(rs_new CCollisionCache(mCollisionBounds, 2, 2, uid.Value() & 0x3ff))
+, mCollisionCache(rs_new CCollisionCache(mCollisionBounds, 2, 2, uid.Value() & kUniqueIdIndexMask))
 , mLightId(kInvalidUniqueId)
 , mParticleAssetId(CToken(particle).GetTag().GetId())
 , mTargetIds()
@@ -113,7 +113,7 @@ void CHomingBlob::Render(const CStateManager& mgr) const {
 
 void CHomingBlob::Think(float dt, CStateManager& mgr) {
   mElapsedTime += dt;
-  rstl::reserved_vector< TUniqueId, 1024 > nearList;
+  rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
   mgr.BuildNearList(nearList, mCollisionBounds, GetMaterialFilter(), this);
   CGameCollision::UpdateCollisionCache(mgr, *mCollisionCache, nearList,
                                        CGameCollision::kCUP_KeepNearListIds);
@@ -328,7 +328,7 @@ void CHomingBlob::AcceptScriptMsg(CStateManager& mgr, const CScriptMsg& msg) {
       const CAABox searchBounds(
           center - CVector3f(mTargetSearchRadius, mTargetSearchRadius, mTargetSearchRadius),
           center + CVector3f(mTargetSearchRadius, mTargetSearchRadius, mTargetSearchRadius));
-      rstl::reserved_vector< TUniqueId, 1024 > nearList;
+      rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
       const CActor* owner = TCastToConstPtr< CActor >(mgr.GetObjectById(GetOwnerId()));
       mgr.BuildNearList(nearList, searchBounds,
                         CMaterialFilter::MakeIncludeExclude(

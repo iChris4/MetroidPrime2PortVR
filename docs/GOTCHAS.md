@@ -31,8 +31,8 @@ Things that took real effort to find out. AGENTS.md keeps a one-line index; the 
   source's frame count comes out 0, and anything that divides by a parsed count must guard it under
   TARGET_PC (`CAnimSource` did not, and an integer divide by zero ended a run). When a sweep sees a
   stream of these after a world change, the question to answer is *which pak family* is missing.
-- **A save load comes up with ~1008 of the 1024 object ids allocated** and only settles near ~350 a
-  few hundred frames later (`CStateManager.cpp:5420` has the same numbers; `MP2_DEBUG_IDS=1` prints
+- **A save load comes up with ~1008 object ids allocated** (of 1024 retail; the port has 2048 since
+  MP1 sync 27, `kMaxObjects` in `TGameTypes.hpp`) and only settles near ~350 a few hundred frames later (`CStateManager.cpp:5420` has the same numbers; `MP2_DEBUG_IDS=1` prints
   the count every 300 frames). A warp that lands in that window can exhaust the pool; `PortWarpSettle`
   waits for 256 free and drops the areas around the player, which is what frees them (the first
   threshold, 512, was tuned for the boot spike and blocked ordinary hops - 499 of 526 waits in one
@@ -267,3 +267,16 @@ game ignores SIGPIPE, the copier ignores SIGTERM/SIGHUP, and Aurora logs through
   that touches them, keep the deletion (`git rm`). Their units and `Kyoto/Streams/CLZOSupport.cpp` stay
   NonMatching in `configure.py` (keep that too), so the matching build links the original objects. The port
   decodes with `src/Kyoto/Streams/CLZOSupportPort.cpp` (MIT, checked byte-identical on every disc chunk).
+
+## Motion watch (`[motion]` log lines)
+
+`platform/port_motion_watch.cpp` keeps the player's last 20 `CGameCollision::MovePlayer` ticks and writes
+them to stderr (and so the port log) when Samus moves more than 2 units in one tick, ends a tick faster than
+60 units/s, or starts a tick more than 2 units from where the previous one ended (a jump outside the mover).
+A dump is a header line (`[motion] <reason>: tick N moved … speed … gap …`) then one `[motion]` line per
+tick: update frame index, area id, mover (`groundNew`, `ball`, `air`), movement state (`ms`), morph state
+(`mb`), non-player colliders, position and velocity before and after, the impulse fed to the mover, `gap`,
+`warp`/`cine` tags and `kb=` knockbacks (`Class#uid`, direction, power, from `CStateManager::ApplyKnockBack`)
+received since the previous tick. At most one dump per 2 s and 20 per run. `CPlayer::Teleport` (console
+`tp`/`goto`, save-state load, room warps) sets the `warp` tag and is not dumped; a rebuilt player or a
+rewound update clock restarts the ring. Normal play writes nothing.

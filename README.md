@@ -16,16 +16,13 @@ package or release built from it.
 
 ## Features
 
-- Native OpenXR VR on PC (Direct3D 12, or Vulkan for SteamVR headsets such as PSVR2) and standalone
-  Meta Quest (tested on Quest 3).
+- Native OpenXR VR on PC (Direct3D 12, or Vulkan for SteamVR headsets such as PSVR2) and standalone Meta Quest (tested on Quest 3).
 - Room-scale movement with a modern VR control scheme, snap or smooth turning.
-- 6DOF arm cannon tracking for aiming, grapple and lock-on; left-handed play.
-- Head-locked HUD and helmet, visors in both eyes, look to scan.
-- Beam wheel and visor gestures, the 3D map held in your hand, pause screens and message boxes in
-  the headset.
+- 6DOF arm cannon tracking for aiming, grapple, lock-on and left-handed play.
 - One-click height calibration and adjustable cannon position and rotation.
-- In-headset VR menu for controls, calibration, graphics and more.
-- A PC launcher (`PrimedGunEchoes.exe`) and a Quest launcher panel for every PrimedGun setting.
+- Beam wheel and visor gestures configurations.
+- 3D map, pause screens and message boxes in the headset.
+- In-headset settings for controls, calibration, graphics, and more.
 
 ## Getting started
 
@@ -48,6 +45,13 @@ To bring over your VR settings from PrimedGun v2 (Metroid Prime) or from PrimedG
 game can share or mirror a Dolphin or PrimeHack card itself (in game, F1 > System > Memory card, PC
 only).
 
+## Full port options on Quest
+
+In **Port Config**, tap **Open Full Port Options (F1)...** to open the native
+settings in a touch-enabled Quest 2D panel. It needs no disc and shares settings
+with the game. Close the panel to return to the launcher; graphics backend and
+other startup-only changes take effect after restarting the game.
+
 ## Where your data is
 
 - **PC:** the `user` folder next to the executables: settings (`settings.cfg`), memory cards, save
@@ -68,7 +72,18 @@ file, else the release's `SHA256SUMS.txt`); a package that cannot be verified is
 **Install and restart launcher** then waits for the game and the launcher to close, copies the new
 files over the installation, keeps the replaced ones in a backup folder and puts them back if
 anything fails, then starts the new launcher. The `user` folder is never touched. Nothing is
-installed until you ask. The Quest has no updater yet: install the new APK over the old one.
+installed until you ask.
+
+## Updating on Quest
+
+From alpha.4, open **Setup > Check for updates...** in the Quest launcher. It checks
+this Echoes repository, shows release notes and downloads the Quest APK. Alpha/beta
+releases are included by default while running a preview; draft releases are hidden.
+The download must pass its SHA-256 check and match this app's package and signing key.
+Close the game and Port Options, then choose **Install update** and approve the Quest
+installer. Quest may first ask you to allow this launcher to install apps. Updates
+preserve saves and settings; never uninstall to update. Older versions can be updated
+by sideloading the APK over the existing installation.
 
 ## Not done yet
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 package org.primedgun.echoes
 
+import dev.encounter.aurora.AuroraSurface
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -38,6 +39,9 @@ import org.libsdl.app.SDLSurface
  * which finishes it as the headset's Quit does.
  */
 open class PrimedGunVrActivity : SDLActivity() {
+    protected open val optionsOnly = false
+    override fun getArguments(): Array<String> = if (optionsOnly) arrayOf("--options") else emptyArray()
+
     private val stopReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             Log.i(TAG, "The launcher asked the game to stop")
@@ -50,15 +54,16 @@ open class PrimedGunVrActivity : SDLActivity() {
 
     override fun getLibraries(): Array<String> = arrayOf("metroid_prime2_port")
 
-    override fun createSDLSurface(context: Context): SDLSurface = QuestSurface(context)
+    override fun createSDLSurface(context: Context): SDLSurface =
+        if (optionsOnly) AuroraSurface(context) else QuestSurface(context)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val user = QuestStorage.userFolder(this)
-        QuestStorage.clearLastError(this)
+        if (!optionsOnly) QuestStorage.clearLastError(this)
         writePortPaths(user)
         Os.setenv("MP2_NO_DISC_DIALOG", "1", true)
-        Os.setenv("MP2_VR", "1", true)
-        Os.setenv("MP2_LOG_FILE", "1", true)
+        Os.setenv("MP2_VR", if (optionsOnly) "0" else "1", true)
+        Os.setenv("MP2_LOG_FILE", if (optionsOnly) "0" else "1", true)
         // Screenshots (F12, MP2_SHOT_AT) need an absolute folder: SDL reads a relative path as an asset.
         Os.setenv("AURORA_SCREENSHOT_DIR", File(user, "screenshots").absolutePath, true)
         // Test runs over adb, e.g. straight into a room:
@@ -66,24 +71,28 @@ open class PrimedGunVrActivity : SDLActivity() {
         for (name in TEST_ENVIRONMENT) {
             intent?.getStringExtra(name)?.let { Os.setenv(name, it, true) }
         }
-        val disc = QuestStorage.discImage(this)
-        val discProblem = QuestStorage.checkDisc(disc)
-        if (discProblem == null) {
-            Os.setenv("MP2_DISC", disc.absolutePath, true)
-        } else {
-            // The game then finds no usable disc, does not ask (MP2_NO_DISC_DIALOG) and ends,
-            // which finishes this activity.
-            Log.w(TAG, discProblem)
-            QuestStorage.writeLastError(this, discProblem)
-            Os.unsetenv("MP2_DISC")
+        if (!optionsOnly) {
+            val disc = QuestStorage.discImage(this)
+            val discProblem = QuestStorage.checkDisc(disc)
+            if (discProblem == null) {
+                Os.setenv("MP2_DISC", disc.absolutePath, true)
+            } else {
+                // The game then finds no usable disc, does not ask (MP2_NO_DISC_DIALOG) and ends,
+                // which finishes this activity.
+                Log.w(TAG, discProblem)
+                QuestStorage.writeLastError(this, discProblem)
+                Os.unsetenv("MP2_DISC")
+            }
         }
         unpackPortResources()
 
         super.onCreate(savedInstanceState)
 
         // Only this app's launcher can send it (an explicit, package-scoped broadcast).
-        ContextCompat.registerReceiver(this, stopReceiver, IntentFilter(ACTION_STOP_GAME), ContextCompat.RECEIVER_NOT_EXPORTED)
-        stopReceiverRegistered = true
+        if (!optionsOnly) {
+            ContextCompat.registerReceiver(this, stopReceiver, IntentFilter(ACTION_STOP_GAME), ContextCompat.RECEIVER_NOT_EXPORTED)
+            stopReceiverRegistered = true
+        }
 
         if (mBrokenLibraries) {
             // SDLActivity reports this in a dialog, which the headset never shows.

@@ -173,7 +173,7 @@ bool InSight(CStateManager& mgr, const CVector3f& eye, const CActor& actor) noex
     }
     const float distance = eyeToOrbit.Magnitude();
     const CVector3f direction = eyeToOrbit.AsNormalized();
-    rstl::reserved_vector< TUniqueId, 1024 > nearList;
+    rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
     mgr.BuildNearList(nearList, eye, direction, distance, kOccluderFilter, &actor);
     for (auto it = nearList.begin(); it != nearList.end();) {
         if (const CEntity* entity = mgr.GetObjectById(*it)) {
@@ -216,7 +216,7 @@ void UpdateScan(CStateManager& mgr, const CPlayer& player, const PortVrSettings&
     const float targetingRadius = LookScan::TargetingRadius(settings.gun_targeting_radius);
     const float maxAlong = LookScan::MaxAlong(settings.gun_targeting_distance);
     const CVector3f reach(maxAlong, maxAlong, maxAlong);
-    rstl::reserved_vector< TUniqueId, 1024 > nearList;
+    rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
     mgr.BuildNearList(nearList, CAABox(origin - reach, origin + reach),
                       CMaterialFilter::MakeInclude(CMaterialList(kMT_Scannable)), &player);
 
@@ -300,7 +300,7 @@ void UpdateLock(CStateManager& mgr, const CPlayer& player, const PortVrSettings&
     const float maxAlong = LookScan::MaxAlong(settings.gun_targeting_distance);
     const float untestedAlong = maxAlong * kUntestedReach;
     const CVector3f reach(untestedAlong, untestedAlong, untestedAlong);
-    rstl::reserved_vector< TUniqueId, 1024 > nearList;
+    rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
     mgr.BuildNearList(nearList, CAABox(origin - reach, origin + reach),
                       CMaterialFilter::MakeInclude(CMaterialList(kMT_Orbit)), &player);
 
@@ -403,7 +403,7 @@ bool VrCannonTargetPoint(const CStateManager& mgr, CVector3f& point) noexcept {
         return false;
     }
     const float distance = LookScan::MaxAlong(settings.gun_targeting_distance);
-    rstl::reserved_vector< TUniqueId, 1024 > nearList;
+    rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
     mgr.BuildNearList(nearList, origin, direction, distance, kLineOfSightFilter, &player);
     TUniqueId hitId = kInvalidUniqueId;
     const CRayCastResult hit = mgr.RayWorldIntersection(hitId, origin, direction, distance,

@@ -1041,7 +1041,7 @@ void CPlayer::UpdateGunTransform(const CVector3f& position, CStateManager& mgr) 
   float pointerY = 0.f;
   mGun->PortSetPointerAimPoint(false, CVector3f::Zero());
   if (mGun->GetGunHolsterState() == CPlayerGunBase::kGHS_Drawn &&
-      PortMouse::PointerAimPosition(pointerX, pointerY) && (pointerX != 0.f || pointerY != 0.f) &&
+      PortMouse::PointerAimPosition(pointerX, pointerY, mPlayerIndex) && (pointerX != 0.f || pointerY != 0.f) &&
       (MouseAimAllowed(mgr) || PortLockFreeAim(mgr))) {
     const CFirstPersonCamera* cam = mCameraManager->GetFirstPersonCamera();
     // The view's own transform: the crosshair is drawn from it.
@@ -1060,7 +1060,7 @@ void CPlayer::UpdateGunTransform(const CVector3f& position, CStateManager& mgr) 
     {
       const CMaterialFilter filter = CMaterialFilter::MakeIncludeExclude(
           CMaterialList(kMT_Solid), CMaterialList(kMT_Player, kMT_ProjectilePassthrough));
-      rstl::reserved_vector< TUniqueId, 1024 > nearList;
+      rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
       mgr.BuildNearList(nearList, eye, rayDir, kAimRange, filter, this);
       TUniqueId hitId = kInvalidUniqueId;
       const CRayCastResult hit =
@@ -1146,13 +1146,15 @@ void CPlayer::UpdateDebugCamera(CStateManager& mgr) {}
 
 void CPlayer::Update(float dt, CStateManager& mgr) {
 #ifdef TARGET_PC
-  // port: the touch overlay's Ball page follows player 0's morph state (MP1's PublishWheelState).
+  // port: the touch overlay's Ball page follows player 0's morph state (MP1's PublishWheelState);
+  // Players 2-4's pads pick their Morph Ball rows from theirs.
   // A screw attack runs as a ball state (spawned state kMS_Morphed while it morphs in, spins and
   // unmorphs out) but plays as the suit: it keeps the gameplay bindings, so a remapped jump chains it.
-  if (mgr.GetPlayer(0) == this) {
+  if (GetPlayerIndex() < 4 && mgr.GetPlayer(GetPlayerIndex()) == this) {
     const bool screwAttack =
         mSpawnedMorphBallState == kMS_Morphed || mMorphBall->InScrewAttackMode();
-    PortTouch::SetMorphed(GetMorphballTransitionState() != kMS_Unmorphed && !screwAttack);
+    PortTouch::SetMorphed(GetMorphballTransitionState() != kMS_Unmorphed && !screwAttack,
+                          GetPlayerIndex());
   }
 #endif
   if (!mBeamParticleDescriptionsInitialized && NWeaponTypes::are_tokens_ready(mBeamEffectTokens)) {
@@ -1649,7 +1651,7 @@ ushort CPlayer::GetMaterialSoundUnderPlayer(CStateManager& mgr, const ushort* ta
   static const CMaterialFilter matFilter = CMaterialFilter::MakeInclude(CMaterialList(kMT_Solid));
 
   TUniqueId collideId = kInvalidUniqueId;
-  rstl::reserved_vector< TUniqueId, 1024 > nearList;
+  rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
   CAABox aabb = GetBoundingBox();
   aabb.AccumulateBounds(GetTranslation() + skDown);
   mgr.BuildNearList(nearList, aabb, matFilter, nullptr);
@@ -2579,7 +2581,7 @@ void CPlayer::ProcessInput(const CFinalInput& input, CStateManager& mgr) {
 #ifdef TARGET_PC
   // Twin-stick aim reads the C-stick here and applies it in Think (see UpdateMouseAim), unless a
   // key on it is picking a beam (PortMouse::StickOwnsCStick).
-  const bool stickAims = PortMouse::StickOwnsCStick();
+  const bool stickAims = PortMouse::StickOwnsCStick(mPlayerIndex);
   mPortLookX = stickAims ? input.GetAnalogRightX() : 0.f;
   mPortLookY = stickAims ? input.GetAnalogRightY() : 0.f;
 #endif
@@ -2980,19 +2982,26 @@ bool CPlayer::PortAimCrosshairsOpen() const {
       PortOverlay::CrosshairStyle() == PortOverlay::kCrosshairStyle_Classic) {
     return false;
   }
-  return PortMouse::Aiming() && PortOverlay::AimCrosshair();
+  return PortMouse::Aiming(mPlayerIndex) && PortOverlay::AimCrosshair();
 }
 
 bool CPlayer::PortLockFreeAim(const CStateManager& mgr) const {
   // Scan locks and grapples still aim through the centre.
-  return PortOverlay::LockOnFreeAim() && PortDirectAimControls() &&
+  if (!PortDirectAimControls() || mgr.GetPlayerState()->GetCurrentVisor() == CPlayerState::kPV_Scan) {
+    return false;
+  }
+  // Under pointer aim an empty lock always frees the pointer: Trilogy's Z with nothing targeted
+  // holds the view and leaves the cursor free. A target lock follows the setting.
+  if (mOrbitState == kOS_OrbitPoint && PortOverlay::PointerAim()) {
+    return true;
+  }
+  return PortOverlay::LockOnFreeAim(mPlayerIndex) &&
          (mOrbitState == kOS_OrbitObject || mOrbitState == kOS_OrbitPoint ||
-          mOrbitState == kOS_OrbitCarcass || mOrbitState == kOS_ForcedOrbitObject) &&
-         mgr.GetPlayerState()->GetCurrentVisor() != CPlayerState::kPV_Scan;
+          mOrbitState == kOS_OrbitCarcass || mOrbitState == kOS_ForcedOrbitObject);
 }
 
 bool CPlayer::PortDirectAimControls() const {
-  if (!PortMouse::Enabled() && !PortMouse::StickEnabled() && !PortMouse::TouchEnabled()) {
+  if (!PortMouse::DirectAim(mPlayerIndex)) {
     return false;
   }
   const CCameraManager* cameras = mCameraManager;
@@ -3003,19 +3012,18 @@ bool CPlayer::PortDirectAimControls() const {
 }
 
 void CPlayer::UpdateMouseAim(CStateManager& mgr, float dt) {
-  const bool direct =
-      PortMouse::Enabled() || PortMouse::StickEnabled() || PortMouse::TouchEnabled();
+  const bool direct = PortMouse::DirectAim(mPlayerIndex);
   // Pointer aim's settings live in the overlay, which PortMouse is built without.
   PortMouse::SetPointerAim(direct && PortOverlay::PointerAim(),
                            PortOverlay::PointerAimBox() / 100.f,
-                           PortOverlay::PointerAimTurn() * (PortMouse::kPi / 180.f));
+                           PortOverlay::PointerAimTurn() * (PortMouse::kPi / 180.f), mPlayerIndex);
   // Photo mode owns the pointer grab (PortPhoto::Frame), and the free camera owns the view.
   if (!direct || PortPhoto::Active()) {
     return;
   }
   const bool allowed = MouseAimAllowed(mgr);
-  if (PortMouse::StickEnabled() && !PortRadial::Capturing()) {
-    PortMouse::AddStickAim(mPortLookX, mPortLookY, dt);
+  if (PortMouse::StickEnabled(mPlayerIndex) && !PortRadial::Capturing()) {
+    PortMouse::AddStickAim(mPortLookX, mPortLookY, dt, mPlayerIndex);
   }
   // While something else owns the view - a lock-on, the morph ball, a cinematic - track the
   // camera direction instead, so engaging the mouse again does not snap the aim.
@@ -3029,12 +3037,14 @@ void CPlayer::UpdateMouseAim(CStateManager& mgr, float dt) {
   // the scan point under the pointer's window rather than the one at the centre (MP1 issue #190).
   const bool scanPointHold = mOrbitState == kOS_OrbitPoint &&
                              mgr.GetPlayerState()->GetCurrentVisor() == CPlayerState::kPV_Scan;
+  const bool lockFree = PortLockFreeAim(mgr);
+  const bool emptyLock = lockFree && mOrbitState == kOS_OrbitPoint && PortOverlay::PointerAim();
   if (!PortMouse::UpdateAim(true, !allowed, forward.GetX(), forward.GetY(), forward.GetZ(), dt,
-                            PortLockFreeAim(mgr), scanPointHold)) {
+                            lockFree, scanPointHold, emptyLock, mPlayerIndex)) {
     return;
   }
 
-  CTransform4f xf = CTransform4f::RotateZ(CRelAngle::FromRadians(PortMouse::Yaw()));
+  CTransform4f xf = CTransform4f::RotateZ(CRelAngle::FromRadians(PortMouse::Yaw(mPlayerIndex)));
   xf.SetTranslation(GetTransform().GetTranslation());
   SetTransform(xf);
 }
@@ -3048,7 +3058,7 @@ void CPlayer::ComputeFreeLook(const CFinalInput& input, CStateManager& mgr) {
 #ifdef TARGET_PC
   // Twin-stick consumes the C-stick: it aims through PortMouse, so letting the game's free
   // look read it too would turn the view twice.
-  if (PortMouse::StickEnabled()) {
+  if (PortMouse::StickEnabled(mPlayerIndex)) {
     lookLeft = lookRight = lookUp = lookDown = 0.f;
   }
 #endif
@@ -3917,7 +3927,7 @@ bool CPlayer::CanLeaveMorphBallState(CStateManager& mgr, CVector3f& position) co
     return false;
   }
 
-  rstl::reserved_vector< TUniqueId, 1024 > nearList;
+  rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
   CMaterialFilter filter = CMaterialFilter::MakeInclude(CMaterialList(kMT_Solid));
   const CVector3f& nearPosition = GetTranslation();
   mgr.BuildColliderList(nearList, *this,

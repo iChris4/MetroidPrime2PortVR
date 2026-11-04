@@ -497,6 +497,43 @@ void expect_clear_copy(Image& e) {
   fill(e, 0, 0, Size, Size, rgb(kClearCopyColor.r, kClearCopyColor.g, kClearCopyColor.b));
 }
 
+// GX permits subtractive lighting: clamp the spot numerator before dividing by
+// the signed distance polynomial. Dark Beam impact blobs use angle=5, distance=-5.
+void draw_signed_spot_light() {
+  background();
+  desc(GX_DIRECT, GX_NONE);
+  GXSetVtxDesc(GX_VA_NRM, GX_DIRECT);
+  GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_NRM, GX_NRM_XYZ, GX_F32, 0);
+  Mtx normal;
+  MTXIdentity(normal);
+  GXLoadNrmMtxImm(normal, GX_PNMTX0);
+  GXSetChanAmbColor(GX_COLOR0A0, GXColor{64, 64, 64, 255});
+  GXSetChanMatColor(GX_COLOR0A0, GXColor{255, 255, 255, 255});
+  GXSetChanCtrl(GX_COLOR0, GX_TRUE, GX_SRC_REG, GX_SRC_REG, GX_LIGHT0, GX_DF_CLAMP, GX_AF_SPOT);
+  GXSetChanCtrl(GX_ALPHA0, GX_FALSE, GX_SRC_REG, GX_SRC_REG, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
+  for (int q = 0; q < 4; ++q) {
+    GXLightObj light{};
+    GXInitLightPos(&light, 0.f, 0.f, 1000000.f);
+    GXInitLightDir(&light, 0.f, 0.f, 1.f);
+    GXInitLightColor(&light, GXColor{255, 255, 255, 255});
+    GXInitLightAttn(&light, q < 2 ? 5.f : -5.f, 0.f, 0.f, q % 2 == 0 ? -5.f : 5.f, 0.f, 0.f);
+    GXLoadLightObjImm(&light, GX_LIGHT0);
+    const f32 x = (q % 2) * 16.f;
+    const f32 y = (q / 2) * 16.f;
+    GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+    for (int v = 0; v < 4; ++v) {
+      GXPosition3f32(x + (v == 1 || v == 2 ? 16.f : 0.f), y + (v >= 2 ? 16.f : 0.f), -5.f);
+      GXNormal3f32(0.f, 0.f, 1.f);
+    }
+    GXEnd();
+  }
+}
+void expect_signed_spot_light(Image& e) {
+  fill(e, 0, 0, 16, 16, rgb(0, 0, 0));
+  fill(e, 16, 0, 32, 16, rgb(255, 255, 255));
+  fill(e, 0, 16, 32, 32, rgb(64, 64, 64));
+}
+
 constexpr Case Cases[] = {
     {"order-lead", draw_konst_reg, expect_konst_reg},
     {"direct-vertices", draw_direct, expect_direct},
@@ -513,6 +550,7 @@ constexpr Case Cases[] = {
     {"direct-vertices-late", draw_direct, expect_direct},
     {"indexed8-pos-color-late", draw_indexed8, expect_indexed8},
     {"indexed16-pos-late", draw_indexed16, expect_indexed16},
+    {"signed-spot-light", draw_signed_spot_light, expect_signed_spot_light},
 };
 constexpr size_t LeadCase = 0;
 constexpr size_t EarlyVertexCase = 1; // three cases, repeated from LateVertexCase on

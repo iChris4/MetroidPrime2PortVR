@@ -26,6 +26,25 @@ submission; clean quit. Without `MP2_SKIP_FRONTEND` a world boot waits at the ti
 attract video looks like gameplay in a capture. Port tests 59/59 (two skipped). Not yet checked in
 the headset by the user.
 
+## Local Quest full port-options panel (2026-11-02)
+
+Port Config > Open Full Port Options (F1) starts PortOptionsActivity in its own
+`:options` process with a normal touch-enabled AuroraSurface. The game remains
+in `:game`. Native `--options` bypasses disc validation, mounting, game startup
+and OpenXR, rendering the full F1 settings UI directly. Its GPU cache is separate;
+the settings file is shared. Settings polling now accepts every registered key
+from the full panel, preserving startup-only restart semantics. Opening flat
+options does not write the temporary VR-off environment flag into the saved VR
+preference. The launcher reloads changed settings when the panel closes.
+
+Windows/Quest built; 57 port checks passed, 2 skipped. Manual GPU smoke command:
+`python tests/port_options_smoke.py build/windows-vr/metroid_prime2_port.exe build/options-smoke`
+All nine pages open without a disc; an additional run checks external non-VR
+settings reload and VR-preference preservation. APK activity/JNI/signing checks
+passed. Physical Quest panel input still needs testing. Game-state actions remain
+in the live game's VR menu, not in the separate settings process.
+
+
 ## Local morph/unmorph heading correction (2026-11-01)
 
 Match Prime 1's separation of the first-person tracking base and the captured
@@ -919,3 +938,15 @@ how an unattended Windows run is checked by picture. Aurora writes
 Upstream `a33e1c0d`, Windows 11, VS 2022 clang-cl 19.1.5, Ninja, CI flags
 (`.github/workflows/windows.yml`) plus static OpenSSL 3.5.9: configure and full build in ~5 min,
 `ctest -L port` 32/32. D3D12 on the RTX 3090. New game to gameplay at 4.8 s.
+
+## Dark Beam impact lighting (2026-11-02)
+
+The bouncing homing blobs after a charged Dark Beam impact use a custom light with
+angular constant +5 and distance constant -5. GX clamps the angular numerator
+before dividing by the signed distance polynomial. Clamping the quotient instead
+lost the negative light and left pale gray centers. The classic GX spot shader now
+preserves that subtraction; final accumulated lighting remains clamped normally.
+A GPU self-test checks all four sign combinations. Before/after impact captures
+confirm dark centers with purple outlines. D3D12 and Vulkan GPU checks pass 17/17,
+including Vulkan with per-pixel lighting enabled; renderer recording tests pass 142/142.
+Windows and signed Quest test builds succeed. In-headset Quest validation remains pending.

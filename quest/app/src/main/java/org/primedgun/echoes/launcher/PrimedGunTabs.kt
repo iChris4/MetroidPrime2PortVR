@@ -16,7 +16,7 @@ import org.primedgun.echoes.R
  * table. Port Config takes the place of PrimedGun's Dolphin Config tab and holds the
  * Quest's own headset settings: the PC-only ones (VR on/off, the desktop mirror,
  * fullscreen, VSync) are left out, and the renderer switches the PC reaches through
- * the F1 overlay are here, since the Quest has none.
+ * the F1 overlay are here too. The full port options open in a separate 2D panel.
  */
 object PrimedGunTabs {
 

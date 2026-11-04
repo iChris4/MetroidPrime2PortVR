@@ -158,6 +158,7 @@
 #include "vr/vr_host.h" // PortVr (PrimedGun Echoes): the live game for the VR layer
 #include "vr/vr_view.h"
 #include "port_harness.h"
+#include "port_motion_watch.h"
 #include "port_entry.h"
 #include "port_hold_toggle.h"
 #include "port_touch.h"
@@ -562,7 +563,7 @@ void CStateManager::UpdateObjectInLists(CEntity& entity) {
 
 CRayCastResult CStateManager::RayWorldIntersection(
     TUniqueId& idOut, const CVector3f& position, const CVector3f& direction, float length,
-    const CMaterialFilter& filter, const rstl::reserved_vector< TUniqueId, 1024 >& nearList) const {
+    const CMaterialFilter& filter, const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList) const {
   return CGameCollision::RayWorldIntersection(*this, idOut, position, direction, length, filter,
                                               nearList);
 }
@@ -574,7 +575,7 @@ CRayCastResult CStateManager::RayStaticIntersection(const CVector3f& position,
 }
 
 bool CStateManager::RayCollideWorld(const CVector3f& start, const CVector3f& end,
-                                    const rstl::reserved_vector< TUniqueId, 1024 >& nearList,
+                                    const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList,
                                     const CMaterialFilter& filter,
                                     const CActor* ignoreActor) const {
   return RayCollideWorldInternal(start, end, filter, nearList, ignoreActor);
@@ -582,7 +583,7 @@ bool CStateManager::RayCollideWorld(const CVector3f& start, const CVector3f& end
 
 bool CStateManager::RayCollideWorld(const CVector3f& start, const CVector3f& end,
                                     const CMaterialFilter& filter, const CActor* ignoreActor) {
-  rstl::reserved_vector< TUniqueId, 1024 > nearList;
+  rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
   CVector3f direction = end - start;
   const float length = direction.Magnitude();
   direction *= 1.f / length;
@@ -593,7 +594,7 @@ bool CStateManager::RayCollideWorld(const CVector3f& start, const CVector3f& end
 
 const bool CStateManager::RayCollideWorldInternal(
     const CVector3f& start, const CVector3f& end, const CMaterialFilter& filter,
-    const rstl::reserved_vector< TUniqueId, 1024 >& nearList, const CActor* ignoreActor) const {
+    const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList, const CActor* ignoreActor) const {
   CVector3f direction = end - start;
   bool visible = true;
   if (direction.CanBeNormalized()) {
@@ -614,18 +615,18 @@ void CStateManager::AddObject(CEntity* entity) {
   }
 }
 
-void CStateManager::BuildNearList(rstl::reserved_vector< TUniqueId, 1024 >& nearList,
+void CStateManager::BuildNearList(rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList,
                                   const CAABox& bounds, const CMaterialFilter& filter,
                                   const CActor* ignoreActor) const {
   mSortedListManager->BuildNearList(nearList, bounds, filter, ignoreActor);
 }
 
-void CStateManager::BuildColliderList(rstl::reserved_vector< TUniqueId, 1024 >& nearList,
+void CStateManager::BuildColliderList(rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList,
                                       const CActor& actor, const CAABox& bounds) const {
   mSortedListManager->BuildNearList(nearList, actor, bounds);
 }
 
-void CStateManager::BuildNearList(rstl::reserved_vector< TUniqueId, 1024 >& nearList,
+void CStateManager::BuildNearList(rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList,
                                   const CVector3f& position, const CVector3f& direction,
                                   float length, const CMaterialFilter& filter,
                                   const CActor* ignoreActor) const {
@@ -2224,7 +2225,7 @@ void CStateManager::CapturePlayerTextures() {
       const bool scanVisor = mPlayerState->GetCurrentVisor() == CPlayerState::kPV_Scan;
       {
         float px = 0.f, py = 0.f;
-        if (scanVisor && PortMouse::PointerAimPosition(px, py)) {
+        if (scanVisor && PortMouse::PointerAimPosition(px, py, static_cast< int >(i))) {
           lensX = static_cast< int >(px * 0.5f * width);
           lensY = static_cast< int >(py * 0.5f * height);
         }
@@ -2638,7 +2639,7 @@ TUniqueId CStateManager::AllocateUniqueId() {
   ushort ourIndex;
   do {
     ourIndex = mNextFreeIndex;
-    mNextFreeIndex = (ourIndex + 1) % 1024;
+    mNextFreeIndex = (ourIndex + 1) % kMaxObjects;
     if (mNextFreeIndex == lastIndex) {
 #ifdef TARGET_PC
       // Port: report it once. The do/while below cannot find a free index and would spin here
@@ -2652,7 +2653,7 @@ TUniqueId CStateManager::AllocateUniqueId() {
       // Nothing here can find a free index, so the do/while would spin forever. Say what happened
       // - including who holds the pool - and stop: a run that dies naming the cause is worth more
       // than one that hangs.
-      std::fprintf(stderr, "[ids] the object id pool is exhausted (1024 live objects)\n");
+      std::fprintf(stderr, "[ids] the object id pool is exhausted (%d live objects)\n", int(kMaxObjects));
       PortLogIdPressure();
       std::fflush(stderr);
       std::abort();
@@ -2662,7 +2663,7 @@ TUniqueId CStateManager::AllocateUniqueId() {
     }
   } while (mAllocatedObjectIndices[ourIndex]);
 
-  mObjectIndexArray[ourIndex] = (mObjectIndexArray[ourIndex] + 1) & 0x3f;
+  mObjectIndexArray[ourIndex] = (mObjectIndexArray[ourIndex] + 1) & kUniqueIdVersionMask;
   if (TUniqueId(mObjectIndexArray[ourIndex], ourIndex) == kInvalidUniqueId) {
     mObjectIndexArray[ourIndex] = 0;
   }
@@ -3578,7 +3579,7 @@ CPlane CScriptWater::GetWRSurfacePlane() const {
 
 const bool
 CStateManager::TestRayDamage(const CVector3f& position, const CActor& damagee,
-                             const rstl::reserved_vector< TUniqueId, 1024 >& nearList) const {
+                             const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList) const {
   if (damagee.GetHealthInfo() == nullptr) {
     return false;
   }
@@ -3678,9 +3679,9 @@ void CStateManager::ProcessRadiusDamage(const CActor& source, CActor& damagee, T
   const CAABox bounds(position + CVector3f(negativeRadius, negativeRadius, negativeRadius),
                       position + CVector3f(radius, radius, radius));
 
-  rstl::reserved_vector< TUniqueId, 1024 > nearList;
+  rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
   BuildNearList(nearList, bounds, localFilter, nullptr);
-  for (rstl::reserved_vector< TUniqueId, 1024 >::iterator it = nearList.begin();
+  for (rstl::reserved_vector< TUniqueId, kMaxObjects >::iterator it = nearList.begin();
        it != nearList.end(); ++it) {
     CActor* actor = static_cast< CActor* >(ObjectById(*it));
     if (actor != nullptr) {
@@ -3711,9 +3712,9 @@ void CStateManager::ApplyDamageToWorld(TUniqueId owner, CActor& projectile,
         weapon->HasAttrib(CWeapon::kPA_TriggerBomb) || weapon->HasAttrib(CWeapon::kPA_PowerBombs);
   }
 
-  rstl::reserved_vector< TUniqueId, 1024 > nearList;
+  rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
   BuildNearList(nearList, bounds, useFilter, &projectile);
-  for (rstl::reserved_vector< TUniqueId, 1024 >::iterator it = nearList.begin();
+  for (rstl::reserved_vector< TUniqueId, kMaxObjects >::iterator it = nearList.begin();
        it != nearList.end(); ++it) {
     CActor* const actor = static_cast< CActor* >(ObjectById(*it));
     CPlayer* const player = TCastToPtr< CPlayer >(actor);
@@ -3771,6 +3772,9 @@ void CStateManager::ApplyKnockBack(CActor& actor, TUniqueId source, TUniqueId ow
   const bool alive = health->GetHP() > 0.f;
   const CKnockBackInfo info(direction, source, owner, damage, dampen == 0.f);
   if (player != nullptr) {
+#ifdef TARGET_PC
+    PortMotionWatch::NoteKnockback(*this, source, direction, power);
+#endif
     player->GetKnockBackManager().KnockBack(*this, *player, info);
     return;
   }
@@ -4123,12 +4127,24 @@ void CStateManager::ProcessPlayerInput() {
 #ifdef TARGET_PC
 // Toggle lock-on and sticky charge (F1 > Gameplay). Edges come from the combined digital/analog
 // state, since a GameCube L passes the analog threshold and clicks on different ticks and would
-// toggle twice. There is one local player's pad, so the state machines are file statics; a second
+// toggle twice. Each pad keeps its own state machines (file statics indexed by controller); a second
 // controller that owns no player is ignored rather than allowed to reset them.
 static void ApplyHoldToggle(CFinalInput& input, CStateManager& mgr, uint controller, bool enabled) {
-  static PortHoldToggle::Toggle sLockOn;
-  static PortHoldToggle::Sticky sCharge;
-  static bool sPrevL = false;
+  static PortHoldToggle::Toggle sLockOnAll[4];
+  static PortHoldToggle::Sticky sChargeAll[4];
+  static PortHoldToggle::Toggle sSpiderAll[4];
+  static PortHoldToggle::Grace sSpiderOnAll[4];
+  static bool sPrevLAll[4] = {false, false, false, false};
+  static bool sPrevRAll[4] = {false, false, false, false};
+  if (controller >= 4) {
+    return;
+  }
+  PortHoldToggle::Toggle& sLockOn = sLockOnAll[controller];
+  PortHoldToggle::Sticky& sCharge = sChargeAll[controller];
+  PortHoldToggle::Toggle& sSpider = sSpiderAll[controller];
+  PortHoldToggle::Grace& sSpiderOn = sSpiderOnAll[controller];
+  bool& sPrevL = sPrevLAll[controller];
+  bool& sPrevR = sPrevRAll[controller];
 
   // A controller index is not a player slot: ProcessPlayerInput maps a slot's selection the other
   // way round, so it is the selection that finds the player this pad belongs to.
@@ -4158,8 +4174,9 @@ static void ApplyHoldToggle(CFinalInput& input, CStateManager& mgr, uint control
   const CPlayer::EPlayerOrbitState orbit = player->GetOrbitState();
   const bool locked = orbit == CPlayer::kOS_OrbitObject ||
                       orbit == CPlayer::kOS_ForcedOrbitObject || orbit == CPlayer::kOS_Grapple;
+  const int index = player->GetPlayerIndex();
   const PortHoldToggle::Output outL = sLockOn.Update(
-      unmorphed && PortOverlay::LockOnToggle(), heldL, pressL, locked, input.DeltaTime());
+      unmorphed && PortOverlay::LockOnToggle(index), heldL, pressL, locked, input.DeltaTime());
   if (sLockOn.Latched() || outL.held != heldL) {
     input.PortSetL(outL.held, outL.pressed);
   }
@@ -4167,11 +4184,34 @@ static void ApplyHoldToggle(CFinalInput& input, CStateManager& mgr, uint control
   const bool heldA = input.DA();
   const bool pressA = input.PA();
   const CPlayerState* const state = player->GetPlayerState();
-  const bool charge = unmorphed && PortOverlay::StickyCharge() && state != nullptr &&
+  const bool charge = unmorphed && PortOverlay::StickyCharge(index) && state != nullptr &&
                       state->GetItemAmount(CPlayerState::kIT_ChargeBeam, true) != 0;
   const PortHoldToggle::Output outA = sCharge.Update(charge, heldA, pressA, input.DeltaTime());
   if (outA.held != heldA || outA.pressed != pressA) {
     input.PortSetA(outA.held, outA.pressed);
+  }
+
+  // Toggle Spider Ball: R clings to a track until the next press. Away from a track a press is a
+  // plain hold, and the damage that knocks the ball off keeps the latch for its duration.
+  const bool heldR = input.DR() || input.DRTrigger();
+  const bool pressR = heldR && !sPrevR;
+  sPrevR = heldR;
+  const CMorphBall* const ball = player->GetMorphBall();
+  const bool morphed = enabled && mgr.GetGameState() == CStateManager::kGS_Running &&
+                       player->GetMorphballTransitionState() == CPlayer::kMS_Morphed;
+  const bool spider = morphed && PortOverlay::SpiderToggle() && ball != nullptr;
+  const bool onTrack =
+      spider && sSpiderOn.Update(ball->GetBallState() == CMorphBall::kBS_Spider ||
+                                     ball->GetBallState() == CMorphBall::kBS_SpiderBoost ||
+                                     (sSpider.Latched() && ball->PortDamageTimer() > 0.f),
+                                 input.DeltaTime());
+  if (!spider) {
+    sSpiderOn.Reset();
+  }
+  const PortHoldToggle::Output outR =
+      sSpider.Update(spider, heldR, pressR, onTrack, input.DeltaTime());
+  if (sSpider.Latched() || outR.held != heldR) {
+    input.PortSetR(outR.held, outR.pressed);
   }
 }
 #endif
@@ -5091,7 +5131,7 @@ void CStateManager::PortWarpToArea(TAreaId aid) {
 
 namespace {
 // A warp holds off starting an area's stream while fewer than this many object ids are free. The
-// pool is 1024 (kMaxObjects) and a busy area's script objects run to several hundred, so a warp
+// pool is kMaxObjects (1024 retail, 2048 since the id widening; these thresholds are free-id counts measured at 1024) and a busy area's script objects run to several hundred, so a warp
 // started against a nearly-full pool is what exhausted it (a save load comes up at ~1008 and
 // settles near ~350 a few hundred frames later).
 constexpr int kPortWarpMinFreeIds = 256;

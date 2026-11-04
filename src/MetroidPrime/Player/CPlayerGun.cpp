@@ -75,6 +75,8 @@
 #include "port_power_charge_release.h"
 #include "port_presentation_rules.h"
 #include "vr/vr_model_mirror.h"
+#include "vr/vr_look_scan.h"
+#include "vr/vr_settings.h"
 #include "vr/vr_view.h"
 #endif
 
@@ -345,8 +347,9 @@ void CPlayerGun::PortAimShotAtPointer(CTransform4f& xf) const {
   xf.SetTranslation(position);
 }
 
-void CPlayerGun::PortStartRapidCharge() {
-  mPortRapidCharge = PortOverlay::RapidCharge() && PortRapidChargeFor(mCurrentBeamId) != nullptr;
+void CPlayerGun::PortStartRapidCharge(CStateManager& mgr) {
+  mPortRapidCharge = PortOverlay::RapidCharge(GetPlayerFromAll(mgr)->GetPlayerIndex()) &&
+                     PortRapidChargeFor(mCurrentBeamId) != nullptr;
   mPortRapidShots = 0;
   mPortRapidTimer = 0.f;
 }
@@ -701,7 +704,7 @@ void CPlayerGun::Main(CStateManager& mgr, int message, float dt) {
         mFiring = false;
         state->SetChargeBeamFactor(0.f);
 #ifdef TARGET_PC
-        PortStartRapidCharge();
+        PortStartRapidCharge(mgr);
 #endif
       }
     }
@@ -712,7 +715,7 @@ void CPlayerGun::Main(CStateManager& mgr, int message, float dt) {
       mPortRapidCharge = false;
     } else if (!state->ItemEnabled(CPlayerState::kIT_ChargeBeam)) {
       if ((mPressedInputFlags & 1) != 0) {
-        PortStartRapidCharge();
+        PortStartRapidCharge(mgr);
       } else if ((mInputFlags & 1) != 0 && mPortRapidCharge &&
                  mChargePhase == CPlayerGun::kCP_NotCharging &&
                  !PortRapidChargeShot(dt, mgr)) {
@@ -962,7 +965,7 @@ void CPlayerGun::MissileClosing(CStateManager& mgr, int message, float dt) {
         (mInputFlags & 4) != 0) {
       mChargePhase = kCP_ChargeRequested;
 #ifdef TARGET_PC
-      PortStartRapidCharge();
+      PortStartRapidCharge(mgr);
 #endif
     }
     break;
@@ -1680,7 +1683,7 @@ void CPlayerGun::Update(float dt, CStateManager& mgr) {
     const CVector3f direction = mGunWorldXf.GetForward().AsNormalized();
     const CVector3f offset = -(0.5f * direction);
     const CVector3f position = mGunWorldXf.GetTranslation() + offset;
-    rstl::reserved_vector< TUniqueId, 1024 > nearList;
+    rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
     CAABox bounds = CAABox::MakeMaxInvertedBox();
     bounds.AccumulateBounds(position);
     bounds.AccumulateBounds(position + 3.5f * direction);
@@ -1762,14 +1765,14 @@ void CPlayerGun::Update(float dt, CStateManager& mgr) {
       absorbXf.AddTranslation(player->GetCameraManager()->GetGlobalCameraTranslation(mgr, true));
       if (absorbXf.GetForward().GetZ() > 0.35f) {
         const float radius = gpTweakPlayerGun->GetPhazonShotAbsorbRadius();
-        rstl::reserved_vector< TUniqueId, 1024 > nearList;
+        rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
         CAABox bounds(CVector3f(-radius, 0.f, -radius), CVector3f(radius, 0.f, radius));
         bounds = bounds.GetTransformedAABox(absorbXf);
         mgr.BuildNearList(nearList, bounds,
                           CMaterialFilter::MakeInclude(CMaterialList(kMT_Projectile)), player);
         const float radiusSquared = radius * radius;
         bool absorbed = false;
-        for (rstl::reserved_vector< TUniqueId, 1024 >::const_iterator it = nearList.begin();
+        for (rstl::reserved_vector< TUniqueId, kMaxObjects >::const_iterator it = nearList.begin();
              it != nearList.end(); ++it) {
           CGameProjectile* projectile =
               TCastToPtr< CGameProjectile >(const_cast< CEntity* >(mgr.GetObjectById(*it)));
@@ -2115,6 +2118,24 @@ void CPlayerGun::UpdateSeeker(float dt, CStateManager& mgr) {
   bool allowMissileFire = true;
   CPlayer* player = GetPlayer(mgr);
   CPlayerState* playerState = player->GetPlayerState();
+#ifdef TARGET_PC
+  CVector3f vrOrigin = player->GetEyePosition();
+  CVector3f vrDirection = player->GetTransform().GetForward();
+  const bool vrSeeker = player == mgr.GetPlayer(0) && PortVr::VrImmersive() &&
+      PortVr::GetVrSettings().CannonTargetingForVisor(false) &&
+      !player->GetCameraManager()->IsInCinematicCamera() &&
+      PortVr::VrCannonAim(*player, player->GetCameraManager()->GetCurrentCameraTransform(mgr, false),
+                          vrOrigin, vrDirection);
+  const auto inVrSeekerCircle = [&](const CVector3f& point) {
+    PortVr::LookScan::Metrics metrics;
+    return PortVr::LookScan::MetricsForPoint(
+        {{vrOrigin.GetX(), vrOrigin.GetY(), vrOrigin.GetZ()},
+         {vrDirection.GetX(), vrDirection.GetY(), vrDirection.GetZ()}},
+        {point.GetX(), point.GetY(), point.GetZ()}, 100.f, metrics) &&
+        PortVr::LookScan::SeekerAimCircle(metrics, player->GetCameraManager()->FirstPersonCamera()->GetRenderFov(),
+                                         CGraphics::GetViewport().mHeight);
+  };
+#endif
   if (playerState->HasPowerUp(CPlayerState::kIT_SeekerLauncher)) {
     if (mSeekerChargeState == kSCS_NotCharging) {
       mSeekerChargeFactor = CMath::Clamp(0.f, mSeekerChargeFactor - kChargeDtFactor * dt, 1.f);
@@ -2191,6 +2212,14 @@ void CPlayerGun::UpdateSeeker(float dt, CStateManager& mgr) {
 
       bool allowDuplicate = false;
       TUniqueId targetId = GetTargetId(mgr);
+#ifdef TARGET_PC
+      if (vrSeeker) {
+        const CActor* orbitTarget = TCastToConstPtr< CActor >(mgr.GetObjectById(targetId));
+        if (!orbitTarget || !inVrSeekerCircle(orbitTarget->GetAimPosition(mgr, 0.f))) {
+          targetId = kInvalidUniqueId;
+        }
+      }
+#endif
       if (CSwarmBasics* swarm =
               TCastToPtr< CSwarmBasics >(const_cast< CEntity* >(mgr.GetObjectById(targetId)))) {
         const TUniqueId swarmTarget = swarm->GetSeekerTargetLockedOn();
@@ -2198,7 +2227,11 @@ void CPlayerGun::UpdateSeeker(float dt, CStateManager& mgr) {
           targetId = swarmTarget;
         }
       }
-      const CVector3f eyePosition = player->GetEyePosition();
+      const CVector3f eyePosition =
+#ifdef TARGET_PC
+          vrSeeker ? vrOrigin :
+#endif
+          player->GetEyePosition();
       if (targetId != kInvalidUniqueId) {
         if (CActor* target =
                 TCastToPtr< CActor >(const_cast< CEntity* >(mgr.GetObjectById(targetId)))) {
@@ -2227,15 +2260,21 @@ void CPlayerGun::UpdateSeeker(float dt, CStateManager& mgr) {
       }
 
       if (targetId == kInvalidUniqueId) {
-        const CTransform4f xf =
+        CTransform4f xf =
             mPointBlankWorldSurface ? mElbowWorldXf : mGunWorldXf * mBeamLocalXf;
-        rstl::reserved_vector< TUniqueId, 1024 > nearList;
+#ifdef TARGET_PC
+        if (vrSeeker) {
+          const CVector3f up = fabsf(vrDirection.GetZ()) > .99f ? CVector3f(0.f, 1.f, 0.f) : CVector3f(0.f, 0.f, 1.f);
+          xf = CTransform4f::LookAt(vrOrigin, vrOrigin + vrDirection, up);
+        }
+#endif
+        rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
         CAABox bounds(CVector3f(-1.f, 0.f, -1.f), CVector3f(1.f, 100.f, 1.f));
         bounds = bounds.GetTransformedAABox(xf);
         mgr.BuildNearList(nearList, bounds, skSeekerTargetFilter, player);
         if (!nearList.empty()) {
           const CGameCamera* camera = player->GetCameraManager()->GetFirstPersonCamera();
-          for (rstl::reserved_vector< TUniqueId, 1024 >::const_iterator it = nearList.begin();
+          for (rstl::reserved_vector< TUniqueId, kMaxObjects >::const_iterator it = nearList.begin();
                it != nearList.end(); ++it) {
             CActor* target = TCastToPtr< CActor >(const_cast< CEntity* >(mgr.GetObjectById(*it)));
             if (!target) {
@@ -2288,10 +2327,19 @@ void CPlayerGun::UpdateSeeker(float dt, CStateManager& mgr) {
               continue;
             }
             const CVector3f orbitPosition = target->GetOrbitPosition(mgr);
-            const CVector3f screenPosition = camera->ConvertToScreenSpace(orbitPosition);
-            const float screenY = screenPosition.GetY() * CGraphics::GetViewport().mHeight * 0.5f;
-            const float screenX = screenPosition.GetX() * CGraphics::GetViewport().mWidth * 0.5f;
-            if (screenX * screenX + screenY * screenY < 2500.f &&
+            bool inAimCircle;
+#ifdef TARGET_PC
+            if (vrSeeker) {
+              inAimCircle = inVrSeekerCircle(orbitPosition);
+            } else
+#endif
+            {
+              const CVector3f screenPosition = camera->ConvertToScreenSpace(orbitPosition);
+              const float screenY = screenPosition.GetY() * CGraphics::GetViewport().mHeight * 0.5f;
+              const float screenX = screenPosition.GetX() * CGraphics::GetViewport().mWidth * 0.5f;
+              inAimCircle = screenX * screenX + screenY * screenY < 2500.f;
+            }
+            if (inAimCircle &&
                 mgr.RayCollideWorld(eyePosition, orbitPosition, nearList, skWeaponCollisionFilter,
                                     target)) {
               targetId = *it;
@@ -2901,7 +2949,7 @@ void CPlayerGun::HandleBeamChange(const CFinalInput& input, CStateManager& mgr) 
 #ifdef TARGET_PC
   // The disc picks beams with the C-stick, which twin stick aims with (issue #15); beams then
   // come from the port's direct picks (LB + D-pad, the radial, keys), through PortTouch.
-  const bool stickPicks = !PortMouse::StickOwnsCStick();
+  const bool stickPicks = !PortMouse::StickOwnsCStick(player->GetPlayerIndex());
   for (int i = 0; stickPicks && i < 4; ++i) {
 #else
   for (int i = 0; i < 4; ++i) {
@@ -3101,7 +3149,11 @@ void CPlayerGun::UpdateGunIdle(float dt, CStateManager& mgr) {
 }
 
 void CPlayerGun::UpdateGunMotion(float dt, CStateManager& mgr) {
+#ifdef TARGET_PC
+  mMotionState.Update(mFiring && !mPortHandOnCannon, dt, mGunWorldXf, mgr);
+#else
   mMotionState.Update(mFiring, dt, mGunWorldXf, mgr);
+#endif
   CPlayer* player = GetPlayer(mgr);
   if (player->GetOrbitState() == CPlayer::kOS_OrbitObject && GetTargetId(mgr) != kInvalidUniqueId &&
       !mComboFiring) {
@@ -3174,8 +3226,26 @@ void CPlayerGun::UpdateTimers(float dt) {
 }
 
 void CPlayerGun::UpdateFreeLook(float dt, CStateManager& mgr) {
+#ifdef TARGET_PC
+  bool freeLook = GetPlayer(mgr)->IsInFreeLook();
+  // Port: as in Trilogy and PrimeHack, standing still under direct aim rests the left hand on the
+  // cannon. Direct aim replaces R's free look, so its pose stands in; turning and firing keep it,
+  // walking or leaving the ground drops it.
+  const CPlayer* const player = GetPlayer(mgr);
+  const bool still = PortOverlay::HandOnCannon() && player->PortDirectAimControls() &&
+                     player->GetPlayerMovementState() == NPlayer::kMS_OnGround &&
+                     player->GetOrbitState() == CPlayer::kOS_NoOrbit &&
+                     !(player->GetVelocityWR().Magnitude() > 0.01f);
+  mPortStillTime = still ? mPortStillTime + dt : 0.f;
+  mPortHandOnCannon = mPortStillTime >= 1.f;
+  freeLook = freeLook || mPortHandOnCannon;
+#endif
   if (mFidget.GetState() == CFidget::kS_NoFidget) {
+#ifdef TARGET_PC
+    if (freeLook && mMotionState.mMotionState == CMotionState::kMS_Zero &&
+#else
     if (GetPlayer(mgr)->IsInFreeLook() && mMotionState.mMotionState == CMotionState::kMS_Zero &&
+#endif
         !mInBigStrike) {
       if (mInFreeLook != true && mBeamChangeState == kBCS_Idle) {
         if (mEnterFreeLookDelayTimer < 0.25f) {

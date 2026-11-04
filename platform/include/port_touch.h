@@ -62,13 +62,19 @@ void AddAim(float dxDp, float dyDp);
 void SetAimDown(bool down);
 void SpringSwipe();
 // A swipe up, the Spring Ball binding or a gyro flick asked for a Spring Ball in the last 120 ms
-// (200 ms for a flick, so one just before landing counts); read by CMorphBall.
-bool SpringBallRequested();
+// (200 ms for a flick, so one just before landing counts); read by CMorphBall. `player` 1-3:
+// Players 2-4's own Spring Ball binding.
+bool SpringBallRequested(int player = 0);
 // MP1's PortDebug::RequestSpringBall: asks for one. CMorphBall springs on the request only on the
 // ground in the ball with Spring Ball on, so elsewhere it expires. The clear is the one spring
 // per request.
-void RequestSpringBall(float seconds = 0.12f);
-void ClearSpringBallRequest();
+void RequestSpringBall(float seconds = 0.12f, int player = 0);
+void ClearSpringBallRequest(int player = 0);
+// The Dodge action (MP1 issue #236): a sideways dash, locked on or not. The request lasts 120 ms;
+// That player's CPlayer takes it once, only on the ground while strafing (false under Original
+// Experience).
+void RequestDodge(int player = 0);
+bool TakeDodgeRequest(int player = 0);
 
 // Drag on the free screen to aim (MP1's `touch_aim`, on by default; `MP2_TOUCH_AIM`).
 bool AimEnabled();
@@ -122,10 +128,11 @@ void SetLayout(const std::string& layout);
 // The editor's entry points: the overlay's Edit button raises the request, the view takes it.
 void RequestEdit();
 bool TakeEditRequested();
-// CPlayer::Update publishes whether player 0 is out of the unmorphed state (bit 13 of the wheel
-// state, the Java view's Ball page), as MP1's CPlayer does.
-void SetMorphed(bool morphed);
-bool Morphed();
+// CPlayer::Update publishes whether each player is out of the unmorphed state (player 0's is bit
+// 13 of the wheel state, the Java view's Ball page), as MP1's CPlayer does; Players 2-4's pick
+// their pads' Morph Ball rows.
+void SetMorphed(bool morphed, int player = 0);
+bool Morphed(int player = 0);
 // CStateManager::Update publishes whether the game is soft paused: the scan text is up (CPlayer's
 // scan freeze, its only soft pause).
 void SetScanTextUp(bool up);
@@ -141,8 +148,9 @@ void CycleLayout();
 // player is in play. Built on the game thread by `BeginFrame`.
 int WheelState();
 // Queue a switch to an owned visor or beam (item index); applied by the next `BeginFrame`.
-void RequestVisor(int visor);
-void RequestBeam(int beam);
+// `player` 1-3: Players 2-4's, applied while their match is in play.
+void RequestVisor(int visor, int player = 0);
+void RequestBeam(int beam, int player = 0);
 // Game thread, from CHudVisorBeamMenu::Update: stores the HUD's four icons of a wheel (0 visor,
 // 1 beam; item order as RequestVisor/RequestBeam) as ARGB once they have loaded. A no-op for the
 // ones already taken.
@@ -152,6 +160,13 @@ bool WheelIcon(int wheel, int item, std::vector< uint32_t >& out);
 // The twin layout's Beam button, and the Turbo button.
 void SetBeamShift(bool held);
 void SetTurboFire(bool held);
+// Turbo's A, pulsed while the button is held (game thread; the input poll reads it).
+bool TurboDown();
+// The pointer menus' back arrow: Player 1's pad reads B while it is held, past every remap
+// (a Remastered preset turns the overlay's east button into fire). TakeMenuBack: held now, or
+// pressed since the last call (Player 1's pad poll is its one caller).
+void SetMenuBack(bool held);
+bool TakeMenuBack();
 // The game is paused (kFS_Paused: the pause menu, or a HUD memo / message screen - MP2's flow
 // state does not tell those apart).
 bool PauseScreenOpen();

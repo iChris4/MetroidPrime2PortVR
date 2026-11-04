@@ -10,6 +10,7 @@
 #include <string>
 
 #include "port_graphics_backend.h"
+#include "port_overlay.h"
 
 namespace PortOverlayState {
 
@@ -46,6 +47,8 @@ extern bool sSpringFlick;
 extern float sSpringFlickRate;
 extern bool sQuickResume;
 extern bool sLockOnToggle;
+extern bool sAimLockOn;
+extern bool sSpiderToggle;
 extern bool sStickyCharge;
 extern bool sRapidCharge;
 extern bool sAutoAim;
@@ -67,6 +70,14 @@ extern bool sGyroSplit;
 extern float sGyroSensitivityY;
 extern bool sResetAimBoth;
 extern bool sLockOnFreeAim;
+extern bool sHandOnCannon;
+// PortOverlay::PlayerSetting overrides of players 1-3 ([0] unused); settings.cpp reads and
+// writes them as `p<N>.<key>`.
+struct PlayerOverride {
+  float value = 0.f;
+  bool set = false;
+};
+extern PlayerOverride sPlayerSettings[PortOverlay::kSettingPlayers][PortOverlay::kPlayerSettingCount];
 extern bool sMenuStandardButtons;
 extern bool sCardBackup;
 extern float sFirstPersonFov;
@@ -74,6 +85,9 @@ extern bool sHideHelmet;
 extern bool sHideVisorEffects;
 extern bool sCinemaBars;
 extern bool sSecondaryCrosshairs;
+extern bool sCrosshairDark;
+extern bool sCrosshairEcho;
+extern bool sBallBars;
 extern bool sDarkVisorFull;
 extern int sDarkVisorStatic;
 extern bool sInfiniteBeamAmmo;

@@ -191,7 +191,7 @@ QLabel* TabContext::Section(const QString& text) const {
 void TabContext::Separator(QVBoxLayout* layout) const {
   auto* line = new QFrame;
   line->setFrameShape(QFrame::HLine);
-  line->setStyleSheet(QStringLiteral("color: #444955;"));
+  line->setStyleSheet(QStringLiteral("color: #3c4058;"));
   layout->addWidget(line);
 }
 

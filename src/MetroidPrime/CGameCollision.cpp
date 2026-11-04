@@ -31,6 +31,10 @@
 #include "rstl/math.hpp"
 #include "rstl/optional_object.hpp"
 
+#ifdef TARGET_PC
+#include "port_motion_watch.h"
+#endif
+
 #include <float.h>
 
 // The meanings of the two implicit static-geometry materials are not yet known.
@@ -133,7 +137,7 @@ CRayCastResult
 CGameCollision::RayWorldIntersection(const CStateManager& mgr, TUniqueId& idOut,
                                      const CVector3f& position, const CVector3f& direction,
                                      float length, const CMaterialFilter& filter,
-                                     const rstl::reserved_vector< TUniqueId, 1024 >& nearList) {
+                                     const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList) {
   const CRayCastResult staticResult =
       RayStaticIntersection(mgr, position, direction, length, filter);
   const CRayCastResult dynamicResult =
@@ -154,7 +158,7 @@ CRayCastResult
 CGameCollision::RayDynamicIntersection(const CStateManager& mgr, TUniqueId& idOut,
                                        const CVector3f& position, const CVector3f& direction,
                                        float length, const CMaterialFilter& filter,
-                                       const rstl::reserved_vector< TUniqueId, 1024 >& nearList) {
+                                       const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList) {
   float closest = length > 0.f ? length : 100000.f;
   CRayCastResult result;
   for (const TUniqueId* id = nearList.begin(); id != nearList.end(); ++id) {
@@ -178,7 +182,7 @@ CGameCollision::RayDynamicIntersection(const CStateManager& mgr, TUniqueId& idOu
 
 bool CGameCollision::RayDynamicLineOfSightTest(
     const CStateManager& mgr, const CVector3f& position, const CVector3f& direction, float length,
-    const CMaterialFilter& filter, const rstl::reserved_vector< TUniqueId, 1024 >& nearList,
+    const CMaterialFilter& filter, const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList,
     const CActor* ignoreActor) {
   const float maxDistance = length > 0.f ? length : 100000.f;
   for (const TUniqueId* id = nearList.begin(); id != nearList.end(); ++id) {
@@ -278,7 +282,7 @@ void CGameCollision::BuildAreaCollisionCache(const CStateManager& mgr, CAreaColl
 
 bool CGameCollision::DetectCollisionBoolean(
     const CStateManager& mgr, const CCollisionPrimitive& primitive, const CTransform4f& transform,
-    const CMaterialFilter& filter, const rstl::reserved_vector< TUniqueId, 1024 >& nearList) {
+    const CMaterialFilter& filter, const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList) {
   if (filter.GetExcludeList().HasMaterial(kMT_NoStaticCollision) == false &&
       DetectStaticCollisionBoolean(mgr, primitive, transform, filter)) {
     return true;
@@ -292,7 +296,7 @@ bool CGameCollision::DetectCollisionBoolean(
 bool CGameCollision::DetectCollisionBoolean_Cached(
     const CStateManager& mgr, CAreaCollisionCache& cache, const CCollisionPrimitive& primitive,
     const CTransform4f& transform, const CMaterialFilter& filter,
-    const rstl::reserved_vector< TUniqueId, 1024 >& nearList) {
+    const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList) {
   if (filter.GetExcludeList().HasMaterial(kMT_NoStaticCollision) == false &&
       DetectStaticCollisionBoolean_Cached(mgr, cache, primitive, transform, filter)) {
     return true;
@@ -306,7 +310,7 @@ bool CGameCollision::DetectCollisionBoolean_Cached(
 bool CGameCollision::DetectCollision_Cached(
     const CStateManager& mgr, CAreaCollisionCache& cache, const CCollisionPrimitive& primitive,
     const CTransform4f& transform, const CMaterialFilter& filter,
-    const rstl::reserved_vector< TUniqueId, 1024 >& nearList, TUniqueId& idOut,
+    const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList, TUniqueId& idOut,
     CCollisionInfoList& collisions) {
   idOut = kInvalidUniqueId;
   bool hit = false;
@@ -326,7 +330,7 @@ bool CGameCollision::DetectCollision_Cached(
 bool CGameCollision::DetectCollision_Cached_Moving(
     const CStateManager& mgr, CAreaCollisionCache& cache, const CCollisionPrimitive& primitive,
     const CTransform4f& transform, const CMaterialFilter& filter,
-    const rstl::reserved_vector< TUniqueId, 1024 >& nearList, const CVector3f& direction,
+    const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList, const CVector3f& direction,
     TUniqueId& idOut, CCollisionInfo& collision, double& distance) {
   idOut = kInvalidUniqueId;
   bool hit = false;
@@ -361,7 +365,7 @@ bool CGameCollision::DetectDynamicCollisionMoving(const CCollisionPrimitive& pri
 
 bool CGameCollision::DetectDynamicCollisionMoving(
     const CCollisionPrimitive& primitive, const CTransform4f& transform,
-    const rstl::reserved_vector< TUniqueId, 1024 >& nearList, const CVector3f& direction,
+    const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList, const CVector3f& direction,
     TUniqueId& idOut, CCollisionInfo& collision, double& distance, const CStateManager& mgr) {
   bool hit = false;
   for (const TUniqueId* id = nearList.begin(); id != nearList.end(); ++id) {
@@ -397,7 +401,7 @@ bool CGameCollision::DetectDynamicCollisionBoolean(const CCollisionPrimitive& pr
 
 bool CGameCollision::DetectDynamicCollisionBoolean(
     const CCollisionPrimitive& primitive, const CTransform4f& transform,
-    const rstl::reserved_vector< TUniqueId, 1024 >& nearList, const CStateManager& mgr) {
+    const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList, const CStateManager& mgr) {
   for (const TUniqueId* id = nearList.begin(); id != nearList.end(); ++id) {
     if (const CPhysicsActor* actor = TCastToConstPtr< CPhysicsActor >(mgr.GetObjectById(*id))) {
       if (DetectDynamicCollisionBoolean(primitive, transform, *actor)) {
@@ -425,7 +429,7 @@ bool CGameCollision::DetectDynamicCollision(const CCollisionPrimitive& primitive
 
 bool CGameCollision::DetectDynamicCollision(
     const CCollisionPrimitive& primitive, const CTransform4f& transform,
-    const rstl::reserved_vector< TUniqueId, 1024 >& nearList, TUniqueId& idOut,
+    const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList, TUniqueId& idOut,
     CCollisionInfoList& collisions, const CStateManager& mgr) {
   for (const TUniqueId* id = nearList.begin(); id != nearList.end(); ++id) {
     if (const CPhysicsActor* actor = TCastToConstPtr< CPhysicsActor >(mgr.GetObjectById(*id))) {
@@ -933,7 +937,7 @@ void CGameCollision::CollideWithStaticBodyNoRot(CPhysicsActor& actor, const CMat
 }
 
 void CGameCollision::Move(CStateManager& mgr, CPhysicsActor& actor, float dt,
-                          const rstl::reserved_vector< TUniqueId, 1024 >* colliderList) {
+                          const rstl::reserved_vector< TUniqueId, kMaxObjects >* colliderList) {
   if (!actor.GetMovable()) {
     return;
   }
@@ -962,14 +966,26 @@ void CGameCollision::Move(CStateManager& mgr, CPhysicsActor& actor, float dt,
 }
 
 void CGameCollision::MovePlayer(CStateManager& mgr, CPhysicsActor& actor, float dt,
-                                const rstl::reserved_vector< TUniqueId, 1024 >* colliderList) {
+                                const rstl::reserved_vector< TUniqueId, kMaxObjects >* colliderList) {
+#ifdef TARGET_PC
+  PortMotionWatch::TickScope motionWatch(mgr, TCastToPtr< CPlayer >(actor), colliderList);
+#endif
   actor.SetAngularEnabled(true);
   actor.AddMotionState(actor.PredictAngularMotion(dt));
   if (actor.IsStandardCollider()) {
+#ifdef TARGET_PC
+    motionWatch.Set(PortMotionWatch::Branch::Ball);
+#endif
     MoveAndCollide(mgr, actor, dt, CBallFilter(actor), colliderList);
   } else if (actor.GetMaterialList().HasMaterial(kMT_GroundCollider)) {
+#ifdef TARGET_PC
+    motionWatch.Set(PortMotionWatch::Branch::GroundNew);
+#endif
     CGroundMovement::MoveGroundCollider_New(mgr, actor, dt, colliderList);
   } else {
+#ifdef TARGET_PC
+    motionWatch.Set(PortMotionWatch::Branch::Air);
+#endif
     MoveAndCollide(mgr, actor, dt, CBallFilter(actor), colliderList);
   }
   actor.SetAngularEnabled(false);
@@ -977,7 +993,7 @@ void CGameCollision::MovePlayer(CStateManager& mgr, CPhysicsActor& actor, float 
 
 void CGameCollision::CollisionFailsafe(const CStateManager& mgr, CAreaCollisionCache& cache,
                                        CPhysicsActor& actor, const CCollisionPrimitive& primitive,
-                                       const rstl::reserved_vector< TUniqueId, 1024 >& nearList,
+                                       const rstl::reserved_vector< TUniqueId, kMaxObjects >& nearList,
                                        float dtFraction, uint failsafeTicks, float impulseScale) {
   actor.MoveCollisionPrimitive(CVector3f::Zero());
   if (dtFraction > 0.5f) {
@@ -1048,7 +1064,7 @@ CGameCollision::FindNonIntersectingVector(const CStateManager& mgr, CPhysicsActo
   const CVector3f centerPoint = center ? center.data() : aabb.GetCenterPoint();
   aabb = CAABox(aabb.GetMinPoint() - CVector3f(5.f, 5.f, 5.f),
                 aabb.GetMaxPoint() + CVector3f(5.f, 5.f, 5.f));
-  rstl::reserved_vector< TUniqueId, 1024 > nearList;
+  rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
   mgr.BuildColliderList(nearList, actor, aabb);
   for (int i = 2; i < 1000.f; i += i / 2) {
     const float pos = 0.005f * i;

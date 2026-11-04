@@ -169,10 +169,32 @@ Controls > Options:
   applies the Remastered layout to all controllers (Remap > Presets...), replacing your own
   controller bindings; greyed out with a GameCube adapter.
 - `lockon_toggle`: Buttons > Toggle Lock-On; env `MP2_LOCK_ON_TOGGLE`.
+- `spider_toggle`: Buttons > Toggle Spider Ball (default off, off under Original Experience; env
+  `MP2_SPIDER_TOGGLE`): an R press on a Spider Ball track clings until the next press; leaving the
+  track (more than 0.15 s) or the morph ball ending lets go. Away from a track, R works as usual.
+  Grapple key, Toggle Grapple and Shoot While Grappling (MP1 #243) are not ported: Echoes grapples
+  with the fire button at a grapple point and never holsters the cannon for it.
+- `aim_lock_on`: Buttons > Aim Lock-On (default off, off under Original Experience; env
+  `MP2_AIM_LOCK_ON`): lock-on picks the target nearest the crosshair, measured as an angle (screen x
+  weighed by the aspect ratio) with line of sight still required. Retail prefers a target nearer the
+  player by more than the orbit distance threshold even when it is off to the side. Grapple points
+  and the scan visor keep retail's pick.
+- Dodge (Controls > Remap > Move and aim, binding `dodge`, unbound by default): pressed on the
+  ground while strafing (strafe at least as strong as forward/back), it dashes. Locked on, it does
+  what a jump tapped while strafing does: retail's dash around the target. Not locked on, it does
+  the same dash (hop, speed, length, sound and rumble) straight sideways along the facing at the
+  press, with mouse/stick look free during it. A press is kept for 0.12 s, so pressing just before
+  the strafe works. Like any digital action it can be a touch button in the layout editor. Off under
+  Original Experience; the jump-tap dash is unchanged.
 - `sticky_charge`, `rapid_charge`: Buttons > Sticky Charge, Remastered charge (rapid fire).
 - `auto_aim`: Aiming > Auto-aim.
 - `pointer_aim`, `pointer_aim_box`, `pointer_aim_turn`: Aiming > Pointer aim (Trilogy style),
-  Dead box, Edge turn speed.
+  Dead box, Edge turn speed. An empty lock (L with nothing targeted, outside the Scan Visor)
+  holds the view and leaves the pointer free, as Trilogy's Z does, whatever Lock-on free aim says.
+- `hand_on_cannon`: Aiming > Hand on cannon when still (default on; needs Mouse aim, Twin stick
+  or Touch aim; env `MP2_HAND_ON_CANNON`), as in Trilogy and PrimeHack: after a second on the
+  ground without walking the gun enters the R free-look pose with the left hand on the cannon.
+  Turning, aiming and firing keep it; walking, jumping, lock-on, grapple and the morph ball drop it.
 - `lock_on_free_aim`: Aiming > Lock-on free aim (default off; needs Mouse aim, Twin stick or
   Touch aim), as in Remastered; env `MP2_LOCK_ON_FREE_AIM`. Under a combat lock the mouse, the
   right stick, gyro aim or a touch aim drag moves a crosshair over the view and shots leave along
@@ -286,6 +308,14 @@ Gyro aim needs mouse aim, twin stick or the touch controls' aim; without pointer
 camera at Sensitivity. Touch aim's Separate vertical speed and Vertical touch aim speed are
 touch.cfg's `aim_split` and `aim_speed_y` (env `MP2_TOUCH_AIM_SPLIT`, `MP2_TOUCH_AIM_SPEED_Y`).
 
+Multiplayer (Player 1-4 selector; Player 1 edits the Controls keys above):
+
+- `p2.`..`p4.` + `twin_stick`, `stick_aim_rate`, `stick_aim_split`, `stick_aim_rate_y`, `lockon_toggle`,
+  `sticky_charge`, `rapid_charge`, `auto_aim`, `lock_on_free_aim`, `gyro_aim`, `gyro_mode`,
+  `gyro_sensitivity`, `gyro_split`, `gyro_sensitivity_y`: that player's own value; a missing key follows
+  Player 1 ("same as Player 1"; Reset and Reset to Player 1 remove keys). Each player's controller is the
+  pad port assignment, not a settings key; Remap... opens Controls > Remap on that port.
+
 Video > Display:
 
 - `fullscreen`, `vsync`, `aspect`: Display > Fullscreen (F11), Vsync, Aspect ratio. `MP2_ASPECT`
@@ -308,6 +338,12 @@ Video > Display:
   `MP2_NO_HELMET`, `MP2_NO_VISOR_FX`.
 - `cinema_bars` (default on, env `MP2_CINEMA_BARS`): HUD and view > Cutscene black bars; off drops
   the cutscene letterbox and its viewport shrink. Original experience keeps them.
+- `crosshair_dark`, `crosshair_echo` (default off, env `MP2_CROSSHAIR_DARK`, `MP2_CROSSHAIR_ECHO`):
+  HUD and view > Crosshair in Dark Visor / Echo Visor; off fades the aiming crosshair (every style,
+  Trilogy's aiming cursor too) out as the Scan Visor does. Original experience shows it (MP1 486f7a0df).
+- `ball_bars` (default off, env `MP2_BALL_BARS`): HUD and view > Morph ball black bars; the ball
+  view's narrowed viewport (tweak `BallViewportYReduction`). Off, the world fills the screen in ball
+  mode and the ball HUD stays put. Original experience keeps the bars (MP1 535ccd192).
 - `secondary_crosshairs` (default on, env `MP2_SECONDARY_CROSSHAIRS`): HUD and view > Secondary
   crosshairs; off hides the next-target reticle (lock-on and the scan box stay).
 - `dark_visor_full` (default off, env `MP2_DARK_VISOR_FULL`): Enhancements > Full-screen Dark
@@ -348,6 +384,7 @@ Video > Quality and Frame rate:
   saved).
 - `per_pixel_lighting`: Quality > Per-pixel lighting (Aurora lights per pixel); env
   `MP2_PER_PIXEL_LIGHTING`.
+- `MP2_PIPELINE_SEED=0` ignores the embedded pipeline cache seed (docs/RELEASING.md).
 - Pipeline memory (env only, not saved; `platform/port_memory_log.cpp`): `MP2_PIPELINE_LAZY=0|1`
   builds pipelines when first drawn instead of all at startup (default on for Android, where a
   low-RAM device - `isLowRamDevice()` or under 4 GiB - is also named in the startup line; off on

@@ -9,7 +9,10 @@
 
 #include "MetroidPrime/CMain.hpp"
 #include <SDL3/SDL.h>
+#include <dolphin/pad.h>
 #include "port_harness.h"
+#include "port_vpads.h"
+#include "port_controls.h"
 #include "port_console.h"
 #include "port_discord.h"
 #include "port_mouse.h"
@@ -19,8 +22,12 @@
 #include "port_photo.h"
 
 #include "port_input.h"
+#include "port_input_remap_ui.h"
+#include "port_input_bindings.h"
+#include "input/port_input_devices.h"
 #include "port_logfile.h"
 #include "port_overlay.h"
+#include "port_touch.h"
 #include "port_pointer.h"
 #include "port_save.h"
 #include "port_savestate.h"
@@ -766,7 +773,7 @@ void CmdAreas(CStateManager& mgr, const Args&, std::string& out) {
     out += "no world yet\n";
     return;
   }
-  // Per area: phase/chain/active, the live objects it owns (what holds the 1024-entry id pool) and
+  // Per area: phase/chain/active, the live objects it owns (what holds the kMaxObjects-entry id pool) and
   // the areas its docks attach, so "who loaded this neighbour" can be read off one reply.
   const int count = world->IGetAreaCount();
   std::vector< int > owned(count > 0 ? count : 0, 0);
@@ -860,6 +867,48 @@ void CmdKill(CStateManager& mgr, const Args& args, std::string& out) {
   }
   patterned->Death(mgr, direction, kSS_DeathRattle);
   out += "killed\n";
+}
+
+// freeze <id>|target [seconds]: CPatterned::Freeze from the player's side, as MP1's Ice Beam
+// does. Echoes has no Ice Beam; Freeze is the body controller's frozen state (the same call
+// CGrenchler, CDarkCommando and the Space Pirate unfreeze), so the frozen draw can be looked at
+// without a source of the freeze.
+void CmdFreeze(CStateManager& mgr, const Args& args, std::string& out) {
+  if (args.size() < 2 || args.size() > 3) {
+    Fail("usage: freeze <id>|target [seconds]");
+    return;
+  }
+  CEntity* ent = nullptr;
+  if (Lower(args[1]) == "target") {
+    const CPlayer* player = mgr.GetPlayer(0);
+    ent = player != nullptr ? mgr.ObjectById(player->GetOrbitTargetId()) : nullptr;
+    if (ent == nullptr) {
+      Fail("no locked-on target");
+      return;
+    }
+  } else {
+    ent = const_cast< CEntity* >(ResolveObject(mgr, args[1]));
+  }
+  CPatterned* patterned = ent != nullptr ? TCastToPtr< CPatterned >(ent) : nullptr;
+  if (patterned == nullptr) {
+    Fail("not a patterned actor");
+    return;
+  }
+  float duration = 10.f;
+  if (args.size() > 2) {
+    duration = static_cast< float >(std::atof(Str(args[2]).c_str()));
+  }
+  CVector3f dir = CVector3f::Zero();
+  if (const CPlayer* player = mgr.GetPlayer(0)) {
+    dir = patterned->GetTranslation() - player->GetTranslation();
+  }
+  if (dir.CanBeNormalized()) {
+    dir.Normalize();
+  } else {
+    dir = patterned->GetTransform().GetForward();
+  }
+  patterned->Freeze(mgr, patterned->GetTranslation(), CUnitVector3f(dir), duration, -1.f);
+  out += "frozen\n";
 }
 
 // refill [energy|ammo]: energy up to the full tank count; ammo up to every capacity the suit has
@@ -1084,6 +1133,198 @@ void CmdInfiniteAmmo(CStateManager&, const Args& args, std::string& out) {
 void CmdMpForce(CStateManager&, const Args& args, std::string& out) {
   gPortForceMultiplayer = args.size() < 2 ? !gPortForceMultiplayer : ArgToInt(args[1], 1) != 0;
   out += gPortForceMultiplayer ? "forced multiplayer on\n" : "forced multiplayer off\n";
+}
+
+// `mpend`: ends the running multiplayer match now, as its time or kill limit would (the match then
+// takes the end-of-match path: fade, results screen, back to the front end).
+void CmdMpEnd(CStateManager& mgr, const Args&, std::string& out) {
+  CGameMode& mode = gpGameState->GetGameMode();
+  const int type = mode.GetGameModeType();  // not IsMultiplayer: `mpforce` fakes that in campaign
+  if (type == 'SNGL' || type == 'FRND' || mode.IsGameOver()) {
+    out += "not in a running multiplayer match\n";
+    return;
+  }
+  mode.EndGame(mode.GetResultIndex(), mgr);
+  out += "match ended\n";
+}
+
+// `pads`: which connected controller drives each pad port 0-3 (the F1 page's Player rows,
+// PADSetPortForIndex/PADClearPort), and how many controllers there are.
+void CmdPads(CStateManager&, const Args&, std::string& out) {
+  const u32 count = PADCount();
+  out += "count " + std::to_string(count) + "\n";
+  for (u32 port = PAD_CHAN0; port <= PAD_CHAN3; ++port) {
+    const s32 index = PADGetIndexForPort(port);
+    const char* name =
+        index >= 0 ? PADGetNameForControllerIndex(static_cast<u32>(index)) : nullptr;
+    out += "port " + std::to_string(port) + ": ";
+    if (index < 0) {
+      out += "none\n";
+    } else {
+      out += std::to_string(index) + " " + (name != nullptr ? name : "unknown") + "\n";
+    }
+  }
+}
+
+// `padport <index> <port>` / `padport clear <port>`: what the F1 Player combos call
+// (PADSetPortForIndex / PADClearPort).
+void CmdPadPort(CStateManager&, const Args& args, std::string& out) {
+  if (args.size() == 3 && args[1] == "clear") {
+    const int port = ArgToInt(args[2], -1);
+    if (port < 0 || port > 3) {
+      Fail("usage: padport <index> <port 0-3> | padport clear <port>");
+      return;
+    }
+    PADClearPort(static_cast<u32>(port));
+    out += "cleared\n";
+  } else if (args.size() == 3) {
+    const int port = ArgToInt(args[2], -1);
+    if (port < 0 || port > 3 || ArgToInt(args[1], -1) < 0) {
+      Fail("usage: padport <index> <port 0-3> | padport clear <port>");
+      return;
+    }
+    PADSetPortForIndex(static_cast<u32>(ArgToInt(args[1], 0)), static_cast<u32>(port));
+    out += "set\n";
+  } else {
+    Fail("usage: padport <index> <port 0-3> | padport clear <port>");
+  }
+}
+
+// `padpreset <gamecube|remastered|modern|southpaw|...> [port]`: apply a pad preset to one player's
+// controller and their own pad bindings (what the F1 remap page's Presets button does for the selected
+// player: controls.toml for port 0, controls_p<N>.toml for the others). Virtual pads and
+// empty ports are reported, not silently skipped. Port 0 is the default.
+void CmdPadPreset(CStateManager&, const Args& args, std::string& out) {
+  const int port = args.size() >= 3 ? ArgToInt(args[2], -1) : 0;
+  if (args.size() < 2 || args.size() > 3 || port < 0 || port > 3) {
+    Fail("usage: padpreset <preset name> [port 0-3]");
+    return;
+  }
+  const PortControls::SPadPortInfo info = PortControls::PadPortInfo(static_cast<unsigned>(port));
+  if (info.state == PortControls::EPadPortState::kNone) {
+    out += "port " + std::to_string(port) + ": no controller, nothing to remap\n";
+    return;
+  }
+  if (info.state == PortControls::EPadPortState::kVirtual) {
+    out += "port " + std::to_string(port) + ": virtual pad (" + info.name + "), mappings ignored: no-op\n";
+    return;
+  }
+  const std::string name = Str(args[1]);
+  if (name != "gamecube" && name != "remastered" && name != "modern" && name != "southpaw") {
+    Fail("unknown pad preset");
+    return;
+  }
+  // Remap's path: the controller's mapping, plus that player's own pad rows and Morph Ball rows.
+  PortInputRemap::ApplyPreset(PortInput::Family::Pad, name, static_cast<unsigned>(port));
+  out += "port " + std::to_string(port) + " (" + info.name + "): preset " + Str(args[1]) + " applied\n";
+}
+
+// `remapport [port]`: the player the F1 remap page's Presets buttons change (its Player selector);
+// no argument prints it.
+void CmdRemapPort(CStateManager&, const Args& args, std::string& out) {
+  if (args.size() > 1) {
+    const int port = ArgToInt(args[1], -1);
+    if (port < 0 || port > 3) {
+      Fail("usage: remapport [port 0-3]");
+      return;
+    }
+    PortControls::SetRemapPort(port);
+  }
+  out += "remap port " + std::to_string(PortControls::RemapPort()) + "\n";
+}
+
+// `padmap <port> [<gc button> <native>]`: a port's GameCube buttons on its controller (Aurora's
+// mapping, what the Multiplayer page's Buttons rows edit); with a button and a native input
+// ("a", "lb", "lt", "none" or an SDL button number) binds it, swapping as the page does.
+void CmdPadMap(CStateManager&, const Args& args, std::string& out) {
+  const int port = args.size() > 1 ? ArgToInt(args[1], -1) : -1;
+  if (port < 0 || port > 3 || (args.size() != 2 && args.size() != 4)) {
+    Fail("usage: padmap <port 0-3> [<a|b|x|y|l|r|z|start|up|down|left|right> <native>]");
+    return;
+  }
+  if (args.size() == 4) {
+    const int button = PortControls::PadButtonForLabel(args[2]);
+    const long long native = PortControls::NativeForLabel(args[3]);
+    if (button < 0 || native < 0) {
+      Fail("padmap: unknown button or native input");
+      return;
+    }
+    if (!PortControls::BindPadButton(port, button, static_cast< unsigned >(native))) {
+      Fail("padmap: port " + std::to_string(port) + " has no real controller");
+      return;
+    }
+  }
+  out += "port " + std::to_string(port) + ": " + PortControls::PadButtonsText(port) + "\n";
+}
+
+// `players`: each match player's position, body yaw, aim (yaw, pitch, whether it owns the view),
+// twin stick, direct aim controls, orbit state and beam.
+void CmdPlayers(CStateManager& mgr, const Args&, std::string& out) {
+  const int count = mgr.GetNumPlayers();
+  for (int i = 0; i < count; ++i) {
+    const CPlayer* player = mgr.GetPlayer(i);
+    const CPlayerState* state = mgr.GetPlayerState(i);
+    char line[256];
+    if (player == nullptr) {
+      std::snprintf(line, sizeof(line), "p%d none\n", i + 1);
+    } else {
+      const CVector3f p = player->GetTranslation();
+      const CVector3f fwd = player->GetTransform().GetForward();
+      std::snprintf(line, sizeof(line),
+                    "p%d pos %.2f %.2f %.2f yaw %.2f aim %.2f %.2f %s twin_stick %d direct %d orbit %d "
+                    "beam %d\n",
+                    i + 1, p.GetX(), p.GetY(), p.GetZ(), std::atan2(-fwd.GetX(), fwd.GetY()) * 57.29578f,
+                    PortMouse::Yaw(i), PortMouse::Pitch(i), PortMouse::Aiming(i) ? "aiming" : "held",
+                    PortMouse::StickEnabled(i) ? 1 : 0, player->PortDirectAimControls() ? 1 : 0,
+                    static_cast< int >(player->GetOrbitState()),
+                    state != nullptr ? static_cast< int >(state->GetCurrentBeam()) : -1);
+    }
+    out += line;
+  }
+}
+
+// `padread`: what the game's PADRead returns for each port right now.
+void CmdPadRead(CStateManager&, const Args&, std::string& out) {
+  PADStatus status[PAD_MAX_CONTROLLERS]{};
+  PADRead(status);
+  for (int i = 0; i < PAD_MAX_CONTROLLERS; ++i) {
+    char line[128];
+    std::snprintf(line, sizeof(line), "port %d: err %d buttons %04x stick %d,%d sub %d,%d trig %d,%d\n", i,
+                  static_cast<int>(status[i].err), status[i].button, status[i].stickX, status[i].stickY,
+                  status[i].substickX, status[i].substickY, status[i].triggerLeft, status[i].triggerRight);
+    out += line;
+  }
+}
+
+// `touchctl <touch name|code> 0|1`: holds or releases a touch overlay control as its button
+// would, code only (a stock one presses its fixed GameCube action, kTouchStockControls);
+// `turbo`/`tturbo` hold Turbo (PortTouch pulses A while the setting is on).
+void CmdTouchCtl(CStateManager&, const Args& args, std::string& out) {
+  PortInput::Input in;
+  if (args.size() != 3 || !PortInput::InputFromText("touch:" + Str(args[1]), in) ||
+      in.device != PortInput::Device::Touch) {
+    Fail("usage: touchctl <touch name|code> 0|1");
+    return;
+  }
+  const bool down = ArgToInt(args[2], 0) != 0;
+  if (in.code == 27 || in.code == 28) {
+    PortTouch::SetTurboFire(down);
+  } else {
+    PortInputDevices::SetTouchControl(in.code, down);
+  }
+  out += "touch " + Str(args[1]) + " (" + std::to_string(in.code) + ") " + (down ? "down" : "up") + "\n";
+}
+
+// `vpad ...`: SDL virtual gamepads (see port_vpads.h).
+void CmdVpad(CStateManager&, const Args& args, std::string& out) {
+  std::string rest;
+  for (size_t i = 1; i < args.size(); ++i) {
+    rest += Str(args[i]) + " ";
+  }
+  std::string err;
+  if (!PortVpads::Command(rest, out, err)) {
+    Fail(err);
+  }
 }
 
 void CmdFreeCam(CStateManager& mgr, const Args& args, std::string& out) {
@@ -1642,6 +1883,14 @@ void CmdGameEvent(CStateManager& mgr, const Args& args, std::string& out) {
   out += line;
 }
 
+// As the Dodge action's press: the player takes it within 120 ms, on the ground while strafing
+// (hold one with `press sx:<n>`).
+void CmdDodge(CStateManager&, const Args&, std::string& out) {
+  PortTouch::RequestDodge();
+  out = PortOverlay::OriginalExperience() ? "dodge requested (off under original experience)"
+                                          : "dodge requested";
+}
+
 void CmdSpringBall(CStateManager&, const Args& args, std::string& out) {
   const bool enabled = args.size() < 2 ? !PortOverlay::SpringBall() : ArgToInt(args[1], 1) != 0;
   PortOverlay::SetSpringBall(enabled);
@@ -1652,6 +1901,18 @@ void CmdLockOn(CStateManager&, const Args& args, std::string& out) {
   const bool enabled = args.size() < 2 ? !PortOverlay::LockOnToggle() : ArgToInt(args[1], 1) != 0;
   PortOverlay::SetLockOnToggle(enabled);
   out += enabled ? "toggle lock-on on\n" : "toggle lock-on off\n";
+}
+
+void CmdSpiderToggle(CStateManager&, const Args& args, std::string& out) {
+  const bool enabled = args.size() < 2 ? !PortOverlay::SpiderToggle() : ArgToInt(args[1], 1) != 0;
+  PortOverlay::SetSpiderToggle(enabled);
+  out += enabled ? "toggle spider ball on\n" : "toggle spider ball off\n";
+}
+
+void CmdAimLockOn(CStateManager&, const Args& args, std::string& out) {
+  const bool enabled = args.size() < 2 ? !PortOverlay::AimLockOn() : ArgToInt(args[1], 1) != 0;
+  PortOverlay::SetAimLockOn(enabled);
+  out += enabled ? "aim lock-on on\n" : "aim lock-on off\n";
 }
 
 void CmdSticky(CStateManager&, const Args& args, std::string& out) {
@@ -2692,7 +2953,7 @@ void DropUnplayableBodyCmds(CStateManager& mgr, std::string* out) {
       if (std::find(sUnplayableReported.begin(), sUnplayableReported.end(), key) ==
           sUnplayableReported.end()) {
         sUnplayableReported.push_back(key);
-        char line[192];
+        char line[256];
         std::snprintf(line, sizeof(line),
                       "u%04x: body cmd %s dropped: its PAS has no %s state (retail plays anim -1)\n",
                       key.first, entry.name, entry.name);
@@ -4163,7 +4424,7 @@ void CmdRay(CStateManager& mgr, const Args& args, std::string& out) {
   }
   dir = dir.AsNormalized();
   const CMaterialFilter filter = CMaterialFilter::MakeInclude(CMaterialList(kMT_Solid));
-  char line[192];
+  char line[256];
   CVector3f start = origin;
   float left = len;
   for (int i = 0; i < 16 && left > 0.f; ++i) {
@@ -4201,7 +4462,7 @@ void CmdRay(CStateManager& mgr, const Args& args, std::string& out) {
     start = pt + dir * 0.01f;
     left = len - CVector3f::Dot(start - origin, dir);
   }
-  rstl::reserved_vector< TUniqueId, 1024 > nearList;
+  rstl::reserved_vector< TUniqueId, kMaxObjects > nearList;
   mgr.BuildNearList(nearList, origin, dir, len, filter, nullptr);
   TUniqueId id = kInvalidUniqueId;
   const CRayCastResult hit = mgr.RayWorldIntersection(id, origin, dir, len, filter, nearList);
@@ -4415,7 +4676,7 @@ void CmdGrapple(CStateManager& mgr, const Args& args, std::string& out) {
   player->Teleport(CTransform4f::LookAt(pos, pos - dir, CVector3f::Up()), mgr, true);
   player->PortRefreshOrbitCandidates();
   PortInput::Hold(PAD_TRIGGER_L, 0, 0, 0, 0, 0, 2);
-  char line[192];
+  char line[256];
   std::snprintf(line, sizeof(line),
                 "grapple u%04x at (%.1f, %.1f, %.1f)%s: player at (%.1f, %.1f, %.1f), L held from "
                 "2 updates on%s\n",
@@ -4471,7 +4732,7 @@ void CmdLock(CStateManager& mgr, const Args& args, std::string& out) {
   player->Teleport(CTransform4f::LookAt(pos, pos - dir, CVector3f::Up()), mgr, true);
   player->PortRefreshOrbitCandidates();
   PortInput::Hold(PAD_TRIGGER_L, 0, 0, 0, 0, updates, 2);
-  char line[192];
+  char line[256];
   std::snprintf(line, sizeof(line),
                 "lock u%04x orbit point (%.1f, %.1f, %.1f): player at (%.1f, %.1f, %.1f), L held "
                 "from 2 updates on\n",
@@ -4941,6 +5202,8 @@ const CommandSpec kCommands[] = {
     {"heal", CmdHeal,
       "heal | kill [id|target]     refill energy; kill the player (a respawn test), an actor or the lock-on\n"},
     {"kill", CmdKill, ""},
+    {"freeze", CmdFreeze,
+      "freeze <id>|target [s]      freeze a patterned actor as CPatterned::Freeze does, for s seconds (default 10)\n"},
     {"refill", CmdRefill,
       "refill [energy|ammo]        energy to full / missiles, power bombs and beam ammo to capacity\n"},
     {"damage", CmdDamage,
@@ -4961,6 +5224,28 @@ const CommandSpec kCommands[] = {
       "                            powerbomb, dark or light\n"},
     {"mpforce", CmdMpForce,
       "mpforce <0|1>               IsMultiplayer reports true (multiplayer-only arms)\n"},
+    {"mpend", CmdMpEnd,
+      "mpend                       end the running multiplayer match now (fade, results, front end)\n"},
+    {"pads", CmdPads,
+      "pads                        the controller on each pad port 0-3 (players 1-4) and the controller count\n"},
+    {"padport", CmdPadPort,
+      "padport <index> <port>      give controller <index> (see `pads`) pad port 0-3; `padport clear <port>` frees it\n"},
+    {"padpreset", CmdPadPreset,
+      "padpreset <name> [port]     apply a pad preset (gamecube, remastered, modern, southpaw) to a port's controller (default 0)\n"},
+    {"remapport", CmdRemapPort,
+      "remapport [port]            the player (port 0-3) the F1 remap page's Presets change; no argument prints it\n"},
+    {"padmap", CmdPadMap,
+      "padmap <port> [<btn> <in>]  a port's GC buttons on its controller; with a button (a..z, start, up..right)\n"
+      "                            and an input (a, lb, lt, none, SDL number) binds it (swaps); Player 2-4 remap\n"},
+    {"players", CmdPlayers,
+      "players                     each player's position, yaw, aim, twin stick, direct aim, orbit, beam\n"},
+    {"padread", CmdPadRead,
+      "padread                     PADRead's status (err, buttons, sticks, triggers) for ports 0-3 right now\n"},
+    {"touchctl", CmdTouchCtl,
+      "touchctl <touch name|code> 0|1  hold/release a touch overlay control, code only (stock ones press their GameCube action)\n"},
+    {"vpad", CmdVpad,
+      "vpad list|attach [n]|detach <i>|<i> <button|axis> <value>|<i> gyro <yaw> <pitch>  SDL virtual gamepads (MP2_VPADS=n attaches at start);\n"
+      "                            buttons a b x y back guide start ls rs lb rb up down left right (0/1), axes lx ly rx ry lt rt (-1..1)\n"},
     {"overlay", CmdOverlay,
       "overlay <page>[/<sub>]|off  open the F1 window on a page (name prefixes: `overlay video/qual`)\n"},
     {"gpuselftest", CmdGpuSelfTest,
@@ -5063,6 +5348,12 @@ const CommandSpec kCommands[] = {
       "springball <0|1>            spring ball: C-stick up in Morph Ball bomb-jumps (needs Bombs)\n"},
     {"lockon", CmdLockOn,
       "lockon <0|1>                toggle lock-on: an L press latches until the next press\n"},
+    {"dodge", CmdDodge,
+      "dodge                      a Dodge press (sideways dash, locked on or not; needs a strafe held)\n"},
+    {"spidertoggle", CmdSpiderToggle,
+      "spidertoggle [0|1]         an R press holds the spider ball on its track until the next (spider_toggle)\n"},
+    {"aimlockon", CmdAimLockOn,
+      "aimlockon [0|1]            lock-on picks the target nearest the crosshair (aim_lock_on)\n"},
     {"sticky", CmdSticky,
       "sticky <0|1>                sticky charge: a long A hold keeps charging after the release\n"},
     {"pointeraim", CmdPointerAim,

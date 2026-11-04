@@ -594,7 +594,7 @@ bool LoadState(CStateManager& mgr, const State& s, int slot, const std::string& 
   const CAssetId liveWorld = gpGameState->CurrentWorldAssetId();
   SwapGameState(s);
   // Rebuild the areas with the layers their objects were spawned with (as each area lists them).
-  DisarmSpawnLayers();
+  DisarmSpawnLayers(false);
   if (PortOverlay::SaveStateRoomState()) {
     ArmSpawnLayers(s.roomState, static_cast< uint32_t >(s.worldId));
   }
@@ -975,7 +975,7 @@ void TickRoom(CStateManager& mgr) {
   // The last layer is waited out too: its objects only exist once its stream finished.
   ++sRoom.waited;
   int waiting = -1;
-  // A reload comes up with ~1008 of the 1024 object ids taken and purges a few hundred frames later;
+  // A reload comes up with ~1008 of the 2048 object ids taken and purges a few hundred frames later;
   // a layer streamed in before that runs the pool dry (AllocateUniqueId aborts). Wait, as
   // PortWarpSettle does, without counting the wait as idle.
   // Only a layer that has to stream in allocates ids: one already active (or switched off) is

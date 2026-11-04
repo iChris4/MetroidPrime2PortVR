@@ -26,6 +26,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
+import org.primedgun.echoes.PortOptionsActivity
 import org.primedgun.echoes.BuildConfig
 import org.primedgun.echoes.PrimedGunVrActivity
 import org.primedgun.echoes.QuestStorage
@@ -297,9 +298,14 @@ class LauncherActivity : AppCompatActivity() {
     }
 
     fun openPortOptions() {
-        // PrimedGun Echoes: the Echoes port has no options-only start, and its F1 window is not
-        // shown in the headset. In game, the VR menu holds the PrimedGun settings.
-        showMessage(R.string.primedgun_title, getString(R.string.primedgun_port_options_unavailable))
+        if (PrimedGunTransfer.isStaging || DiscCopy.isRunning) return
+        if (!gameRunning && !saveSettings(showResult = false)) return
+        try {
+            startActivity(Intent(this, PortOptionsActivity::class.java))
+        } catch (e: ActivityNotFoundException) {
+            Log.e(TAG, "Cannot open port options", e)
+            Toast.makeText(this, R.string.primedgun_launch_failed, Toast.LENGTH_LONG).show()
+        }
     }
 
     fun play() {
@@ -371,6 +377,16 @@ class LauncherActivity : AppCompatActivity() {
         binding.mainStatus.visibility = if (status.isEmpty()) View.GONE else View.VISIBLE
         binding.mainResetAll.isEnabled = !gameRunning
         binding.mainSaveSettings.isEnabled = !gameRunning
+    }
+
+    fun prepareUpdate(): Boolean {
+        val optionsOpen = (getSystemService(android.app.ActivityManager::class.java).runningAppProcesses ?: emptyList())
+            .any { it.processName == "$packageName:options" }
+        if (optionsOpen || gameRunning || launching || DiscCopy.isRunning || PrimedGunTransfer.isStaging) {
+            Toast.makeText(this, "Close the game and Port Options, and finish any file transfers before installing an update.", Toast.LENGTH_LONG).show()
+            return false
+        }
+        return saveSettings(showResult = false)
     }
 
     /** Writes the changed keys; false (after saying why) when the file could not be written. */

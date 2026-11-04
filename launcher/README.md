@@ -103,5 +103,9 @@ table and line-preserving editor. Where the Quest panel differs:
 - Import PrimedGun Settings takes a picked file: PrimedGun v2's
   `port_settings.ini`, a `PrimedGun.ini`, or a Dolphin user data zip (settings
   only; memory cards are refused).
-- Open Full Port Options says the F1 options are PC-only; the VR menu holds
-  the PrimedGun settings in the headset.
+- Open Full Port Options opens the native settings overlay in its own touch-enabled
+  2D panel and process, sharing settings with the game.
+- Setup > Check for updates lists published Echoes releases, downloads and verifies
+  the Quest APK, checks package/version/signature, then opens the system installer.
+  Installing is blocked while the game, Port Options, or a file transfer is active.
+  Saves and settings stay in place; the updater never uninstalls the app.

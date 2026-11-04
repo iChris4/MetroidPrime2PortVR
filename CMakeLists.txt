@@ -108,7 +108,7 @@ endif()
 option(MP_ENABLE_OPENXR "Build OpenXR VR support (PrimedGun Echoes)" ${MP_ENABLE_OPENXR_DEFAULT})
 unset(MP_ENABLE_OPENXR_DEFAULT)
 # PrimedGun Echoes' release version: the launcher's title and About tab, and the game's --version.
-set(MP_PRIMEDGUN_VERSION "1.0.0-alpha.3")
+set(MP_PRIMEDGUN_VERSION "1.0.0-alpha.4")
 # PrimedGun Echoes' launcher (launcher/): a Qt 6 window beside the game. Needs Qt on
 # CMAKE_PREFIX_PATH (docs/PRIMEDGUN.md, "Launcher").
 option(MP_BUILD_LAUNCHER "Build the PrimedGun Echoes Qt launcher (PrimedGunEchoes.exe)" OFF)
@@ -733,16 +733,16 @@ endif()
 if(AURORA_SDL3_TARGET)
     add_library(mp_port_audio OBJECT platform/ai_dma.cpp platform/port_controls.cpp
         platform/port_save.cpp platform/port_save_convert.cpp platform/port_save_trilogy.cpp platform/port_save_trilogy_payload.cpp platform/port_savestate.cpp platform/port_beam_ammo.cpp platform/port_savestate_room.cpp platform/port_savestate_fields.cpp platform/port_entity_schema.cpp platform/port_statedump.cpp platform/port_savestate_format.cpp platform/port_randomizer.cpp platform/port_rando_gen.cpp platform/port_rando_models.cpp platform/port_rando_world.cpp platform/port_rando_logic.cpp platform/port_logfile.cpp platform/port_breadcrumb.cpp
-        platform/port_crash.cpp platform/port_watchdog.cpp platform/port_memory_log.cpp platform/port_storage_report.cpp
+        platform/port_crash.cpp platform/port_watchdog.cpp platform/port_motion_watch.cpp platform/port_memory_log.cpp platform/port_storage_report.cpp
         platform/port_pointer.cpp platform/port_pointer_menu.cpp
-        platform/port_events.cpp platform/port_livesplit.cpp platform/port_harness.cpp platform/port_mouse.cpp
+        platform/port_events.cpp platform/port_vpads.cpp platform/port_livesplit.cpp platform/port_harness.cpp platform/port_mouse.cpp
         platform/port_radial.cpp
         platform/port_warp.cpp platform/port_freecam.cpp platform/port_photo.cpp platform/port_console.cpp platform/port_overlay.cpp platform/port_disc_replace.cpp
         platform/port_gyro_motion.cpp
         platform/port_dynamic_res.cpp platform/port_video.cpp platform/port_gpu_driver.cpp
         platform/port_data_folder.cpp
         platform/port_json.cpp platform/port_ws.cpp platform/port_update_check.cpp
-        platform/debug_ui/audio.cpp platform/debug_ui/card_data.cpp platform/debug_ui/cheats.cpp platform/debug_ui/controls.cpp platform/debug_ui/debug.cpp
+        platform/debug_ui/audio.cpp platform/debug_ui/card_data.cpp platform/debug_ui/cheats.cpp platform/debug_ui/controls.cpp platform/debug_ui/multiplayer.cpp platform/debug_ui/debug.cpp
         platform/debug_ui/enhancements.cpp
         platform/debug_ui/game_sections.cpp platform/debug_ui/mods.cpp platform/debug_ui/performance.cpp platform/debug_ui/randomizer.cpp
         platform/debug_ui/savestates.cpp platform/debug_ui/search.cpp platform/debug_ui/settings.cpp
@@ -915,6 +915,10 @@ if(AURORA_SDL3_TARGET)
     add_test(NAME port_scope_macho
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/port_scope_macho_test.py)
     set_tests_properties(port_scope_macho PROPERTIES TIMEOUT 60 LABELS port SKIP_RETURN_CODE 77)
+    # The pipeline cache seed holds only current, retail rows (tools/pipeline_seed.py check).
+    add_test(NAME port_pipeline_seed
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tools/pipeline_seed.py check)
+    set_tests_properties(port_pipeline_seed PROPERTIES TIMEOUT 60 LABELS port)
     # Every command in the console's table is documented in docs/CONSOLE.md.
     add_test(NAME port_console_docs
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/port_console_docs.py
@@ -1315,6 +1319,13 @@ if(MP_EMBED_RESOURCES)
     string(JOIN "\n" MP_EMBED_LIST ${MP_EMBED_INPUTS})
     set(MP_EMBED_LIST_FILE "${CMAKE_CURRENT_BINARY_DIR}/generated/port_embedded_inputs.txt")
     file(CONFIGURE OUTPUT "${MP_EMBED_LIST_FILE}" CONTENT "${MP_EMBED_LIST}\n" @ONLY)
+    # The pipeline cache seed (tools/pipeline_seed.py) rides along; the port_pipeline_seed test checks it.
+    # Absent (a first recording builds the binary that makes it), the build embeds textures only.
+    set(MP_EMBED_SEED "")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/initial_pipeline_cache.db")
+        set(MP_EMBED_SEED "${CMAKE_CURRENT_SOURCE_DIR}/assets/initial_pipeline_cache.db")
+        set(MP_EMBED_SEED_ARGS --file "${MP_EMBED_SEED}" initial_pipeline_cache.db)
+    endif()
     set(MP_EMBED_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/port_embedded_data.cpp")
     add_custom_command(
         OUTPUT "${MP_EMBED_SOURCE}"
@@ -1322,9 +1333,10 @@ if(MP_EMBED_RESOURCES)
         COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_resources.py"
             "${MP_EMBED_SOURCE}"
             --dir "${CMAKE_CURRENT_SOURCE_DIR}/textures" textures
-        DEPENDS ${MP_EMBED_INPUTS} "${MP_EMBED_LIST_FILE}"
+            ${MP_EMBED_SEED_ARGS}
+        DEPENDS ${MP_EMBED_INPUTS} "${MP_EMBED_LIST_FILE}" "${MP_EMBED_SEED}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_resources.py"
-        COMMENT "Embedding textures"
+        COMMENT "Embedding textures and the pipeline cache seed"
         VERBATIM)
     target_sources(metroid_prime2_port PRIVATE "${MP_EMBED_SOURCE}")
     target_compile_definitions(metroid_prime2_port PRIVATE MP_EMBED_RESOURCES)
@@ -1342,6 +1354,24 @@ elseif(NOT ANDROID)
             "${CMAKE_CURRENT_SOURCE_DIR}/textures"
             "$<TARGET_FILE_DIR:metroid_prime2_port>/textures"
         COMMENT "Copying texture replacements next to the executable")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/initial_pipeline_cache.db")
+    # Android: the APK carries the textures, but the seed is still embedded. Lazy mode merges it and
+    # queues each area's recorded pipelines when the game prefetches that area.
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(MP_EMBED_SEED "${CMAKE_CURRENT_SOURCE_DIR}/assets/initial_pipeline_cache.db")
+    set(MP_EMBED_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/port_embedded_data.cpp")
+    add_custom_command(
+        OUTPUT "${MP_EMBED_SOURCE}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/generated"
+        COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_resources.py"
+            "${MP_EMBED_SOURCE}" --file "${MP_EMBED_SEED}" initial_pipeline_cache.db
+        DEPENDS "${MP_EMBED_SEED}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_resources.py"
+        COMMENT "Embedding the pipeline cache seed"
+        VERBATIM)
+    target_sources(metroid_prime2_port PRIVATE "${MP_EMBED_SOURCE}")
+    # Gates only the table in port_embedded.cpp; with no textures/ entries, textures still come
+    # from the unpacked APK assets (main.cpp checks PortEmbedded::Under("textures/")).
+    target_compile_definitions(metroid_prime2_port PRIVATE MP_EMBED_RESOURCES)
 endif()
 
 # Install rules (desktop only): the executable, and for Linux menus and software centres the desktop

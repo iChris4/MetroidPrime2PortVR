@@ -7,8 +7,9 @@
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
     <!-- SDL's haptics call Vibrator.cancel() unconditionally. -->
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- The Archipelago client's WebSocket (ws:// only in this build). -->
+    <!-- GitHub release updates and the Archipelago client's WebSocket. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Select Game copies the disc image in a foreground service that keeps the CPU awake. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
@@ -83,6 +84,19 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Full native options use a touch-enabled 2D panel and their own SDL process. -->
+        <activity
+            android:name=".PortOptionsActivity"
+            android:configChanges="density|fontScale|keyboard|keyboardHidden|layoutDirection|locale|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:process=":options"
+            android:resizeableActivity="true"
+            android:theme="@style/Theme.PrimedGun.Vr">
+            <layout android:defaultWidth="1024dp" android:defaultHeight="720dp"
+                android:minWidth="760dp" android:minHeight="520dp" />
+        </activity>
+
         <!-- The game. Its own process, which PrimedGunVrActivity ends when the game
              closes: SDLActivity cannot be created twice in one process, and the
              OpenXR device must not start twice. Every configuration change is
@@ -109,6 +123,15 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+        <!-- Shares only verified APKs from the updater cache with the system installer. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
+        </provider>
     </application>
 
 </manifest>

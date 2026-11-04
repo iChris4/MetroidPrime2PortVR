@@ -33,7 +33,7 @@ qt_add_resources(PrimedGunEchoes "primedgun_assets"
         assets/PrimedGun.png
         assets/controller_layout.png
         assets/default_arm.png
-        assets/samus.png
+        assets/light_suit.png
         assets/samus_arm.png)
 # Setup > Check for updates installs through this script (ui/update_dialog.cpp).
 qt_add_resources(PrimedGunEchoes "primedgun_updater" PREFIX "/" FILES update-windows.ps1)
