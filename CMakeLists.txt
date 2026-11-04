@@ -98,8 +98,8 @@ set(MP_REL_FIXTURE "" CACHE PATH
 set(MP_DOL_SYMBOLS "${CMAKE_CURRENT_SOURCE_DIR}/config/G2ME01/symbols.txt" CACHE FILEPATH
     "DOL symbol list matching MP_REL_FIXTURE")
 
-# PrimedGun Echoes: OpenXR VR (docs/PRIMEDGUN.md), Windows D3D12/Vulkan first; the Quest
-# (Android Vulkan) comes later. The VR host layer is platform/vr, its Aurora side
+# PrimedGun Echoes: OpenXR VR (docs/PRIMEDGUN.md): Windows D3D12 or Vulkan, and the Quest
+# (Android Vulkan). The VR host layer is platform/vr, its Aurora side
 # extern/aurora/lib/stereo*. Off, the game builds without it (the PortVr calls compile to stubs).
 set(MP_ENABLE_OPENXR_DEFAULT OFF)
 if(WIN32)
@@ -669,6 +669,23 @@ if(MP_SDK_HEADERS_ONLY)
     return()
 endif()
 
+# PC VR on Vulkan (platform/vr/openxr_vulkan_direct.cpp and Aurora's direct bridge,
+# lib/webgpu/vulkan_direct_interop.cpp) compiles against the pinned Vulkan-Headers; the
+# Quest build has the NDK's. It needs PrimedGun's patched Dawn at run time
+# (tools/Build-WindowsDawn.ps1); with the stock one only Vulkan VR reports it unavailable.
+if(MP_ENABLE_OPENXR AND WIN32)
+    include(FetchContent)
+    # Vulkan-Headers' optional C++20 module needs `import std`; nothing here uses it.
+    set(VULKAN_HEADERS_ENABLE_MODULE OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(vulkan_headers
+        URL https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.335.tar.gz
+        URL_HASH SHA256=8ee39bee575bdccc1ecacd0bdb26f181841de35d7409a3eca468c6b622daa2f1
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        EXCLUDE_FROM_ALL)
+    FetchContent_MakeAvailable(vulkan_headers)
+    set(AURORA_VULKAN_DIRECT_HEADERS Vulkan::Headers)
+endif()
+
 add_subdirectory(extern/aurora EXCLUDE_FROM_ALL)
 if(TARGET aurora_mtx)
     target_compile_definitions(aurora_mtx PRIVATE MTX_USE_PS=1)
@@ -823,7 +840,12 @@ if(AURORA_SDL3_TARGET)
         target_compile_definitions(mp_port_vr PRIVATE MP_ENABLE_OPENXR=1)
         target_link_libraries(mp_port_vr PRIVATE ${MP_OPENXR_TARGET})
         if(WIN32)
-            target_sources(mp_port_vr PRIVATE platform/vr/openxr_d3d12.cpp)
+            # D3D12, or Vulkan through direct presentation on Dawn's own device (PrimedGun's
+            # patched Dawn), as the graphics_backend setting picks.
+            target_sources(mp_port_vr PRIVATE
+                platform/vr/openxr_d3d12.cpp
+                platform/vr/openxr_vulkan_direct.cpp)
+            target_link_libraries(mp_port_vr PRIVATE Vulkan::Headers)
         elseif(ANDROID)
             # The Quest: the loader's Android glue, and two Vulkan backends: direct
             # presentation on Dawn's own device (PrimedGun's patched Dawn), or Wiicompiled's
@@ -1123,7 +1145,7 @@ if(AURORA_SDL3_TARGET)
     mp_port_test(port_vr_policy_tests SOURCES tests/port_vr_policy.cpp platform/vr/prime_vr_policy.cpp
         INCLUDES platform/include extern/aurora/include extern/aurora/lib)
     mp_port_test(port_launcher_tests SOURCES tests/port_launcher.cpp
-        INCLUDES platform/include LIBRARIES primedgun_launcher_core
+        INCLUDES platform/include extern/aurora/include LIBRARIES primedgun_launcher_core
         ARGS "${CMAKE_CURRENT_BINARY_DIR}/launcher-test-data")
     if(MP_ENABLE_OPENXR AND MP_OPENXR_TARGET)
         mp_port_test(port_vr_panel_pose_tests SOURCES tests/port_vr_panel_pose.cpp

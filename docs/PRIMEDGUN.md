@@ -1,5 +1,31 @@
 # PrimedGun Echoes: engineering notes
 
+## PC VR on Vulkan, and the launcher's Graphics API (2026-11-04)
+
+As the Metroid Prime VR fork (`b17d58909`, its PORT_NOTES "VR: PC VR on Vulkan"): Graphics API =
+Vulkan with VR on runs the headset through the Quest's direct presentation on Windows
+(`vr/openxr_windows.h` holds D3D12 or `OpenXRVulkanDirectBackend`); Auto and D3D12 keep D3D12. The
+VR and Aurora files are the fork's, byte for byte apart from the licence line and the `MP2_`
+names. Aurora's direct bridge finds the patched Dawn's entry points in `webgpu_dawn.dll` at run
+time, so the stock Dawn still starts (Vulkan VR then logs that it needs the patched one and the
+game runs flat on Vulkan). Vulkan-Headers v1.4.335 are fetched by the root CMakeLists.
+
+`tools/Build-WindowsDawn.ps1` builds the patched Dawn from aurora's desktop pin, `118436b3` (the
+Quest's patched Dawn stays at `1155e0ed`); `quest/dawn/apply.py` applies to it unchanged. Configure
+with `-DAURORA_DAWN_PACKAGE_URL=<path>` and `-DAURORA_DAWN_PACKAGE_SHA256` (the script prints both).
+
+The launcher's Port Config tab has Graphics API (`graphics_backend`); `ApplyChangedSetting` keeps a
+change made while the game runs for the next start instead of writing the running API back.
+
+Desk (PSVR2 through SteamVR on the desk, 120 Hz, scale 1.00 = 3400x3468 eyes, pipelined,
+`MP2_USER_PATH` copy with the user's card, `MP2_SKIP_FRONTEND=1 MP2_SKIP_CINEMATICS=1
+MP2_SKIP_INTRO=1 MP2_WORLD="42b935e4,01_sand_entrance_dark"`): gameplay at 5 s, immersive in both
+eyes on Vulkan (eye captures at 30 s); over 41 s of immersive play Vulkan 119.6 layers/s, 13
+skipped slots, render 7.25 ms, and D3D12 with the patched DLL 119.7, 15, 6.94 ms; no failed
+submission; clean quit. Without `MP2_SKIP_FRONTEND` a world boot waits at the title screen, whose
+attract video looks like gameplay in a capture. Port tests 59/59 (two skipped). Not yet checked in
+the headset by the user.
+
 ## Local morph/unmorph heading correction (2026-11-01)
 
 Match Prime 1's separation of the first-person tracking base and the captured
@@ -777,8 +803,8 @@ Platform hooks:
 
 - `platform/main.cpp`: after the settings load, `PortVrHost::SetUserFolder`,
   `ApplyVrEnvironmentOverrides`, `PushVrSettingsToAurora`; after `PortVideo::BeginGpuStart`,
-  `OpenXRPrepareAurora(config)` (a renderer chosen in F1 other than Auto or D3D12 leaves the headset
-  off for the run); `aurora_initialize`'s `AuroraInfo` kept; after the first `aurora_update`,
+  `OpenXRPrepareAurora(config)` (a renderer chosen in F1 other than Auto, D3D12 or Vulkan leaves
+  the headset off for the run); `aurora_initialize`'s `AuroraInfo` kept; after the first `aurora_update`,
   `OpenXRStartAfterAurora`; `OpenXRShutdownBeforeAurora` before every `aurora_shutdown`.
 - `platform/port_events.cpp`: `PortPaceFrame` waits for the headset's frame request instead of the
   60 FPS cap while the session runs; `PortPumpEvents` applies the controller state first and runs

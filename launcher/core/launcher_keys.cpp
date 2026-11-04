@@ -145,6 +145,9 @@ constexpr KeyInfo kKeys[] = {
     // Port Config: display (not PrimedGun settings, so Reset All leaves them).
     // Echoes' names and defaults (platform/port_overlay.cpp): `aniso`, and
     // render_scale 0 = the window's own size (else 0.5-4 x the render mode's).
+    // graphics_backend is the F1 Video page's Graphics API, read at the next start: every name
+    // the game offers on Windows (PortGraphicsBackend::Choices, port_launcher_tests checks it).
+    {"graphics_backend", K::Choice, "auto", 0, 0, 0, true, false, "auto,d3d12,vulkan,d3d11,opengl"},
 #if defined(__ANDROID__)
     {"fullscreen", K::Bool, "1", 0, 0, 0, true, false},
 #else

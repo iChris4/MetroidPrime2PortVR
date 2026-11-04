@@ -862,6 +862,19 @@ static bool ApplyChangedSetting(const std::string& key, const std::string& value
       key == "quick_resume") {
     return ApplySetting(key, value);
   }
+  if (key == "graphics_backend") {
+    // Read when the window is made: kept for the next start, as the Video page's combo keeps it
+    // (sGraphicsBackendAtStart stays this run's, so the page says a restart applies it), and
+    // written back by the next save instead of the API this run started on.
+    PortGraphicsBackend::EGraphicsBackend backend = sGraphicsBackend;
+    const auto choices = PortGraphicsBackend::Choices();
+    if (!PortGraphicsBackend::ParseGraphicsBackend(value, backend) ||
+        std::find(choices.begin(), choices.end(), backend) == choices.end()) {
+      return false;
+    }
+    sGraphicsBackend = backend;
+    return true;
+  }
   return false;
 }
 

@@ -13,6 +13,7 @@
 #include "../launcher/core/primedgun_import.h"
 #include "../launcher/core/settings_model.h"
 
+#include "port_graphics_backend.h"
 #include "vr/vr_settings.h"
 
 #include <cstdio>
@@ -332,6 +333,32 @@ void TestDefaultsMatchGame() {
     }
     Check(Canonical(info, info.defaultValue) == info.defaultValue,
           "every default is already in the game's spelling");
+  }
+}
+
+// The Port Config tab's Graphics API offers every API the game offers here, by the
+// name the game writes, and nothing it would ignore (a launcher only offering Auto
+// and D3D12 could not show a Vulkan choice made in F1).
+void TestGraphicsBackendChoices() {
+  const KeyInfo* info = FindKey("graphics_backend");
+  Check(info != nullptr && info->kind == KeyKind::Choice, "graphics_backend is a launcher choice");
+  if (info == nullptr) {
+    return;
+  }
+  Check(info->defaultValue == PortGraphicsBackend::GraphicsBackendConfigName(PortGraphicsBackend::kGraphicsBackend_Auto),
+        "graphics_backend defaults to the game's Auto");
+  for (const PortGraphicsBackend::EGraphicsBackend backend : PortGraphicsBackend::Choices()) {
+    const std::string name = PortGraphicsBackend::GraphicsBackendConfigName(backend);
+    Check(Canonical(*info, name) == name, "the launcher accepts every graphics API the game offers");
+  }
+  for (std::string_view rest = info->choices; !rest.empty();) {
+    const size_t comma = rest.find(',');
+    const std::string name(rest.substr(0, comma));
+    rest = comma == std::string_view::npos ? std::string_view{} : rest.substr(comma + 1);
+    PortGraphicsBackend::EGraphicsBackend parsed = PortGraphicsBackend::kGraphicsBackend_Auto;
+    Check(PortGraphicsBackend::ParseGraphicsBackend(name, parsed) &&
+              PortGraphicsBackend::GraphicsBackendConfigName(parsed) == name,
+          "every launcher graphics API is a name the game reads back unchanged");
   }
 }
 
@@ -722,6 +749,7 @@ int main(int argc, char** argv) {
   TestSettingsFile(root);
   TestModel();
   TestDefaultsMatchGame();
+  TestGraphicsBackendChoices();
   TestRangesInsideGameClamps();
   TestDiscProbe(root);
   TestImport(root / "import");
