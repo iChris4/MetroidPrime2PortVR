@@ -24,6 +24,8 @@
 #include "MetroidPrime/ScriptObjects/CScriptGrapplePoint.hpp"
 #include "MetroidPrime/TCastTo.hpp"
 
+#include "port_prompts.h"
+
 #include <dolphin/pad.h>
 
 #include <algorithm>
@@ -32,7 +34,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <cwchar>
 #include <mutex>
+#include <string>
 
 namespace PortVr {
 namespace {
@@ -167,6 +171,121 @@ bool GripPressed(const OpenXRControllerState& hand, const std::string& profile, 
         return hand.squeeze_force > settings.index_grip_press_threshold || hand.squeeze_click;
     }
     return hand.squeeze_click || hand.squeeze_value > 0.5f;
+}
+
+// PrimedGun Echoes: the Rezbit reboot's three controls (VrRezbitRebootText), lock, shoot and
+// jump as the gameplay layout binds them, in the custom layout's numbering
+// (vr_controller_layout.h) so one reader serves both layouts.
+struct RebootControls {
+    int lock = 0;
+    int shoot = 0;
+    int jump = 0;
+};
+RebootControls RebootBindings(const PortVrSettings& settings) noexcept {
+    RebootControls controls;
+    if (settings.custom_layout_enabled) {
+        controls.lock = settings.custom_lock;
+        controls.shoot = settings.custom_shoot;
+        controls.jump = settings.custom_jump != 0 ? settings.custom_jump : settings.custom_jump_extra;
+        return controls;
+    }
+    constexpr int kHand = ControllerLayout::ControlsPerHand;
+    const int weapon = settings.use_right_hand ? 1 : 0;
+    const int look = settings.directional_movement_use_right_stick ? 0 : 1;
+    controls.lock = (1 - weapon) * kHand + 3;  // the off trigger
+    controls.shoot = weapon * kHand + 3;       // the weapon trigger
+    controls.jump = settings.combat_jump_use_primary_button ? weapon * kHand + 1  // A / X
+                                                            : look * kHand + 8;   // look stick up
+    return controls;
+}
+
+// The reboot on the pad: L from lock, B from jump, and R from shoot while lock is held (the
+// gameplay layout's shoot is the game's A, and a lone R would be the game's free aim). In
+// gameplay that only adds R; in Morph Ball the classic layout's L, R and B come from other
+// controls, so the reboot's are added there too.
+void ApplyRezbitReboot(const OpenXRControllerState& left, const OpenXRControllerState& right,
+                       const PortVrSettings& settings, PADStatus& pad) {
+    const std::array<OpenXRControllerState, 2> hands{left, right};
+    const RebootControls controls = RebootBindings(settings);
+    const ControllerLayout::Thresholds thresholds =
+        settings.custom_layout_enabled ? ControllerLayout::Thresholds(settings) : ControllerLayout::Thresholds();
+    const bool lock = ControllerLayout::Pressed(hands, controls.lock, thresholds);
+    if (lock) {
+        pad.button |= PAD_TRIGGER_L;
+        pad.triggerLeft = kTriggerFull;
+        if (ControllerLayout::Pressed(hands, controls.shoot, thresholds)) {
+            pad.button |= PAD_TRIGGER_R;
+            pad.triggerRight = kTriggerFull;
+        }
+    }
+    if (ControllerLayout::Pressed(hands, controls.jump, thresholds)) {
+        pad.button |= PAD_BUTTON_B;
+        pad.analogB = kTriggerFull;
+    }
+}
+
+// The controller family whose button names apply, numbered as the launcher's "Controller type /
+// button labels" (vr_custom_label_profile): 0 Quest / Touch / Pico, 1 Valve Index, 2 HTC Vive
+// wands, 3 PSVR2, 4 Steam Frame, 5 generic OpenXR, 6 WMR / Reverb. The default layout reads it
+// from the runtime's interaction profile; PSVR2 through SteamVR shows as Touch there.
+int LabelFamily(const std::string& profile) {
+    if (profile.find("valve/index_controller") != std::string::npos) return 1;
+    if (profile.find("htc/vive_controller") != std::string::npos) return 2;
+    if (profile.find("valve/frame_controller") != std::string::npos) return 4;
+    if (profile.find("khr/simple_controller") != std::string::npos) return 5;
+    if (profile.find("microsoft/motion_controller") != std::string::npos) return 6;
+    return 0;
+}
+
+// A control's name for the game's own text (the HUD memo font): "Left trigger", "Right A button".
+std::wstring ControlName(int binding, int family) {
+    switch (binding) {
+    case 33: return L"Right X button"; // Steam Frame
+    case 34: return L"Right Y button";
+    case 35: return L"Left button 3";
+    case 36: return L"Left button 4";
+    default: break;
+    }
+    if (binding < 1 || binding > 2 * ControllerLayout::ControlsPerHand) {
+        return L"(unassigned)";
+    }
+    const bool right = binding > ControllerLayout::ControlsPerHand;
+    const int part = (binding - 1) % ControllerLayout::ControlsPerHand + 1;
+    std::wstring name = right ? L"Right " : L"Left ";
+    if (part == 1 || part == 2) {
+        const bool primary = part == 1;
+        switch (family) {
+        case 0: name += primary ? (right ? L"A" : L"X") : (right ? L"B" : L"Y"); break;
+        case 1: name += primary ? L"A" : L"B"; break;
+        case 3: name += primary ? (right ? L"Cross" : L"Square") : (right ? L"Circle" : L"Triangle"); break;
+        case 4:
+            if (!right) {
+                return name + (primary ? L"D-pad down" : L"D-pad up");
+            }
+            name += primary ? L"A" : L"B";
+            break;
+        default: return name + (primary ? L"primary button" : L"secondary button");
+        }
+        return name + L" button";
+    }
+    // The Vive wand has a trackpad where the others have a stick.
+    const wchar_t* stick = family == 2 ? L"trackpad" : L"stick";
+    switch (part) {
+    case 3: return name + L"trigger";
+    case 4: return name + L"grip";
+    case 5: return name + stick + L" click";
+    case 6: return name + L"menu button";
+    case 7: return name + L"touchpad press";
+    case 8: return name + stick + L" up";
+    case 9: return name + stick + L" down";
+    case 10: return name + stick + L" left";
+    case 11: return name + stick + L" right";
+    case 12: return name + L"D-pad up";
+    case 13: return name + L"D-pad down";
+    case 14: return name + L"D-pad left";
+    case 15: return name + L"D-pad right";
+    default: return name + L"shoulder button";
+    }
 }
 
 void SetBeamCStick(Beam beam, PADStatus& pad) noexcept {
@@ -439,9 +558,11 @@ void VrPadUpdate(const CStateManager* mgr) noexcept {
     bool visor_press_accepted = false;
     bool visor_changing = false;
     bool screw_attack = false;
+    bool rezbit_virus = false;
     if (mgr != nullptr && mgr->GetPlayer(0) != nullptr) {
         const CPlayer* player = mgr->GetPlayer(0);
         screw_attack = player->GetMorphBall() != nullptr && player->GetMorphBall()->InScrewAttackMode();
+        rezbit_virus = player->GetRezbitState() == CPlayer::kRS_Infected;
         const bool first_person = player->GetCameraState() == CPlayer::kCS_FirstPerson;
         const bool unmorphed = player->GetMorphballTransitionState() == CPlayer::kMS_Unmorphed;
         const bool cinematic = mgr->GetCameraManager(0) != nullptr && mgr->GetCameraManager(0)->IsInCinematicCamera();
@@ -601,6 +722,10 @@ void VrPadUpdate(const CStateManager* mgr) noexcept {
             ApplyScrewAttackJump(left, right, weapon_hand, settings, pad);
         }
     }
+    // The Rezbit virus's reboot, on foot and in Morph Ball (not in a menu, where B backs out).
+    if (rezbit_virus && (gameplay || morph_ball)) {
+        ApplyRezbitReboot(left, right, settings, pad);
+    }
     // The beam wheel owns the weapon hand's B while it is held; the orbit lock
     // keeps its L (the game does the locking) and the pad's C-stick is free.
     const bool beamHeld = settings.custom_layout_enabled
@@ -680,5 +805,54 @@ VrPadState GetVrPadState() noexcept {
 bool VrCustomLayoutActive() noexcept { return g_custom_layout.load(std::memory_order_relaxed); }
 
 bool VrPadOwnsPort0() noexcept { return g_owns_motor.load(std::memory_order_relaxed); }
+
+bool VrRezbitRebootText(const wchar_t* text, std::wstring& out) {
+    if (text == nullptr || !VrPadOwnsPort0()) {
+        return false;
+    }
+    const PortVrSettings settings = GetVrSettings();
+    const RebootControls controls = RebootBindings(settings);
+    int family = settings.custom_label_profile;
+    if (!settings.custom_layout_enabled) {
+        const OpenXRInputSnapshot snapshot = OpenXRGetInputSnapshot();
+        family = LabelFamily(snapshot.interaction_profiles[settings.use_right_hand ? 1 : 0]);
+    }
+    // G2ME01: "&image=967A3516; + &image=D89B9F7C; + &image=SI,0.70,0.68,53B7AC95; to reboot
+    // system." The texture id is a tag's last field.
+    const std::wstring source(text);
+    const std::wstring tag = L"&image=";
+    std::wstring result;
+    bool replaced = false;
+    size_t pos = 0;
+    while (pos < source.size()) {
+        const size_t start = source.find(tag, pos);
+        const size_t end = start == std::wstring::npos ? start : source.find(L';', start);
+        if (end == std::wstring::npos) {
+            result.append(source, pos, std::wstring::npos);
+            break;
+        }
+        result.append(source, pos, start - pos);
+        const size_t comma = source.rfind(L',', end);
+        const size_t first = comma != std::wstring::npos && comma > start ? comma + 1 : start + tag.size();
+        const std::wstring hex = source.substr(first, end - first);
+        const uint32_t id = static_cast<uint32_t>(std::wcstoul(hex.c_str(), nullptr, 16));
+        const uint32_t button = PortPrompts::PromptButtonForAsset(id);
+        const int binding = button == PAD_TRIGGER_L ? controls.lock
+                            : button == PAD_TRIGGER_R ? controls.shoot
+                            : button == PAD_BUTTON_B ? controls.jump : -1;
+        if (binding >= 0) {
+            result += ControlName(binding, family);
+            replaced = true;
+        } else {
+            result.append(source, start, end + 1 - start);
+        }
+        pos = end + 1;
+    }
+    if (!replaced) {
+        return false;
+    }
+    out = std::move(result);
+    return true;
+}
 
 } // namespace PortVr

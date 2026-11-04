@@ -41,6 +41,7 @@
 #endif
 
 #include "MetroidPrime/CStateManager.hpp"
+#include "MetroidPrime/CRezbitEffect.hpp"
 #include "MetroidPrime/HUD/CSamusHud.hpp"
 #include "MetroidPrime/HUD/CHUDMemoParms.hpp"
 #include "Kyoto/Math/CRelAngle.hpp"
@@ -1073,6 +1074,33 @@ void CmdStrg(CStateManager&, const Args& args, std::string& out) {
   if (count > 40) {
     out += "  ...\n";
   }
+}
+
+// PrimedGun Echoes: rezbit [0|1]: the Rezbit virus as its attack starts it (CRezbit.cpp: 3 s, the
+// interference from 1.5 s to 2.5 s, held until the reboot), without its particles or sounds; 0
+// clears it the way the scripts' RemoveRezbitVirus does, and no argument prints the player's
+// state (CPlayer::ERezbitState). For desk checks of the reboot memo, the interference and the
+// L + R + B chord.
+void CmdRezbit(CStateManager& mgr, const Args& args, std::string& out) {
+  CPlayer* player = mgr.GetPlayer(0);
+  if (player == nullptr) {
+    Fail("there is no player");
+    return;
+  }
+  static const char* const kStates[] = {"none", "infected", "recovering", "recovered"};
+  const int state = int(player->GetRezbitState());
+  if (args.size() < 2) {
+    out += std::string("rezbit state: ") + (state >= 0 && state < 4 ? kStates[state] : "?") + "\n";
+    return;
+  }
+  if (ArgToInt(args[1], 1) == 0) {
+    player->StopRezbitState(mgr);
+    out += "rezbit virus cleared\n";
+    return;
+  }
+  player->StartRezbitState(mgr, CRezbitEffectOptions(kInvalidAssetId, 0xffff, 0xffff, 3.f, 1.5f,
+                                                     2.5f, true));
+  out += "rezbit virus started\n";
 }
 
 void CmdGod(CStateManager&, const Args& args, std::string& out) {
@@ -5217,6 +5245,8 @@ const CommandSpec kCommands[] = {
       "settled                     busy 0|1 (a warp/layer request in flight), free_ids, frame\n"},
     {"god", CmdGod,
       "god <0|1>                   god mode (the F1 cheat)\n"},
+    {"rezbit", CmdRezbit,
+      "rezbit [0|1]                start (1) or clear (0) the Rezbit virus; no argument: its state\n"},
     {"nodarkair", CmdNoDarkAether,
       "nodarkair <0|1>             no Dark Aether air damage (the F1 cheat)\n"},
     {"infammo", CmdInfiniteAmmo,

@@ -14,6 +14,7 @@
 #include "MetroidPrime/Tweaks/CTweakBall.hpp"
 #ifdef TARGET_PC
 #include "MetroidPrime/CStateManager.hpp"
+#include "vr/vr_pad.h"
 #include "vr/vr_view.h"
 #endif
 
@@ -329,9 +330,21 @@ void CPlayer::UpdateRezbitState(float dt) {
     mRezbitVirusMemoTimer -= dt;
     if (mRezbitVirusMemoTimer <= 0.f) {
       const int playerIndex = GetPlayerIndex();
+#ifdef TARGET_PC
+      // PrimedGun Echoes: with the headset controllers on port 0, the memo names the controls
+      // that make its L, R and B (PortVr::VrRezbitRebootText). The HUD keeps the string's
+      // pointer, so that text goes in as an owning copy; the table's own stays a literal.
+      const wchar_t* virusText = gpStringTable->GetString("RezbitSuitSoftwareVirus");
+      std::wstring vrText;
+      CSamusHud::DisplayHudMemo(
+          PortVr::VrRezbitRebootText(virusText, vrText) ? rstl::wstring(vrText.c_str())
+                                                        : rstl::wstring_l(virusText),
+          CHUDMemoParms(3.4028235e38f, true, false, false, 1 << playerIndex, false));
+#else
       CSamusHud::DisplayHudMemo(
           rstl::wstring_l(gpStringTable->GetString("RezbitSuitSoftwareVirus")),
           CHUDMemoParms(3.4028235e38f, true, false, false, 1 << playerIndex, false));
+#endif
     }
   }
   if (mStaticTimer < 0.5f) {

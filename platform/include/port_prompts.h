@@ -56,6 +56,10 @@ void NoteTouchInput(bool xboxLayout);
 // CTexture's own address, so it holds whatever the texels are) and BindTexture returns true.
 // UnbindTexture drops it (the CTexture's destructor). Both main-thread only.
 bool IsPromptAsset(uint32_t id);
+// PrimedGun Echoes: the PADButton a prompt texture stands for (PAD_TRIGGER_L for the GameCube L
+// art), or 0 when `id` is not a prompt's or is a stick or D-pad picture. For text that names the
+// headset controls in place of the game's `&image=` icons.
+uint32_t PromptButtonForAsset(uint32_t id);
 bool BindTexture(const void* owner, uint32_t id, uint32_t width, uint32_t height);
 void UnbindTexture(const void* owner);
 } // namespace PortPrompts

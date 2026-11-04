@@ -27,6 +27,7 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `layer <n>` — activate a layer of the current area
 - `settled` — `busy 0|1` (a warp or layer request still being served), the free object ids and the update frame; `tools/statecheck.py` polls it after a `layer` instead of sleeping
 - `god <0|1>` — god mode (the F1 cheat)
+- `rezbit [0|1]` — start (1) the Rezbit virus as a Rezbit's attack does (no particles or sounds; it holds until the L + R + B reboot) or clear it (0, as the scripts' RemoveRezbitVirus); no argument prints the state (none, infected, recovering, recovered)
 - `nodarkair <0|1>` — no Dark Aether air damage (the F1 cheat)
 - `combocost [0..30]`, `combomissiles [0..5]`, `beamammo [50..100]` — combo beam ammo cost, combo missile cost, Dark/Light ammo per capacity pickup (F1 Cheats, each with a Reset); no argument prints it
 - `infammo [all|missile|powerbomb|dark|light] [0|1]` — infinite ammo per counter (fire at zero, HUD shows ∞, real counts and pickups kept; F1 Cheats); no 0|1 flips

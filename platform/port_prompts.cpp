@@ -1117,6 +1117,11 @@ void Poll() {
 
 bool IsPromptAsset(uint32_t id) { return FindAsset(id) != nullptr; }
 
+uint32_t PromptButtonForAsset(uint32_t id) {
+  const PromptAsset* asset = FindAsset(id);
+  return asset != nullptr && asset->prompt < PROMPT_STICK ? asset->prompt : 0;
+}
+
 bool BindTexture(const void* owner, uint32_t id, uint32_t width, uint32_t height) {
   const PromptAsset* asset = FindAsset(id);
   if (asset == nullptr) {

@@ -16,6 +16,9 @@
 #include "Kyoto/Graphics/CGraphics.hpp"
 #include "Kyoto/Math/CVector2i.hpp"
 #include "Kyoto/Particles/CElementGen.hpp"
+#ifdef TARGET_PC
+#include "vr/openxr_integration.h"
+#endif
 
 extern CIOWinManager* gpIOWinManager;
 
@@ -215,6 +218,14 @@ CIOWin::EMessageReturn CRezbitEffectIOWin::OnMessage(const CArchitectureMessage&
 #endif
   if (msg.GetType() == kAM_FrameBegin) {
 #ifdef TARGET_PC
+    // PrimedGun Echoes: no held frames in the headset. A hold opens no frame, so the eyes stayed
+    // on one stale image for 7 to 30 ticks out of every few while the virus was in (it lasts
+    // until the reboot). The world keeps drawing there; the static, the corrupted text and the
+    // sound still play. A hold in progress winds down through the phases below, which restore
+    // the clear flag.
+    if (PortVr::OpenXRIsRunning()) {
+      mFrameCount = 0;
+    }
     // Uncapped, a frame begins every loop and a held frame neither presents nor waits on vsync,
     // so counting frames ended the freeze in milliseconds. Count only frames a game tick ran in:
     // the retail 60 Hz frames.

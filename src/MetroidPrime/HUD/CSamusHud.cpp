@@ -2729,6 +2729,13 @@ void CSamusHud::Draw(const CStateManager& mgr, float alpha, uint helmetVisibilit
 
   if (mBootTimer > 0.f || mBootTextFade > 0.f ||
       (player.GetRezbitState() == CPlayer::kRS_Infected && ballState != CPlayer::kMS_Morphed)) {
+#ifdef TARGET_PC
+    // PrimedGun Echoes: the Rezbit virus's corrupted text and the reboot's boot log are an
+    // orthographic draw, which the head-locked route leaves spread over each eye's whole image.
+    // The headset lays them on the HUD's plane instead (CInGameGuiManager::Draw sets it), where
+    // the rest of the visor's text is.
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED_2D);
+#endif
     gpRender->SetBlendMode_AlphaBlended();
     gpRender->SetViewportOrtho(true, -4096.f, 4096.f);
     CGraphics::SetModelMatrix(CTransform4f::Translate(-210.f, 0.f, 200.f) *
@@ -2737,6 +2744,9 @@ void CSamusHud::Draw(const CStateManager& mgr, float alpha, uint helmetVisibilit
     gpRender->SetDepthReadWrite(false, false);
     mBootText.Render();
     CGraphics::SetCullMode(kCM_Front);
+#ifdef TARGET_PC
+    AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED);
+#endif
   }
   if (player.GetRezbitState() == CPlayer::kRS_Recovering) {
     return;

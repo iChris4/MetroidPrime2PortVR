@@ -1,5 +1,47 @@
 # PrimedGun Echoes: engineering notes
 
+## The Rezbit virus in the headset (2026-11-04)
+
+User report: a Rezbit's virus (`CPlayer::StartRezbitState`, held until the L + R + B reboot that
+`CHintState`'s `kBHT_TriggersAndB` waits for) froze the headset's image, and the reboot prompt did
+not match the controllers, so the reboot could not be done. Three faults, plus a fourth seen on the
+way:
+
+- Freeze: `CRezbitEffectIOWin` holds the frame 7 to 30 ticks out of every few while the virus is
+  in (`CGraphics::PortSetHoldFrame`: no frame opens), so the eyes kept a stale image almost the
+  whole time. With OpenXR running its frame count is zeroed: no holds. The static, the corrupted
+  text and the sound stay.
+- Reboot: the gameplay layout never sends R (the weapon trigger is the game's A). While the virus
+  is in, on foot or in Morph Ball (not in a menu, where B backs out), `VrPadUpdate` adds L from
+  lock, R from shoot while lock is held (a lone R is the game's free aim) and B from jump. Default
+  layout: off trigger + weapon trigger + jump (look stick up, or A/X with the primary-button jump);
+  custom layout: its lock, shoot and jump.
+- Prompt: STRG_Main's `RezbitSuitSoftwareVirus` is `&image=967A3516; + &image=D89B9F7C;
+  + &image=SI,0.70,0.68,53B7AC95; to reboot system.` (the L, R and B prompt art). While the
+  controllers own port 0, `PortVr::VrRezbitRebootText` puts each control's name in place of a tag
+  whose texture is L, R or B (`PortPrompts::PromptButtonForAsset`, new): "Left trigger + Right
+  trigger + Right stick up to reboot system." by default. Button names follow the custom layout's
+  label family, or the runtime's interaction profile in the default layout.
+- The corrupted text and the reboot's boot log (`CSamusHud::Draw`) are an orthographic draw, which
+  the head-locked route spread over each eye's whole image: now `HEAD_LOCKED_2D`, on the HUD's
+  plane under the memo.
+
+Console `rezbit [0|1]` starts the virus as the Rezbit's attack does (no particles or sounds) or
+clears it; with no argument it prints the state.
+
+Desk (SteamVR, 120 Hz, scale 1.00, `nodarkair 1` + `god 1`, since the Dark Agon spawn kills Samus by
+about 19 s): infected 13-25 s, immersive throughout, no repeated layers except at screenshots
+(`[xr-diag]`, `MP2_VR_LOG=1`); the console's L + R + B gave
+infected, recovering, none; eye captures show the text on the HUD plane. Flat (`MP2_VR=0`)
+unchanged: the holds and the pad's own prompt icons. Render cost while infected rises from 7.3 to
+8.7-10.6 ms (83-97 layers/s at 120 Hz), growing with the corrupted text; not addressed. Desk
+controllers report not connected, so the VR chord and the prompt's names need the headset.
+
+Merged origin/OpenXR (Nobbie, 70 commits to `74b19b1b4`: upstream 0.8.0, Quest updates, launcher
+theme) as `e87a5eeb2`. Conflicts: this log (both entries kept) and `ApplyChangedSetting` (the
+`graphics_backend` case kept ahead of the new fall-through to `ApplySetting` for every key). Port
+tests 60/60 (two skipped).
+
 ## PC VR on Vulkan, and the launcher's Graphics API (2026-11-04)
 
 As the Metroid Prime VR fork (`b17d58909`, its PORT_NOTES "VR: PC VR on Vulkan"): Graphics API =

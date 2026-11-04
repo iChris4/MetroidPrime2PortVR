@@ -25,6 +25,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 class CStateManager;
 
@@ -99,5 +100,13 @@ bool VrPadOwnsPort0() noexcept;
 bool VrCustomLayoutActive() noexcept;
 // Called only when CPlayer can accept a visor change, on an actual simulation tick.
 int VrTakeWristVisorRequest() noexcept;
+
+// PrimedGun Echoes: the Rezbit virus's reboot (CHintState's kBHT_TriggersAndB) wants L, R and B
+// held together. While the virus is in, VrPadUpdate makes them from lock, shoot (R only with lock
+// held, so a lone shot never holds the game's R) and jump, in Morph Ball too. This rewrites its
+// memo ("L + R + B to reboot system.") to match: each `&image=` tag on a GameCube L, R or B
+// prompt texture becomes the name of that headset control ("Left trigger"). False, `out`
+// untouched, unless the headset controllers own port 0. Game thread.
+bool VrRezbitRebootText(const wchar_t* text, std::wstring& out);
 
 } // namespace PortVr
