@@ -738,7 +738,7 @@ void LauncherWindow::SetRunning(bool running) {
     }
   } else if (!haveGame) {
     m_runStatus->setObjectName(QStringLiteral("PrimedGunBad"));
-    m_runStatus->setText(tr("metroid_prime2_port.exe was not found next to the launcher."));
+    m_runStatus->setText(tr("%1 was not found next to the launcher.").arg(QFileInfo(m_paths.gameExe).fileName()));
   } else {
     m_runStatus->setObjectName(QStringLiteral("PrimedGunMuted"));
     m_runStatus->setText(QString());
