@@ -57,8 +57,6 @@ namespace {
 // PrimedGun keeps the 16 best objects for icons and the 8 best for the target.
 constexpr int kMaxNearby = 16;
 constexpr int kMaxTargets = 8;
-// Line-of-sight tests per tick, best candidates first.
-constexpr int kMaxSightTests = 4;
 // PrimedGun's gun ray reaches 1.75 times further for objects without the
 // target distance test (bosses and other large targets).
 constexpr float kUntestedReach = 1.75f;
@@ -195,20 +193,11 @@ bool InSight(CStateManager& mgr, const CVector3f& eye, const CActor& actor) noex
 // scores close to the best.
 TUniqueId PickInSight(CStateManager& mgr, const CVector3f& eye, Ranked* targets, int targetCount,
                       TUniqueId previous) noexcept {
-    std::sort(targets, targets + targetCount, [](const Ranked& a, const Ranked& b) { return a.score < b.score; });
-    for (int i = 1; i < targetCount; ++i) {
-        if (targets[i].id == previous && LookScan::KeepPrevious(targets[i].score, targets[0].score)) {
-            std::rotate(targets, targets + i, targets + i + 1);
-            break;
-        }
-    }
-    for (int i = 0; i < targetCount && i < kMaxSightTests; ++i) {
-        const CActor* actor = TCastToConstPtr< CActor >(mgr.GetObjectById(targets[i].id));
-        if (actor != nullptr && InSight(mgr, eye, *actor)) {
-            return targets[i].id;
-        }
-    }
-    return kInvalidUniqueId;
+    return LookScan::SelectVisibleTarget(targets, targetCount, previous, kInvalidUniqueId,
+        [&](TUniqueId id) {
+            const CActor* actor = TCastToConstPtr<CActor>(mgr.GetObjectById(id));
+            return actor != nullptr && InSight(mgr, eye, *actor);
+        });
 }
 
 void UpdateScan(CStateManager& mgr, const CPlayer& player, const PortVrSettings& settings, const LookScan::Ray& ray,
@@ -295,7 +284,7 @@ bool GrapplePointUsable(const CStateManager& mgr, const CPlayer& player, const C
 }
 
 void UpdateLock(CStateManager& mgr, const CPlayer& player, const PortVrSettings& settings, const LookScan::Ray& ray,
-                const CVector3f& origin, TUniqueId previous) noexcept {
+                const CVector3f& origin) noexcept {
     const float targetingRadius = LookScan::TargetingRadius(settings.gun_targeting_radius);
     const float maxAlong = LookScan::MaxAlong(settings.gun_targeting_distance);
     const float untestedAlong = maxAlong * kUntestedReach;
@@ -306,7 +295,7 @@ void UpdateLock(CStateManager& mgr, const CPlayer& player, const PortVrSettings&
 
     const CVector3f eye = player.GetEyePosition();
     const float maxTargetDistance = player.GetOrbitMaxTargetDistance();
-    Ranked targets[kMaxTargets];
+    Ranked targets[kMaxObjects];
     int targetCount = 0;
     for (auto it = nearList.begin(); it != nearList.end(); ++it) {
         const CActor* actor = TCastToConstPtr< CActor >(mgr.GetObjectById(*it));
@@ -338,18 +327,19 @@ void UpdateLock(CStateManager& mgr, const CPlayer& player, const PortVrSettings&
         }
         const float cone = LookScan::LockConePerp(targetingRadius, metrics, point != nullptr);
         if (metrics.perp <= cone) {
-            Insert(targets, targetCount, kMaxTargets, actor->GetUniqueId(), LookScan::TargetScore(metrics, cone));
+            Insert(targets, targetCount, kMaxObjects, actor->GetUniqueId(), LookScan::TargetScore(metrics, cone));
         }
     }
 
-    s_look.lockTarget = PickInSight(mgr, eye, targets, targetCount, previous);
+    // Combat acquisition follows the best visible aim candidate immediately.
+    // KeepPrevious is scan highlight smoothing, not a lock-on retention rule.
+    s_look.lockTarget = PickInSight(mgr, eye, targets, targetCount, kInvalidUniqueId);
 }
 
 } // namespace
 
 void VrLookTargetUpdate(CStateManager& mgr, const CPlayer& player) noexcept {
     const TUniqueId previousScan = s_look.target;
-    const TUniqueId previousLock = s_look.lockTarget;
     s_look.stamp = mgr.GetUpdateFrameIdx();
     s_look.active = false;
     s_look.target = kInvalidUniqueId;
@@ -385,7 +375,7 @@ void VrLookTargetUpdate(CStateManager& mgr, const CPlayer& player) noexcept {
     if (scanVisor) {
         UpdateScan(mgr, player, settings, ray, origin, previousScan);
     } else {
-        UpdateLock(mgr, player, settings, ray, origin, previousLock);
+        UpdateLock(mgr, player, settings, ray, origin);
     }
 }
 

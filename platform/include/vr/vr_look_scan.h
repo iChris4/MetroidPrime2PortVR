@@ -274,4 +274,24 @@ inline bool KeepPrevious(float previousScore, float bestScore) noexcept {
     return previousScore <= bestScore * 1.15f + 0.05f;
 }
 
+// Candidates carry an id and score. Visibility is supplied by the game so the
+// ordering can also be checked without a world or headset.
+template <class Candidate, class Id, class Visible>
+Id SelectVisibleTarget(Candidate* targets, int count, Id previous, Id invalid, Visible visible) {
+    std::sort(targets, targets + count,
+              [](const Candidate& a, const Candidate& b) { return a.score < b.score; });
+    if (previous != invalid) {
+        for (int i = 1; i < count; ++i) {
+            if (targets[i].id == previous && KeepPrevious(targets[i].score, targets[0].score)) {
+                std::rotate(targets, targets + i, targets + i + 1);
+                break;
+            }
+        }
+    }
+    for (int i = 0; i < count; ++i) {
+        if (visible(targets[i].id)) return targets[i].id;
+    }
+    return invalid;
+}
+
 } // namespace PortVr::LookScan

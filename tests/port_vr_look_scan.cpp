@@ -143,5 +143,21 @@ int main() {
   Check(KeepPrevious(0.04f, 0.0f) && !KeepPrevious(0.06f, 0.0f), "even against a perfect score, by a margin");
 
   std::puts("port_vr_look_scan_tests: ok");
+  struct Candidate { int id; float score; };
+  Candidate crowded[] = {{1, .1f}, {2, .2f}, {3, .3f}, {4, .4f}, {5, .5f},
+                         {6, .6f}, {7, .7f}, {8, .8f}, {9, .9f}};
+  Check(SelectVisibleTarget(crowded, 9, -1, -1, [](int id) { return id == 9; }) == 9,
+        "blocked candidates do not hide the next visible enemy in a crowded room");
+  Candidate switching[] = {{2, 1.f}, {1, 1.1f}};
+  Check(SelectVisibleTarget(switching, 2, -1, -1, [](int) { return true; }) == 2,
+        "combat selection switches to the better aimed enemy without previous-target bias");
+  Check(SelectVisibleTarget(switching, 2, 1, -1, [](int) { return true; }) == 1,
+        "scan highlights can retain their existing jitter protection");
+  Check(SelectVisibleTarget(switching, 2, 1, -1, [](int id) { return id == 2; }) == 2,
+        "an occluded previous scan target does not block the visible alternative");
+  Check(SelectVisibleTarget(switching, 2, -1, -1, [](int) { return false; }) == -1,
+        "no visible target clears the marker");
+  Check(SelectVisibleTarget(switching, 0, -1, -1, [](int) { return true; }) == -1,
+        "empty target list clears the marker");
   return 0;
 }

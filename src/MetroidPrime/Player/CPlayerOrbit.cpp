@@ -1104,6 +1104,16 @@ TUniqueId CPlayer::PortCycleOrbitTarget(int dir, CStateManager& mgr) const {
 #endif
 
 TUniqueId CPlayer::FindOrbitTargetId(CStateManager& mgr) {
+#ifdef TARGET_PC
+  // A VR candidate is chosen in tracked aim space. The previous marker may be
+  // outside the body camera's box even while the next enemy is under the cannon.
+  TUniqueId trackedTarget = kInvalidUniqueId;
+  if (mgr.GetPlayer(0) == this &&
+      PortVr::VrLookToLockTarget(mgr, kInvalidUniqueId, trackedTarget) &&
+      trackedTarget != kInvalidUniqueId) {
+    return trackedTarget;
+  }
+#endif
   const CActor* act = TCastToConstPtr< CActor >(mgr.GetObjectById(GetOrbitNextTargetId()));
   if (act) {
     const CVector3f eyePosition = GetEyePosition();
