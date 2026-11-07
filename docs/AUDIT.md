@@ -160,6 +160,74 @@ Scripts: `tools/audit/` (see its README).
 | A8-27 | HUD | src/MetroidPrime/CTargetReticles.cpp:2041 | wrong-logic | low | Classic/GameCube crosshair replaced the tweak alpha with the opacity option and dropped the draw-scale fade (retail 0x800AE414..438). Now tweak alpha * opacity * draw scale | fixed |
 | A8-28 | HUD | platform/port_overlay.cpp:142 | port-feature | info | Crosshair style defaults to Remastered (port feature on by default; retail look is Classic). User decision 2026-10-31: keep Remastered as default | won't fix (decision) |
 
+## Sweep A9
+
+`tools/retail_diff.py` triage (retail vs port calls/constants). Accepted model differences live in
+`tools/retail_diff_allow.txt`, one line per finding with its id and asm reason.
+
+| id | area | file:line | class | severity | evidence | status |
+|----|------|-----------|-------|----------|----------|--------|
+| A9-100 | ElitePirate | src/MetroidPrime/Enemies/PortCElitePirate.cpp:1051,1089 DoUserAnimEvent | logic | minor | shakes (events 16 IS01/ATCH, 26 FOOT/ATCH) took the shaker from CPatterned::GetConnectedObject (random pick, one RNG draw per shake); retail fn_15_7BFC calls CEntity::FindConnectedObject (bl at 0x7DAC, 0x7DFC). Smoke: `uevent` 16/26 in Sanctuary 0c_cliff_hall reach FindConnectedObject (IS01, FOOT), 0 crashes | fixed fe7b15710 |
+| A9-101 | Retail dead math | fn_3_3104, fn_16_601C, fn_83_1098, fn_55_3434, fn_55_37F4, fn_61_2630 | logic | info | retail calls a pure function and never reads the result (Magnitude/AsNormalized, GetCurrentCameraTransform, FromMatrix, GetLctrTransform, IsMultiplayer; offsets in the allowlist) | not-a-bug |
+| A9-102 | Inlined / restated helpers | fn_79_A13C, fn_79_66DC, fn_78_48A8, fn_79_6B78, fn_29_2414, fn_30_CC34, fn_30_CD10, fn_56_D690, fn_56_E764, fn_55_D208 | logic | info | same behaviour written another way (Dot written out, lookups inlined, vulnerability hoisted, AddObject in the caller, optional/copy assignments, Render split; fn_30_CC34 hidden by A9-400 since) | not-a-bug |
+| A9-103 | Callee elsewhere | fn_10_1FA14, fn_18_94C8, fn_40_3B18, fn_76_59BC | logic | info | member initializer (PhazonVisorToken), implicit member dtor, FuncPtrs proxy (DetachActorFromPirate), retail-unreachable prediction (r4 = 0 at 0x5C2C) | not-a-bug |
+| A9-104 | Tool names | ElitePirate/SafeZone/Tryclops libm, GeomBlobV2 OSGetTime, 5 SetLoader_*, DigitalGuardianHead SetTarget, IngBoostBallGuardian fn_30_F78 | logic | info | the port calls sinf/acosf/cosf, CStopwatch::GetGlobalMicros, Set*_FuncPtrs, SetVisualTarget; the phase copy marker sat on the wrong function | not-a-bug (aliases eb85716eb) |
+| A9-105 | Value helpers | 83 findings (Cross, struct copies, aggregate ctors) | logic | info | unported straight-line helpers that only store through r3: the port's `=`/operators; hidden by default since 304b3a87b, `--strict` shows them | not-a-bug |
+| A9-200 | Player | src/MetroidPrime/Player/CPlayer.cpp:841 ResetPlayerState | wrong-call | low | retail 0x8001A038/0x8001A054 `lwz r12,0x10(r12)` = CHintManager vtable slot 0x10 Reset; decomp called RefreshHint (0xC) | fixed 9a8ff5911 |
+| A9-201 | Player | CPlayer.cpp:852 ResetPlayerState (multiplayer) | wrong-const | low | retail 0x8001A088 lfs lbl_8041A4B4 = 3.0 into 0x12f4 (invulnerability); decomp 2.0 | fixed 9a8ff5911 |
+| A9-202 | Player | CPlayer.cpp:1356 UpdatePlayerDrawFlags | wrong-const | visual | retail 0x80017F60 `fdivs f29,f1,f3`, f3 = 3.0 (Double Damage pulse); decomp /2 | fixed 9a8ff5911 |
+| A9-203 | Player | CPlayer.cpp:3963 TakeDamage | wrong-const | visual | retail 0x8000F85C lfs lbl_8041A50C = 0.333f (0x3EAA7EFA) damage colour timer; decomp 1/3 | fixed 9a8ff5911 |
+| A9-204 | Player | CPlayer.cpp:4588 StartTurret | wrong-const | low | retail 0x8000D838 lfs lbl_8041A4BC = 5.0, `fcmpo; bge` (turret occupant radius); decomp 2.0; multiplayer only | fixed 9a8ff5911 |
+| A9-205 | Player | src/MetroidPrime/Player/CPlayerDynamics.cpp:1422 SetIntoBallReadyAnimation | wrong-const | low | retail 0x80185CA8 lfs lbl_8041C9C4 = 45.0, `blt` (then <= 315); decomp 225 | fixed 9a8ff5911 |
+| A9-206 | Gun | src/MetroidPrime/Player/CPlayerGunBase.cpp:313 UpdateTransform | wrong-branch | low | retail 0x801DD9AC `cmpwi r0,0x2` on 0x38c = kMS_Morphing (fast 0.1 s holster); decomp kMS_Morphed | fixed 9a8ff5911 |
+| A9-207 | Gun | src/MetroidPrime/Player/CPlayerGun.cpp:1512, :1724 Render/Update | wrong-branch | visual | retail 0x801D098C / 0x801CFE88 `cmpwi r0,0x4` on mChargePhase 0x694 = kCP_Charged; decomp kCP_ChargeFx | fixed 9a8ff5911 |
+| A9-208 | Collision | src/MetroidPrime/CCollisionActorManager.cpp:195 ctor (OBBFromMayaPlugIn) | wrong-const | med | retail 0x80136D6C `fmuls f4,f3,f2`, f3 = lbl_8041C0B4 = 2.0 on the bounds; decomp 0.5 | fixed 9a8ff5911 |
+| A9-300 | cov tooling | tools/cov/specs/*.py, tools/drivers/{dg31_echo,ing_drive,spacepirate_drive}.py | port-limit | minor | gdb specs/drivers decoded TUniqueId with the retail 10/6 packing (& 0x3ff, 1024 slots, version +0x400) after the PC moved to 11/5 (kMaxObjects 2048): slot indices above 1023 aliased. Left as-is: splinter_grab_force.py hard-coded ids, elitepirate_shouldfire.con `ep.target 1024` (fixture values) | fixed 921d82799 |
+| A9-301 | Chykka 2 | src/MetroidPrime/Enemies/PortCSwampBossStage2.cpp:685 UpdateWater (fn_79_3900) | render | visual | asm 0x3D58-0x3D68 `lhz 0xd3c` (mWater) -> `sth 0x12a` of the splash before AddObject; port dropped it (TODO), so splashes sorted independently of the water. Smoke: 109/109 splashes linked | fixed a5f03ba7c |
+| A9-302 | Chykka 2 | src/MetroidPrime/Enemies/PortCSwampBossStage2.cpp:2427 Render (fn_79_A78C) | render | minor | asm 0xA7B4-0xA7CC queries GetCharacterRenderMaskAndTarget only when 0x421 bit 0x01 (mDrawParticles); port always queried | fixed a5f03ba7c |
+| A9-303 | Chykka 1 | src/MetroidPrime/Enemies/PortCSwampBossStage1.cpp:2226 GetScannableObjectInfo (fn_78_A570) | logic | gameplay | asm 0xA57C `lwz 0x48c; lwz 0x580; cmpwi 7`: 0x580 is CBodyController::mLocomotionType (DOL SetLocomotionType 0x800F73EC), type 7 set by ResetPlatform; port compared the body state id 7 (melee), hiding the scan in melee and showing it during the reset. No other module misreads 0x580 | fixed a5f03ba7c |
+| A9-304 | Ing | src/MetroidPrime/Enemies/PortCIng.cpp:1825 CreateBlob (fn_29_4830) | render | visual | asm 0x4930-0x4948 `lhz 0x8` (Ing id) -> blob `sth 0x12a` before AddObject; port dropped it. Smoke (Agon 3f5cdf39): blob linked | fixed ef701fe5b |
+| A9-305 | Splitter | src/MetroidPrime/Enemies/PortCSplitterCommandModule.cpp:1674,1748 (fn_75_3EEC, fn_75_31A8) | render | visual | guest 0x12a was a private `mClearedId` instead of CActor's next draw node: the docked head never drew after its chassis (asm 0x3F60 set, 0x324C clear). Field removed, schema regenerated. Smoke (split23): 2/2 docks linked; clear arm not reached | fixed e8aa180e3 |
+| A9-306 | Chykka 1/2 | PortCSwampBossStage1.cpp:2046, PortCSwampBossStage2.cpp:2414 AddToRenderer | upstream | minor | notes claimed IRenderer slot 0x44 is a 3-arg overload; asm 0x2240-0x228C / 0xA720-0xA73C set only r4: the one-argument AddParticleGen the port calls | not-a-bug (notes rewritten a5f03ba7c) |
+| A9-307 | Quadraxis, Sandworm eye | PortCSandBossAttacks.cpp:1158, PortCSandBoss.cpp:772, PortCSandwormEye.cpp:26 | upstream | minor | `[uncertain]` notes: 0x24/0x34/0x44 is GetColumn(kDX) (row-major m00/m10/m20); vtable lbl_55_data_760 D208/D308 = AddToRenderer/Render; lbl_56_bss_C = string_l(rodata_250+0x489) "Sandworm.rel" (fn_56_14FA8). Port already right | not-a-bug (notes rewritten 2c45a8f50) |
+| A9-308 | CStateManager warp | src/MetroidPrime/CStateManager.cpp:4425,5071,5089-5099,5126,5467-5474,5601 | port-limit | minor | kPortWarpMinFreeIds 256 / kPortWarpComfortIds 700 heuristics have comments measured at 1024 slots; still valid lower bounds at 2048. CDarkCommando.cpp:1064 reserved_vector<TUniqueId,128> holds candidates, not slots | not-a-bug (stale comments only) |
+| A9-309 | unmarked companions | SnakeWeedSwarm, Splitter fn_75_5F18/5418/CB30, BoostBallSwooshToken fn_10_895C, ctor/dtor helpers | target-pc | minor | retail_diff/`--strict` hits are inlined container/token helpers, a wrapper whose body (PortListen) is marked, or Bounce/DoubleSnap (dead in shipped data); no marker without every arm run, so none added | not-a-bug |
+| A9-310 | guessed names | PortCDigitalGuardianHead.cpp:1964, PortCSplitterCommandModule.cpp:297, CActor.hpp "Guessed names" | upstream | minor | remaining notes only question member names, not behaviour; no other TODO(uncertain) in src | not-a-bug |
+| A9-400 | Inline copies (tool) | tools/retail_diff.py leaves_named; 326 of the 337 default `(unported) not named` findings | logic | info | the callee's transitive effect leaves (DOL calls and ported functions past rstl/alloc/ctor/dtor plumbing, FreeLockedCache and a TLockedToken copy's CToken ctor + Lock) are all named in the port body: 290 have none (TLockedToken/optional copies, reserved_vector and vector push/assign/erase, refcounted ptr copies; 127 store outside r3, all container/refcount fields, spot-checked fn_73_27AC, fn_79_B7F8, fn_66_54E0), 36 make only calls the body makes (DeliverCmd copies, property loader chains, FishCloud lower_bound). Hidden by default, `--strict` shows them; fixtures in retail_diff_regress.sh | not-a-bug |
+| A9-401 | Unmarked port bodies | CScriptFrontEndDataNetwork.cpp:828 CloseNode (fn_59_3380), :1202 SetSelection (fn_59_155C); CScriptSkyRipple.cpp:84 RenderSkyActor (fn_70_330) | logic | info | the callers call the port functions; the asm matches them (3380: PRSB msgs, SetIntAt1C(-1), ENTR, bl 155C; 155C: 0x194/0x198, bl 4088; 330: TCastToPtr<CActor> 0x370, CModelData::Render 0x4B8) but no run covered every arm, so they stay unmarked (allowlisted) | not-a-bug |
+| A9-402 | GetTouchBounds copies | fn_12_1154, fn_29_B970, fn_52_120C, fn_74_3CA8 | logic | info | callees are the RELs' copies of CPatterned::GetTouchBounds (bl GetBoundingBox__13CPhysicsActorCFv, fn_12_11E0 0x11F8), which the port calls (as A9-102 fn_30_CD10) | not-a-bug |
+| A9-403 | Shock-wave info | PortCElitePirate.cpp:291 GetShockWaveInfo (fn_15_1A48), CIngSpaceJumpGuardian.cpp:1074 SpawnShockWave (fn_34_1904) | logic | info | retail builds the CShockWaveInfo from its loader data per use (bl LdrToDamageInfo 0x1AB0 / 0x1B5C); the port converts once in the data ctor | not-a-bug |
+| A9-404 | CLineSeg ctor | CGrenchler.cpp:3838 IsBeamBlockedByHint (fn_27_3C1C) | logic | info | fn_27_3E18 is the CLineSeg ctor (AsNormalized 0x3E74, CUnitVector3f ctor 0x3E80): the port's `const CLineSeg line(start, end)` | not-a-bug |
+| A9-405 | Data copy in a ctor | CMinorIng fn_44_A9DC (strict only) | logic | info | the CMinorIngData copy ctor called from the ctor: the port's `mData(data)` (ctor callers hide by default) | not-a-bug |
+| A9-406 | Sandworm AngleToTarget | PortCSandwormAttacks.cpp:43 (fn_56_6AA8) | logic | info | 0x6B3C/0x6B44 normalize both vectors before GetAngleDiff, which divides by both magnitudes itself: rounding only | not-a-bug |
+| A9-500 | SwampBossStage1 | PortCSwampBossStage1.cpp:626 (UpdateHeadTurn fn_78_2E38) | constant | minor | retail divides the radian angle by `lfs f2, lbl_78_rodata_194` = 0.43633232f (0x2F84, `fdivs f29, f1, f2` at 0x2F8C); the port's Rad2Deg(a) / 25.f could round 1 ulp apart (the A8 log's open note). Smoke: 487 calls in a forced TongueLoop/Vomit/PlatformReady fight | fixed |
+| A9-501 | DarkCommando | CDarkCommando.cpp:1308 (fn_3_3104) | constant | info | the 15 (lfs at 0x3304) feeds an AsNormalized whose 0x38(r1) result is never read | not-a-bug (dead in retail) |
+| A9-502 | CommandoPirate | PortCCommandoPirate.cpp:4939 (fn_9_E30) | constant | info | 150/360/90/0.8/30/80 are SLdrCommandoPirate.hpp's inline ctor defaults, stored at 0xED0.. | not-a-bug |
+| A9-503 | DarkSamus | PortCDarkSamusHelpers.cpp:949 (FirePhazonShot fn_10_50B8) | constant | info | `lfs 1.3f` at 0x5128 * scale.z (0x513C) stored at 0x5164..0x516C, overwritten at 0x5360..0x5368 before any read | not-a-bug (dead store) |
+| A9-504 | DigitalGuardian | PortCDigitalGuardian.cpp:269 (ctor fn_14_B100) | constant | info | the +-pi/4, +-3pi/4 .data words 0x45C..0x468 fill the 0xFF8 vector, which nothing reads | not-a-bug |
+| A9-505 | Metroid, Splinter | SLdrMetroidAlpha.hpp:45 (fn_40_D70), SLdrSplinter.hpp:44 (fn_74_C3C) | constant | info | re-store SLdrIngPossessionData's ctor default health 150 (SLdrIngPossessionData.cpp:12) | not-a-bug |
+| A9-506 | SwampBossStage1 | PortCSwampBossStage1.cpp:1068 (ShouldExposeBelly fn_78_6458) | nan | info | retail duplicates `xd10 > x824/x820` into each ternary arm (mfcr/extrwi GT at 0x6498, 0x64B0); same NaN arm | not-a-bug |
+| A9-507 | SwampBossStage2 | PortCSwampBossStage2.cpp:1912 (Circle fn_79_7BE0) | nan | info | retail splits the per-phase compare (0x7C50 bgt, 0x7C68 ble); the port's selected-limit compare is equivalent | not-a-bug |
+| A9-508 | SwampBossStage2 | PortCSwampBossStage2.cpp:1374 (AllGrowthsDead fn_79_A438) | nan | info | retail tests the four fixed slots xc10..xc1c (ble 0xA444..0xA480); the port loops size(), InitGrowths always pushes 4 | not-a-bug |
+| A9-509 | ScriptPlayerTurret | PortCScriptPlayerTurret.cpp:756 (PreRender fn_63_2D68) | nan | info | retail re-tests x20c > 0 in the unrendered arm (0x2F0C); the clamp's NaN arm cannot happen (x20c/0.33 with x20c > 0) | not-a-bug (unreachable) |
+| A9-510 | DarkSamus | PortCDarkSamusHelpers.cpp:474 (ConstructPhazonBeam fn_10_45F8) | shape | info | the 14 branches are the token/optional build, which lives in PhazonBeamHitToken's member initializer (:454-472) | not-a-bug |
+| A9-511 | Tweaks | Tweaks.cpp:149 (FreeTweaks fn_82_8C) | shape | info | retail Frees each tweak global (Free, single_ptr assign, a delete[] loop); the port keeps them inside CTweakContents, whose delete frees them (runs at REL exit only) | not-a-bug |
+| A9-520 | retail_diff const | tools/retail_diff.py | tool | info | named constants (M_PIF, Deg2Rad, Rad2Deg, close_enough's 1e-5, CColor 255), literal folds (every prefix), Deg2Rad/byte folds, tree `const float` defs with literal right-hand sides; 107 const findings cleared | fixed |
+| A9-521 | retail_diff nan | tools/retail_diff.py | tool | info | mfcr + extrwi of the EQ bit is ==; MWCC unrolls literal-trip loops (compares x trips); a shadowed header inline counts per call; the negated-form count reads only the body's own code; 28 nan findings cleared | fixed |
+| A9-522 | retail_diff shape | tools/retail_diff.py | tool | info | loader switches in the generated .inc, auto_ptr assigns (5 branches), jumptable switches (one branch), new null checks, string_l temporaries, Min/Max selects; the short-body rule counts inlined helpers and CTransform4f/rs_new plumbing; 35 shape findings cleared | fixed |
+| A9-600 | Platforms | CScriptPlatform.cpp:855 Move | upstream | minor | retail unit 0x17CC/0x1828 `lwz r12,0x5c(r12); bctrl` = CActor slot 0x5C GetScanObjectIndicatorPosition for the look-at target; decomp called GetOrbitPosition (0x50). Not reached in smoke (no look-at platform) | fixed 301d76296 (TARGET_PC) |
+| A9-601 | AI base | CPatterned.cpp:202 ctor | upstream | gameplay | retail unit 0x6CC0-0x6CEC `lbz 0x2a4(pinfo); extrwi. 1,24` (SEchoParameters.mIsEchoEmitter, bit 0x80) `beq; CAABox(pos,pos); li r4,1; bl AllocateEchoEmitter`; decomp never allocated the echo emitter. Smoke: 9 ctor calls in Agon 0i_sand_hall | fixed 4179dca39 (TARGET_PC) |
+| A9-602 | constants | CActorLights.cpp:113 ActivateLights, CScriptSound.cpp:425 GetOccludedVolumeAmount | upstream | minor | 1-ulp literals: retail lbl_8041B64C = 0x40A00001 (5.0000005f) vs 5.f; 0.42f rounds 1 ulp off retail. A8 precedent | wontfix |
+| A9-700 | Model materials | CCubeMaterial.cpp:529 HandleReflection | upstream | render | retail 0x80304040 `rlwinm r0,r0,9,21,22` (0x54004D6C) `cmpwi r0,3` tests `((mColorOps & 3) << 9) == GX_TEVREG2`, never true: retail never takes the TEVREG2 reflection path (always KONST colour arg, no extra stage). Decomp read the outReg field (`>> 9 & 3`). Only two such sites in the DOL; a stderr probe reached neither path in three 900-frame runs (both sit under `reflection`, needs a reflective material) | fixed (TARGET_PC), unverified on screen |
+| A9-701 | Model materials | CCubeMaterial.cpp:1033 SetCurrent | upstream | render | retail 0x80303594 `rlwinm. r0,r0,9,21,22` (0x54004D6D) `beq`: DoPassthru when the last stage's `(mColorOps & 3) << 9` (op low bits) is non-zero, not its outReg. Same packing-helper mixup as A9-700. Needs a visual check of materials whose last stage writes a non-PREV register; not reached in the A9-700 probe runs | fixed (TARGET_PC), unverified on screen |
+| A9-800 | Particles | CElementGen.cpp:1696 RenderParticles, :2365 RenderParticlesFlameThrower | upstream | info | retail 0x802D5A64 and 0x802D4DA8 `li r6,0x1` (0x38C00001) = GX_S8 with frac 1 for the packed TEX0 format; decomp passes GX_U8. The packed path only writes `GXTexCoord1s16` 0x0000/0x0002/0x0200/0x0202 (bytes 0 and 2), which decode to 0.0/1.0 under either format. Matching-only difference | not-a-bug |
+| A9-801 | Splines | CMayaSpline.cpp:95/135 CMayaSplineKnot::CalculateTangents | upstream | info | retail compare tree on mFlagA/B (0x80329EE0..: `cmpwi 3` beq, bge -> `cmpwi 5` beq/bge end else set 2; `cmpwi 1` beq, bge -> case 2, `cmpwi 0` bge -> case 0) is the decomp switch with 4 falling into 2 and 5+ / <0 skipped; constants 0.05/1.0/0.0 match | not-a-bug |
+| A9-802 | Animation | CParticlePOINode.hpp:9 default ctor | upstream | info | retail `__defctor__16CParticlePOINode` calls CPOINode(-1, 5 = kPT_Particle, CCharAnimTime(0), -1, false, 1.0, -1, 0) then stores 0 at 0x2C/0x30/0x34, byte 0 at 0x38, 1.0 at 0x3C, 0 at 0x40 = CParticleData(0, SObjectTag(0,0), CSegId(0), 1.f, kPM_Initial); same as the header defaults (the tool did not pair the inline ctor) | not-a-bug |
+| A9-803 | Script loading | ScriptLoader.cpp:64 g_LoaderFuncs | upstream | info | retail `__sinit_ScriptLoader_cpp` simulated (lis/addi/stw into g_LoaderFuncs): all 184 FourCC -> loader pairs equal the source table, in order (RelProxy_ = REL_ENTRY). The 50% objdiff score is scheduling | not-a-bug |
+| A9-804 | Graphics | CGX.cpp:617 SetVtxDescv_Compressed | upstream | info | retail also walks the 8 matrix-index bits 24..31 (attr idx, type `(flags >> bit) & 1`, gated on `clrrwi 24` differing); the port's TARGET_PC loop does the same. Upstream's non-PC build lacks it (matching gap only) | not-a-bug |
+| A9-805 | precision | CSimpleShadow.cpp:68 Calculate, CVisorFlare.cpp:53 UpdateOcclusion | upstream | info | retail calls msl_sqrtf where the decomp inlines a Newton sqrt (0.5/3.0); retail fmadds where the decomp does fmuls+fadds: last-bit precision only | wontfix |
+| A9-806 | unpaired fn_ | 191 NOPAIR symbols (TypesMatch 106, CAnimData 17, main 7, CPortalAreaData/CCEAnimationSet/CCharacterFactory 6 each, rest 1-3) | upstream | info | the large ones (CMapWorld fn_8009646C, CGroundMovement fn_8012C808, CPortalAreaData fn_80255DA8, CRainSplashGenerator, CAuiMeter, CRezbitEffect, CPakFile, CCEAnimationSet, main) are rstl tree/vector/string instantiations (allocate/Free/CCallStack, reserve, copy ctors); CCubeMaterial fn_80304310 is CGX::SetTevIndWarp (args checked: STU bias, ITW_OFF, ITM_0 at HandleReflection 0x80304214). None carry gameplay constants | not-a-bug |
+
 ## Sweep log
 
 Moved verbatim to `docs/history/AUDIT-to-2026-10-29.md` (one row per lane report: sweeps 1-4, Review 5b
@@ -172,6 +240,46 @@ covered so far: reached stubs (clean), Grenchler parts 1-3 (part 3 clean), Sporb
 constants (none diverge; fn_78_2E38 may round 1 ulp differently), FlyingPirate (clean), ScriptSafeZone
 (clean), the 50 NaN-flagged comparisons (A8-3..7), commits since 2026-10-29 (gate list; the 9 that reach
 gameplay at defaults restore retail behaviour or are port features by design: quick resume, input mapping).
+
+Sweep A9 upstream-decomp (2026-11-02): non-100% functions of port-compiled units from report.json (1649,
+ranked by reach); tier 1 (564: player, state manager, weapons, scan, HUD, collision) read for constant,
+branch-sense and call diffs, tier 2 constant diffs only, tier 3 not read. A9-200..208; report
+`/tmp/opencode/reports/a9-upstream-decomp.md`.
+Sweep A9 upstream-tier2 (2026-11-02, report `/tmp/opencode/reports/a9-upstream-tier2.md`): tier 2 (424)
+read for branch sense, compare immediates, call targets and vtable slots (A9-600..602; rest false
+positives: tail duplication, inlined helpers, switch-tree shape, NaN-only). Tier 3 (661) scanned by
+vtable-slot, call-target and compare-immediate bags only; 3/3, ~14/61 and ~8/52 hits read, all false
+positives; the unread hits are listed in the report.
+Sweep A9 upstream-tier3 (2026-11-02, report `/tmp/opencode/reports/a9-upstream-tier3.md`): all unread
+tier-3 compare-immediate and call-target hits read, plus the 5 tier-2 functions skimmed earlier; A9-700/701
+(CCubeMaterial TEV outReg test), the rest false positives. All 661 tier-3 functions screened by
+immediate/constant multisets (295 same, 175 differ, 191 unpaired fn_ symbols); ~35 of the differing ones
+read, all false positives (switch layout, reloads, inlined helpers, mislabels); where the read stopped is
+in the report.
+Sweep A9 upstream-tier3b (2026-11-02, report `/tmp/opencode/reports/a9-upstream-tier3b.md`): the rest of
+the 175 differing tier-3 functions screened by per-function immediate/float-constant multisets (108 with a
+delta, all read against `build/G2ME01/asm`) and call-target/vtable-slot multisets (34, all read); no fix.
+A9-800..806: the tier-3 lane's open questions settled (packed UV format, CalculateTangents, POINode
+defctor), ScriptLoader table simulated, NOPAIR symbols classified. Functions with neither delta were not
+read for branch sense instruction by instruction.
+Sweep A9 constants-notes lane (2026-11-02, plan steps 4-6; report `/tmp/opencode/reports/a9-constants-notes.md`):
+Port companions without markers (retail_diff on 79 unmarked ids, `--strict`: all inlined helpers, already
+marked elsewhere, or dead in shipped data, A9-309), capacity constants 1024->2048 (A9-300, A9-308), and
+every `TODO(uncertain)` / `[uncertain]` note in src (A9-301..307, A9-310); every retail `sth 0x12a`
+(CActor next draw node) site checked against the port (the three missing ones are A9-301/304/305).
+Sweep A9 (retail vs decomp vs port, 2026-11-02): tooling-port lane (`/tmp/opencode/reports/a9-tooling-port.md`):
+retail_diff effect kind (ctor/dtor Locks, `tools/retail_diff_regress.sh`), DOL-named call findings
+all triaged (A9-100..104), value helpers hidden (A9-105); default calls 546 -> 338, strict 2174 -> 1381.
+Sweep A9 const-nan-shape lane (2026-11-02, `/tmp/opencode/reports/a9-const-nan-shape.md`): every const,
+nan and shape finding (default and `--strict`) read against the asm: one real constant (A9-500), model
+differences allowlisted (A9-501..511, fn_72_38E4 cites A8-7), the rest tool rules (A9-520..522, fixtures in
+`tools/retail_diff_regress.sh`); const 108 -> 0, nan 33 -> 0, shape 37 -> 0 (13 allowlisted).
+Sweep A9 local-callees lane (2026-11-02, plan step 2 part 1; report `/tmp/opencode/reports/a9-local-callees.md`):
+all 337 default `(unported) not named` findings (312 callees) read through their effect leaves: inline
+copies hidden (A9-400), the rest allowlisted (A9-401..404, A9-406); no behaviour bug. Default calls 338 -> 0,
+strict 1381 -> 1370 (allowlist only).
+Sweep A9 closed 2026-11-02: every row above has a status; game fixes A9-100, 200..208, 300..305, 500, 600, 601, 700, 701
+(700/701 unverified on screen); `retail_diff.py` default findings 0 (48 allowlisted), `retail_diff_regress.sh` 33/33.
 
 Open: only A1-26 (RadialHud `model_inner_ring`, widget name on the GameCube pak unconfirmed); every other
 row above is `fixed`, `not-a-bug`, `wontfix` or `partly fixed` (state in its status cell).

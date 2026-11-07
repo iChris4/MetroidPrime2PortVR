@@ -173,6 +173,7 @@
 #include "port_console.h"
 #endif
 #include "port_freecam.h"
+#include "port_third_person.h"
 #endif
 
 #include <alloca.h>
@@ -821,6 +822,13 @@ float PortPresentedWorldTime(float time) {
   time -= (1.f - t) * sPortWorldTimeDt;
   return time < 0.f ? time + 900.f : time;
 }
+
+// The field of view SetupViewForDraw draws with: photo mode's, else the camera's widened for a
+// view narrower than 4:3. The frusta PreRender and ResetViewAfterDraw cull by take it too, or an
+// actor in view at the edge would be flagged out of frustum (no lights, swarms not drawn).
+float PortDrawFov(const CGameCamera& camera) {
+  return PortFreeCam::FovOverride() > 0.f ? PortFreeCam::FovOverride() : camera.GetRenderFov();
+}
 } // namespace
 #endif
 
@@ -864,11 +872,18 @@ void CStateManager::PreRender(uint playerIndex) {
   mWorld->PreRender();
   BuildDynamicLightListForWorld();
   const CGameCamera* camera = mCameraManager->GetCurrentCamera(*this, true);
+#ifdef TARGET_PC
+  // Port: cull from where SetupViewForDraw draws (the free camera) with its field of view.
+  const CTransform4f cameraTransform =
+      PortFreeCam::View(mCameraManager->GetCurrentCameraTransform(*this, true));
+  CFrustumPlanes frustum(cameraTransform, CRelAngle::FromDegrees(PortDrawFov(*camera)).AsRadians(),
+                         camera->GetAspectRatio(), camera->GetNearClipDistance(), false, 100.f);
+#else
   const CTransform4f cameraTransform = mCameraManager->GetCurrentCameraTransform(*this, true);
   CFrustumPlanes frustum(cameraTransform, CRelAngle::FromDegrees(camera->GetFov()).AsRadians(),
                          camera->GetAspectRatio(), camera->GetNearClipDistance(), false, 100.f);
+#endif
 #ifdef TARGET_PC
-  // PortVr: cull against where the head looks, with the headset's wider cone.
   PortVr::VrCullingFrustum(cameraTransform, camera->GetNearClipDistance(), frustum);
 #endif
   mPlanes = frustum;
@@ -897,9 +912,13 @@ void CStateManager::PreRender(uint playerIndex) {
     {
       CScopedProfiler profile(rstl::string_l("*PreRender:Portals"), true);
       if (CPortalArea* portal = area.GetPostConstructed()->mPortalArea.get()) {
+#ifdef TARGET_PC
+        portal->PreRender(*this, *camera, cameraTransform, PortDrawFov(*camera));
+#else
         const CCameraManager* cameraManager = mCameraManager;
         portal->PreRender(*this, *cameraManager->GetCurrentCamera(*this, true),
                           cameraManager->GetCurrentCameraTransform(*this, true));
+#endif
       }
     }
     {
@@ -1237,6 +1256,30 @@ void CStateManager::DrawDarkVisor(const CInGameGuiManagerSet& gui) {
     x = 0;
   } else {
     gpTweakGui->GetDarkVisorFrame(&x, &y, &width, &height);
+#ifdef TARGET_PC
+    // Port: the frame is authored for the 4:3 framebuffer; the widescreen HUD centers the lens in
+    // the wider one, so shift the frame with it (#60: otherwise it stays at the left).
+    const int viewportWidth = CGraphics::GetViewport().mWidth;
+    const int baseWidth = int(float(viewportWidth) / PortOverlay::AspectWiden() + 0.5f);
+    x += (viewportWidth - baseWidth) / 2;
+    // The HUD scale, and a framebuffer narrower than the authored one (whose HUD fits the width,
+    // CGuiCamera::Draw), shrink the lens and its outer mask about the viewport's centre
+    // (CInGameGuiManager::DrawDarkVisorMask); shrink the frame with them, or the highlight shows
+    // between the mask's edge and the frame's (#60).
+    const float widen = PortOverlay::AspectWiden();
+    const float scale = float(PortOverlay::HudScale()) / float(PortOverlay::kHudScaleMax) *
+                        (widen < 1.f ? widen : 1.f);
+    if (scale != 1.f) {
+      const float centerX = 0.5f * float(viewportWidth);
+      const float centerY = 0.5f * float(CGraphics::GetViewport().mHeight);
+      const int right = int(centerX + (float(x + width) - centerX) * scale + 0.5f);
+      const int bottom = int(centerY + (float(y + height) - centerY) * scale + 0.5f);
+      x = int(centerX + (float(x) - centerX) * scale + 0.5f);
+      y = int(centerY + (float(y) - centerY) * scale + 0.5f);
+      width = right - x;
+      height = bottom - y;
+    }
+#endif
   }
 #ifdef TARGET_PC
   if (!fullScreen)
@@ -1316,8 +1359,7 @@ void CStateManager::SetupViewForDraw(const CViewport& viewport) {
   const float aspect = (widthScale * camera->GetAspectRatio()) / heightScale;
 #ifdef TARGET_PC
   // Port: photo mode's field of view (0 keeps the camera's own).
-  const float fovDegrees =
-      PortFreeCam::FovOverride() > 0.f ? PortFreeCam::FovOverride() : camera->GetRenderFov();
+  const float fovDegrees = PortDrawFov(*camera);
 #endif
 #ifdef TARGET_PC
   const float tangent = static_cast< float >(tan(CMath::Deg2Rad(0.5f * fovDegrees)));
@@ -1474,15 +1516,16 @@ void CStateManager::DrawWorld(const CInGameGuiManagerSet& gui) {
     CPortPipelineContextScope globalPipelines(AURORA_PIPELINE_CONTEXT_GLOBAL);
     // Port (MP1 5fb236a91): the arm cannon is drawn at retail's FOV whatever the FOV setting, like
     // a view-model FOV in other shooters; otherwise a wide view shrinks it and pushes it into the
-    // corner. Morph ball and scripted cameras keep their own FOVs.
+    // corner. Morph ball and scripted cameras keep their own FOVs. The cannon's FOV is a setting
+    // (MP1 ae213ea30, retail 55), and "Arm cannon follows FOV" keeps the world's projection.
     const CGameCamera& gunCam = *mCameraManager->GetCurrentCamera(*this, true);
-    // PortVr: the headset's own projection draws the cannon at its tracked pose.
-    const bool gunFov = !PortVr::VrImmersive() && mCameraManager->IsInFPCamera() &&
-                        gunCam.GetFov() != CCameraManager::sFirstPersonFOV;
+    // Not in third person: its grapple beam leaves the body's hand, in the world's view.
+    const bool gunFov = !PortVr::VrImmersive() && mCameraManager->IsInFPCamera() && !PortThirdPerson::Active() &&
+                        PortOverlay::GunOwnFov(gunCam.GetFov());
     const CGraphics::CProjectionState gunProj = CGraphics::GetProjectionState();
     if (gunFov) {
       const CViewport& gunViewport = CGraphics::GetViewport();
-      gpRender->SetPerspective(CCameraManager::sFirstPersonFOV,
+      gpRender->SetPerspective(PortOverlay::GunDrawFov(gunCam.GetFov()),
                                static_cast< float >(gunViewport.mWidth),
                                static_cast< float >(gunViewport.mHeight),
                                gunCam.GetNearClipDistance(), gunCam.GetFarClipDistance());
@@ -1539,8 +1582,13 @@ void CStateManager::DrawWorld(const CInGameGuiManagerSet& gui) {
 void CStateManager::ResetViewAfterDraw(const CViewport& viewport, const CTransform4f& viewMatrix) {
   gpRender->SetViewport(viewport.mLeft, viewport.mTop, viewport.mWidth, viewport.mHeight);
   const CGameCamera* camera = mCameraManager->GetCurrentCamera(*this, true);
+#ifdef TARGET_PC
+  CFrustumPlanes frustum(viewMatrix, CRelAngle::FromDegrees(PortDrawFov(*camera)).AsRadians(),
+                         camera->GetAspectRatio(), camera->GetNearClipDistance(), false, 100.f);
+#else
   CFrustumPlanes frustum(viewMatrix, CRelAngle::FromDegrees(camera->GetFov()).AsRadians(),
                          camera->GetAspectRatio(), camera->GetNearClipDistance(), false, 100.f);
+#endif
 #ifdef TARGET_PC
   PortVr::VrCullingFrustum(viewMatrix, camera->GetNearClipDistance(), frustum);
 #endif
@@ -1549,7 +1597,7 @@ void CStateManager::ResetViewAfterDraw(const CViewport& viewport, const CTransfo
   const float height = CGraphics::GetViewport().mHeight;
   const float width = CGraphics::GetViewport().mWidth;
 #ifdef TARGET_PC
-  gpRender->SetPerspective(camera->GetRenderFov(), width, height, camera->GetNearClipDistance(),
+  gpRender->SetPerspective(PortDrawFov(*camera), width, height, camera->GetNearClipDistance(),
                            camera->GetFarClipDistance());
 #else
   gpRender->SetPerspective(camera->GetFov(), width, height, camera->GetNearClipDistance(),
@@ -2497,9 +2545,13 @@ CStateManager::~CStateManager() {
     PortLiveSplit::GameSessionEnd(gpGameState->GetTotalPlayTime());
     PortOverlay::ClearGameTime();
   }
+  // The overlay's world readout tells it a world runs (F1's card import is locked in game); no
+  // update clears it once this manager is gone, until the front end's or the next game's publishes.
+  PortOverlay::SetGameState(0u, -1, nullptr);
   PortSaveState::Forget(this);
   // PortVr: the VR layer must not read a state manager that is going away.
   PortVrHost::ForgetStateManager(this);
+  PortThirdPerson::Reset();
 #endif
   mTearingDown = true;
   CMemory::OffsetFakeStatics(-(mObjectLists.size() * sizeof(CObjectList) +
@@ -3326,7 +3378,14 @@ CDamageInfo CStateManager::GetModifiedDamageInfo(TUniqueId damager, TUniqueId ow
     return damage;
   }
 
+#ifdef TARGET_PC
+  // Port: custom difficulty (F1 > Game > Difficulty) scales the player's damage to enemies at
+  // the same point as Hard, on top of a Hard file's own multiplier.
+  const float portDealt = IsMultiplayer() ? 1.f : PortOverlay::DamageDealtMultiplier();
+  if ((gpGameState->GetHardModeEnabled() || portDealt != 1.f) &&
+#else
   if (gpGameState->GetHardModeEnabled() &&
+#endif
       TCastToConstPtr< CPlayer >(GetObjectById(owner)) != nullptr) {
     bool aiDamage = false;
     if (TCastToConstPtr< CPatterned >(GetObjectById(damagee)) != nullptr) {
@@ -3338,7 +3397,15 @@ CDamageInfo CStateManager::GetModifiedDamageInfo(TUniqueId damager, TUniqueId ow
       }
     }
     if (aiDamage) {
+#ifdef TARGET_PC
+      CDamageInfo result = gpGameState->GetHardModeEnabled()
+                               ? NGunUtils::DifficultyModifyDamageInfo(damage)
+                               : damage;
+      result.MultiplyDamage(portDealt);
+      return result;
+#else
       return NGunUtils::DifficultyModifyDamageInfo(damage);
+#endif
     }
   }
   return damage;
@@ -3443,6 +3510,12 @@ bool CStateManager::ApplyLocalDamage(const CVector3f& pos, const CVector3f& dir,
         break;
       }
     }
+#ifdef TARGET_PC
+    // Port: custom difficulty (F1 > Game > Difficulty), every damage type, single player only.
+    if (!IsMultiplayer()) {
+      useDamage *= PortOverlay::DamageTakenMultiplier();
+    }
+#endif
 
     float damageReduction = 0.0f;
     const EWeaponType weaponType = EWeaponType(damageInfo.GetWeaponMode().GetRawType());
@@ -4689,6 +4762,10 @@ void CStateManager::Update(float inputDt, CArchitectureQueue& queue) {
     for (uint player = 0; player < mNumPlayers; ++player) {
       mCameraManagers[player]->Update(cameraDt, *this);
     }
+#ifdef TARGET_PC
+    // Port: the third-person camera follows the first-person one it moves back from.
+    PortThirdPerson::Update(*this, cameraDt);
+#endif
   }
   ThinkNewObjects(dt);
   if (mGameState != kGS_Paused) {
@@ -5297,6 +5374,22 @@ void CStateManager::PortDarkWorldTick() {
 // once it is done: CMFGame clears mPendingDockArea when its transition finishes, and it never spawns
 // the player itself (a dock crossing keeps the player where they were standing), so a warp has to do
 // it - the area the player came from is unloaded, so their position means nothing here.
+bool CStateManager::PortSpawnEnclosed(const CScriptSpawnPoint& spawn) const {
+  const CVector3f origin = spawn.GetTransform().GetTranslation() + CVector3f(0.f, 0.f, 1.f);
+  if (!RayStaticIntersection(origin, CVector3f::Up(), 6.f, CMaterialFilter()).IsValid()) {
+    return false;
+  }
+  static const float kDirs[4][2] = {{1.f, 0.f}, {-1.f, 0.f}, {0.f, 1.f}, {0.f, -1.f}};
+  for (int i = 0; i < 4; ++i) {
+    if (!RayStaticIntersection(origin, CVector3f(kDirs[i][0], kDirs[i][1], 0.f), 6.f,
+                               CMaterialFilter())
+             .IsValid()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // A warp's arrival (the debug menu's area list, the console's `area`, the sweep's NEXTAREA): put
 // the player inside `target`. The old scan took the first active first-spawn point of *any* loaded
 // area, and a room without one left the player at the old coordinates, outside the new room. Order:
@@ -5324,7 +5417,9 @@ void CStateManager::PortPlaceAtArrival(TAreaId target) {
       if (spawn->GetActive() && spawn->IsFirstSpawn() && firstSpawn == nullptr) {
         firstSpawn = spawn;
       }
-      if (spawn->GetActive() && activeSpawn == nullptr) {
+      if (spawn->GetActive() && spawn != firstSpawn &&
+          (activeSpawn == nullptr ||
+           (PortSpawnEnclosed(*activeSpawn) && !PortSpawnEnclosed(*spawn)))) {
         activeSpawn = spawn;
       }
       if (anySpawn == nullptr) {
@@ -5337,6 +5432,15 @@ void CStateManager::PortPlaceAtArrival(TAreaId target) {
     }
   }
   const char* kind = "first spawn";
+  // Battleground's (Dark Agon) first spawn sits in a closed pocket under the arena floor; the game
+  // never uses it (no save station there). Take an open active spawn over a boxed-in first one.
+  if (firstSpawn != nullptr && activeSpawn != nullptr && PortSpawnEnclosed(*firstSpawn) &&
+      !PortSpawnEnclosed(*activeSpawn)) {
+    std::fprintf(stderr, "[warp] first spawn e%08x is boxed in; using e%08x\n",
+                 static_cast< unsigned >(firstSpawn->GetEditorId().Value()),
+                 static_cast< unsigned >(activeSpawn->GetEditorId().Value()));
+    firstSpawn = nullptr;
+  }
   CScriptSpawnPoint* plain = activeSpawn != nullptr ? activeSpawn : anySpawn;
   if (firstSpawn != nullptr) {
     SpawnPlayer(*firstSpawn, 0);
@@ -5607,7 +5711,11 @@ void CStateManager::PortWarpSettle() {
                      keep.Value(), mPortPendingWarpArea.Value(), PortFreeObjectIds());
       }
     }
-    return;
+    // An area that finished loading just now settles in this frame, before its new objects first
+    // Think: see the spawn below.
+    if (!area->IsLoaded()) {
+      return;
+    }
   }
   mPortWarpWaitingForIds = false;
   mPortWarpStreamStarted = false;
@@ -5618,6 +5726,15 @@ void CStateManager::PortWarpSettle() {
   const TAreaId target = mPortPendingWarpArea;
   mPortPendingWarpArea = kInvalidAreaId;
   mPortWarpDroppedAreas = false;
+  // The world's per-frame travel to the old area moved the streaming one from Loading to
+  // ToDeallocate, so the next TravelToArea(target) would invalidate it and load it again: every
+  // script object of the arrival room deleted and rebuilt right after the spawn below. A script the
+  // spawn had started is lost with it - Dark Falls' save-station "From Load" relay holds the screen
+  // black until Samus's player actor arrives, and the rebuilt room never sends it (the world and
+  // the arm cannon stayed black). Keep the area alive instead.
+  if (area->GetCurChain() != CWorld::kC_Alive) {
+    world->MoveToChain(area, CWorld::kC_Alive);
+  }
 
   // Loaded now, so the move is safe. This is also what makes the world update travel here
   // instead of back to the old area.
@@ -5633,6 +5750,16 @@ void CStateManager::PortWarpSettle() {
 
   if (!PortPlaceKeptTransform()) {
     PortPlaceAtArrival(target);
+  }
+  // A save load spawns in InitializeState and runs the spawn point's script chain before any object
+  // of the room thinks. Do the same here: Dark Falls' "From Load" relay activates the relay that waits
+  // for Samus's player actor, whose suit is already resident on PC, so it arrives in its first Think.
+  // Left queued, that arrival is dispatched ahead of the activation, hits the inactive relay and is
+  // lost, and the "Hold Black" filter and black cinematic camera stay on (world and arm cannon black).
+  if (!mDispatchingScriptMessages) {
+    mDispatchingScriptMessages = true;
+    DispatchScriptMessages();
+    mDispatchingScriptMessages = false;
   }
   for (uint i = 0; i < mNumPlayers; ++i) {
     mCameraManagers[i]->ResetCameras(*this);

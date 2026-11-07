@@ -3,12 +3,15 @@
 #include "port_freecam.h"
 
 #include "port_overlay.h"
+#include "port_third_person.h"
 #include "Kyoto/Input/CFinalInput.hpp"
 #include "Kyoto/Math/CRelAngle.hpp"
 #include "Kyoto/Math/CTransform4f.hpp"
 #include "Kyoto/Math/CVector3f.hpp"
 #include "MetroidPrime/CStateManager.hpp"
 #include "MetroidPrime/CCameraManager.hpp"
+#include "MetroidPrime/Player/CMorphBall.hpp"
+#include "MetroidPrime/Player/CPlayer.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -44,6 +47,8 @@ Pose PresentedPose() { return sPose; }
 // True when the camera was switched on without a state manager (the F8 key and the F1 row have
 // none): the next View() starts the pose at the game camera it is given.
 bool sPendingStart = false;
+// RequestMovePlayerHere: taken at the next tick (TakeRequests).
+bool sPendingMove = false;
 
 void StartAt(const CTransform4f& xf) {
   const CVector3f fwd = xf.GetForward();
@@ -96,6 +101,31 @@ void SetPose(const Pose& pose, bool /*snap*/) {
   sPose.roll = std::isfinite(sPose.roll) ? std::clamp(sPose.roll, -180.f, 180.f) : 0.f;
 }
 
+bool MovePlayerHere(CStateManager& mgr) {
+  CPlayer* player = mgr.GetPlayer(0);
+  if (!sActive || player == nullptr) {
+    return false;
+  }
+  const bool morphed = player->GetMorphballTransitionState() == CPlayer::kMS_Morphed;
+  const float height = morphed ? player->GetMorphBall()->GetBallRadius() : player->GetEyeHeight();
+  const CVector3f pos(sPose.x, sPose.y, sPose.z - height);
+  const float yaw = sPose.yaw / kDegrees;
+  const CVector3f dir(-std::sin(yaw), std::cos(yaw), 0.f);
+  player->Teleport(CTransform4f::LookAt(pos, pos + dir, CVector3f::Up()), mgr, true);
+  player->SetVelocityWR(CVector3f(0.f, 0.f, 0.f));
+  SetActive(false, &mgr);
+  return true;
+}
+
+void RequestMovePlayerHere() { sPendingMove = true; }
+
+void TakeRequests(CStateManager& mgr) {
+  if (sPendingMove) {
+    sPendingMove = false;
+    MovePlayerHere(mgr);
+  }
+}
+
 float FovOverride() { return sActive ? sFov : 0.f; }
 float PresentedFovOverride() { return FovOverride(); }
 void SetTouchMove(float x, float y) {
@@ -146,7 +176,7 @@ bool Input(const CFinalInput& input) {
 
 CTransform4f View(const CTransform4f& game) {
   if (!sActive) {
-    return game;
+    return PortThirdPerson::View(game);
   }
   if (sPendingStart) {
     StartAt(game);

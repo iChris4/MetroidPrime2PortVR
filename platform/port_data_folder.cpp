@@ -366,6 +366,17 @@ std::string CurrentUserFolder() {
   return backups.empty() ? std::string() : WithSeparator(ToUtf8(FromUtf8(backups).parent_path()));
 }
 
+// One folder spelled two ways compares unequal as text: Android's /data/user/0 and
+// /data/data (the activity's getFilesDir() and SDL's canonical path), a link, a
+// doubled separator. Folders that do not both exist are told apart by text alone.
+bool SameFolder(const std::string& a, const std::string& b) {
+  if (a == b) {
+    return true;
+  }
+  std::error_code ec;
+  return !a.empty() && !b.empty() && fs::equivalent(FromUtf8(a), FromUtf8(b), ec) && !ec;
+}
+
 Move& State() {
   static Move sMove;
   return sMove;
@@ -484,13 +495,56 @@ bool StorageAccess() {
   return sAccess;
 }
 
+// Copies the shader pipeline cache (app storage's cache folder, which does not move with the
+// data) into <data>/shader_cache/, where a file manager or adb can read it; the pipeline seed
+// (tools/pipeline_seed.py merge) takes it from there. The write-ahead log goes too: it holds the
+// rows added since the last checkpoint, and SQLite reads it along with the file.
+std::string ExportShaderCache(const std::string& dataFolder) {
+  const std::string app = AppFolder();
+  if (app.empty() || dataFolder.empty()) {
+    return "No app storage folder.";
+  }
+  const fs::path from = FromUtf8(app + "cache");
+  const fs::path to = FromUtf8(dataFolder + "shader_cache");
+  std::error_code ec;
+  if (!fs::exists(from / "pipeline_cache.db", ec)) {
+    return "There is no shader cache yet.";
+  }
+  fs::create_directories(to, ec);
+  uint64_t bytes = 0;
+  for (const char* name : {"pipeline_cache.db", "pipeline_cache.db-wal"}) {
+    fs::remove(to / name, ec);
+    if (!fs::exists(from / name, ec)) {
+      continue;
+    }
+    if (!fs::copy_file(from / name, to / name, fs::copy_options::overwrite_existing, ec)) {
+      return std::string("Could not copy ") + name + ": " + ec.message();
+    }
+    bytes += fs::file_size(to / name, ec);
+  }
+  PortLogFile::Write("data folder: shader cache copied to " + ToUtf8(to));
+  return "Copied the shader cache (" + Size(bytes) + ") to " + ToUtf8(to) + ".";
+}
+
+// A move to shared storage that waits for "All files access": the panel starts
+// it once the grant shows up, so coming back from the system settings is enough.
+bool sMoveAfterGrant = false;
+
 void RequestMove(const std::string& target, bool needsAccess) {
   Move& move = State();
-  if (needsAccess && !StorageAccess()) {
-    CallActivity("requestStorageAccess", false);
+  sMoveAfterGrant = false;
+  if (SameFolder(target, CurrentUserFolder())) {
     std::lock_guard lock(move.mutex);
     move.state = EState::Idle;
-    move.message = "Allow \"All files access\" for Metroid Prime 2, then come back and press the button again.";
+    move.message = "The data is already in " + target + ".";
+    return;
+  }
+  if (needsAccess && !StorageAccess()) {
+    CallActivity("requestStorageAccess", false);
+    sMoveAfterGrant = true;
+    std::lock_guard lock(move.mutex);
+    move.state = EState::Idle;
+    move.message = "Allow \"All files access\" for Metroid Prime 2 and come back; the copy then starts by itself.";
     return;
   }
   if (HasData(target)) {
@@ -513,7 +567,7 @@ void DrawPanel() {
   const std::string current = CurrentUserFolder();
   const std::string priv = PrivateUserFolder();
   const std::string shared = SharedFolder();
-  const bool inPrivate = current == priv;
+  const bool inPrivate = SameFolder(current, priv);
   ImGui::TextWrapped("Settings, memory card, mods, save states and the texture pack are in %s%s.",
                      current.c_str(), inPrivate ? " (app storage, hidden from file managers)" : "");
   if (const char* env = std::getenv("MP2_USER_UNAVAILABLE"); env != nullptr && env[0] != 0) {
@@ -535,7 +589,7 @@ void DrawPanel() {
   const std::string target = move.target;
   const std::string message = move.message;
   lock.unlock();
-  const std::string targetName = target == priv ? "app storage" : target;
+  const std::string targetName = SameFolder(target, priv) ? "app storage" : target;
 
   switch (state) {
   case EState::Idle:
@@ -544,6 +598,9 @@ void DrawPanel() {
       ImGui::TextWrapped("%s", message.c_str());
     }
     if (inPrivate) {
+      if (sMoveAfterGrant && StorageAccess()) {
+        RequestMove(shared, true);
+      }
       const std::string label = "Move to " + shared;
       if (ImGui::Button(label.c_str())) {
         RequestMove(shared, true);
@@ -554,6 +611,13 @@ void DrawPanel() {
     } else {
       if (ImGui::Button("Move back to app storage")) {
         RequestMove(priv, false);
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Copy the shader cache here")) {
+        const std::string result = ExportShaderCache(current);
+        lock.lock();
+        move.message = result;
+        lock.unlock();
       }
       // Measured once: walking a big mods folder every frame would stutter,
       // and nothing else writes to app storage while the data is elsewhere.

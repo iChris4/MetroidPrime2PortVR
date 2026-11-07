@@ -17,6 +17,7 @@
 #include <algorithm>
 
 #include "port_debug.h"
+#include "port_entry.h"
 #include "port_mods.h"
 #include "port_overlay.h"
 #include "port_resume_logic.h"
@@ -41,6 +42,7 @@
 #include "MetroidPrime/CCameraManager.hpp"
 #include "MetroidPrime/CGameArea.hpp"
 #include "MetroidPrime/CGameGlobalObjects.hpp"
+#include "MetroidPrime/CMFGame.hpp"
 #include "MetroidPrime/CMain.hpp"
 #include "MetroidPrime/CStateManager.hpp"
 #include "MetroidPrime/CWorld.hpp"
@@ -70,7 +72,11 @@ namespace {
 
 constexpr uint32_t kMagic = 0x5332504d; // "MP2S" read little-endian
 // 2: a room state section follows the blob. Version 1 states still load, without room state.
-constexpr uint32_t kVersion = 2;
+// 3: the disc's game code follows the room state. The CGameState stream sizes its hint and scan
+// lists from the disc's data, so another disc's state misreads (issue #68: its escape timer came
+// back running, which kills Samus); versions 1 and 2 carry no code and load as before.
+constexpr uint32_t kVersion = 3;
+constexpr uint32_t kVersionRoom = 2;
 constexpr uint32_t kVersionNoRoom = 1;
 // The card slot holds 0xa38 bytes of CGameState stream (SGameFileSlot::mSaveBuffer); the state
 // keeps more room than that so a port-only addition to the stream cannot be cut off silently.
@@ -102,6 +108,7 @@ struct State {
   std::string room;
   std::vector< uint8_t > blob;
   RoomState roomState; // empty for a version 1 state
+  std::string gameCode; // the disc that made it ("G2ME"), empty before version 3
   PortResume::Header resumeHeader; // a quick-resume file only (ReadSlot)
 };
 
@@ -143,6 +150,7 @@ struct RoomRestore {
   // and those saved objects come back as unmatched (162 in area 0 of the Temple Grounds save).
   std::vector< std::pair< int, int > > layers;
   size_t nextLayer = 0;
+  bool replaced = false; // Samus put back once her area was applied
 };
 RoomRestore sRoom;
 std::atomic< bool > sHoldAfterRestore{false};
@@ -263,6 +271,7 @@ std::string Encode(const State& s) {
   std::string room;
   EncodeRoomState(s.roomState, room);
   PutBytes(out, room.data(), room.size());
+  PutBytes(out, s.gameCode.data(), s.gameCode.size());
   return out;
 }
 
@@ -273,7 +282,7 @@ bool Decode(const std::string& in, State& s, std::string& error) {
     return false;
   }
   const uint32_t version = r.U32();
-  if (version != kVersion && version != kVersionNoRoom) {
+  if (version != kVersion && version != kVersionRoom && version != kVersionNoRoom) {
     error = "save state version " + std::to_string(version) + " is not supported";
     return false;
   }
@@ -304,17 +313,29 @@ bool Decode(const std::string& in, State& s, std::string& error) {
     }
   }
   s.blob.assign(blob.begin(), blob.end());
-  if (version >= kVersion) {
+  if (version >= kVersionRoom) {
     const std::string room = r.Bytes();
     if (!r.ok || !DecodeRoomState(room, s.roomState)) {
       error = "save state's room state is damaged";
       return false;
     }
   }
+  if (version >= kVersion) {
+    s.gameCode = r.Bytes();
+    if (!r.ok) {
+      error = "save state is truncated";
+      return false;
+    }
+  }
   return true;
 }
 
-bool ReadSlot(int slot, State& s, std::string& error) {
+// A state made with another disc (PAL, Trilogy, USA) cannot be read with this one's data.
+bool OtherDisc(const State& s) {
+  return !s.gameCode.empty() && s.gameCode != port::entry::CurrentGameCode();
+}
+
+bool ReadSlot(int slot, State& s, std::string& error, bool anyDisc = false) {
   const std::string path = SlotPath(slot);
   if (path.empty()) {
     error = "no user directory, so no save state folder";
@@ -336,6 +357,11 @@ bool ReadSlot(int slot, State& s, std::string& error) {
   }
   if (!Decode(bytes, s, error)) {
     error = path + ": " + error;
+    return false;
+  }
+  if (!anyDisc && OtherDisc(s)) {
+    error = SlotName(slot) + " was made with another disc (" + s.gameCode + "; this one is " +
+            port::entry::CurrentGameCode() + ")";
     return false;
   }
   return true;
@@ -440,6 +466,7 @@ bool Capture(CStateManager& mgr, State& s, std::string& error) {
   s.morphed = morph == CPlayer::kMS_Morphed || morph == CPlayer::kMS_Morphing;
   s.playTime = gpGameState->GetTotalPlayTime();
   s.savedAt = static_cast< int64_t >(std::time(nullptr));
+  s.gameCode = port::entry::CurrentGameCode();
 
   // A card save records the area it was made in; do the same for the stream, and leave the
   // desired area as it was (the load sets it from the header).
@@ -842,6 +869,34 @@ void TickResume(CStateManager& mgr) {
   }
 }
 
+// Samus at the saved spot, facing along the saved forward in the horizontal plane (as the console's
+// `face` does), at rest and in her saved morph state.
+void PlaceSamus(CStateManager& mgr, const State& s) {
+  CPlayer& player = *mgr.GetPlayer(0);
+  const CVector3f pos(s.pos[0], s.pos[1], s.pos[2]);
+  float lx = s.fwd[0];
+  float ly = s.fwd[1];
+  const float len = std::sqrt(lx * lx + ly * ly);
+  if (len < 1e-4f || !std::isfinite(len)) {
+    lx = 0.f;
+    ly = 1.f;
+  } else {
+    lx /= len;
+    ly /= len;
+  }
+  const CVector3f look(pos.GetX() + lx, pos.GetY() + ly, pos.GetZ());
+  player.Teleport(CTransform4f::LookAt(pos, look, CVector3f::Up()), mgr, true);
+  player.SetVelocityWR(CVector3f(0.f, 0.f, 0.f));
+  // The rebuilt player has no area until its first tick files it; give it Samus's before that
+  // tick so nothing the restore starts sees an area-less player (MP1 sync 14-25).
+  mgr.SetActorAreaId(player, mgr.World()->GetCurrentAreaId());
+  const CPlayer::EPlayerMorphBallState morph = player.GetMorphballTransitionState();
+  const bool morphedNow = morph == CPlayer::kMS_Morphed || morph == CPlayer::kMS_Morphing;
+  if (morphedNow != s.morphed) {
+    player.SetSpawnedMorphBallState(s.morphed ? CPlayer::kMS_Morphed : CPlayer::kMS_Unmorphed, mgr);
+  }
+}
+
 // Put Samus back once the rebuilt world runs.
 void TickPlacement(CStateManager& mgr) {
   if (++sPlace.waited > kPlaceTimeoutFrames) {
@@ -874,8 +929,10 @@ void TickPlacement(CStateManager& mgr) {
     SetMessage("load landed in another world; Samus stays at its spawn");
     return;
   }
+  // The load's own fast-forward (its settle included) ends first: the restore resumes a saved
+  // shot, which a skip still running would fast-forward too.
   if (CCameraManager* cameras = mgr.CameraManager(0);
-      cameras != nullptr && cameras->IsInCinematicCamera()) {
+      (cameras != nullptr && cameras->IsInCinematicCamera()) || CMFGame::PortCinematicSkipActive()) {
     sPlace.settled = 0;
     return;
   }
@@ -885,30 +942,7 @@ void TickPlacement(CStateManager& mgr) {
   sPlace.active = false;
 
   const State& s = sPlace.state;
-  CPlayer& player = *mgr.GetPlayer(0);
-  const CVector3f pos(s.pos[0], s.pos[1], s.pos[2]);
-  // Face along the saved forward in the horizontal plane, as the console's `face` does.
-  float lx = s.fwd[0];
-  float ly = s.fwd[1];
-  const float len = std::sqrt(lx * lx + ly * ly);
-  if (len < 1e-4f || !std::isfinite(len)) {
-    lx = 0.f;
-    ly = 1.f;
-  } else {
-    lx /= len;
-    ly /= len;
-  }
-  const CVector3f look(pos.GetX() + lx, pos.GetY() + ly, pos.GetZ());
-  player.Teleport(CTransform4f::LookAt(pos, look, CVector3f::Up()), mgr, true);
-  player.SetVelocityWR(CVector3f(0.f, 0.f, 0.f));
-  // The rebuilt player has no area until its first tick files it; give it Samus's before that
-  // tick so nothing the restore starts sees an area-less player (MP1 sync 14-25).
-  mgr.SetActorAreaId(player, mgr.World()->GetCurrentAreaId());
-  const CPlayer::EPlayerMorphBallState morph = player.GetMorphballTransitionState();
-  const bool morphedNow = morph == CPlayer::kMS_Morphed || morph == CPlayer::kMS_Morphing;
-  if (morphedNow != s.morphed) {
-    player.SetSpawnedMorphBallState(s.morphed ? CPlayer::kMS_Morphed : CPlayer::kMS_Unmorphed, mgr);
-  }
+  PlaceSamus(mgr, s);
   if (CCameraManager* cameras = mgr.CameraManager(0)) {
     cameras->ResetCameras(mgr);
   }
@@ -960,6 +994,19 @@ uint64_t RoomSignature(CStateManager& mgr, int waiting, bool& busy) {
   return signature;
 }
 
+// The world ran while the restore waited for its layers and areas: Samus may have fallen through a
+// platform that was not yet back where she stood (#61, the Dark Torvus Temple elevator closed
+// around her). Once her area's saved objects are in place, put her back on the saved spot.
+void ReplaceSamusIfApplied(CStateManager& mgr) {
+  const std::vector< int32_t >& done = sRoom.progress.done;
+  if (sRoom.replaced || mgr.GetPlayer(0) == nullptr ||
+      std::find(done.begin(), done.end(), sPlace.state.areaIndex) == done.end()) {
+    return;
+  }
+  sRoom.replaced = true;
+  PlaceSamus(mgr, sPlace.state);
+}
+
 // Apply the room state to each saved area once it is back, Samus's own first.
 void TickRoom(CStateManager& mgr) {
   if (mgr.mQuitGame || !mgr.IsFullyInitialized() || mgr.World() == nullptr ||
@@ -997,6 +1044,7 @@ void TickRoom(CStateManager& mgr) {
     }
   } else {
     waiting = ApplyRoomState(mgr, sRoom.state, sRoom.progress);
+    ReplaceSamusIfApplied(mgr);
   }
   if (waiting != 0) {
     // Give up only once nothing has moved for kRoomTimeoutFrames: a world that is still loading
@@ -1017,6 +1065,7 @@ void TickRoom(CStateManager& mgr) {
                  sRoom.waited, sRoom.idle);
     // the layers never settled, or an area never came back: restore the areas that are ready
     waiting = ApplyRoomState(mgr, sRoom.state, sRoom.progress, true);
+    ReplaceSamusIfApplied(mgr);
   }
   sRoom.active = false;
   DisarmSpawnLayers();
@@ -1046,13 +1095,13 @@ Info SlotInfo(int slot) {
   Info info;
   State s;
   std::string error;
-  if (!ReadSlot(slot, s, error)) {
+  if (!ReadSlot(slot, s, error, true)) {
     return info;
   }
   info.exists = true;
   info.worldId = s.worldId;
   info.areaIndex = s.areaIndex;
-  info.room = s.room;
+  info.room = OtherDisc(s) ? s.room + " (" + s.gameCode + " disc)" : s.room;
   info.playTime = s.playTime;
   info.savedAt = s.savedAt;
   info.morphed = s.morphed;
@@ -1117,6 +1166,11 @@ void TestHook() {
 }
 
 std::atomic< bool > sResumeAccepted{false};
+// A quick resume booted the card's save into the resume room (ResumeBootArea) and its load has not
+// started yet (ResumeCheck): the picture is held black meanwhile (HidesPicture).
+bool sResumeBoot = false;
+// HidesPicture's frames held for the current resume boot (reset in ResumeBootArea).
+int sResumeBootHeld = 0;
 std::atomic< bool > sResumeLoadRequest{false};
 std::atomic< bool > sResumeSnapshotRequest{false};
 
@@ -1131,6 +1185,7 @@ void ResumeCheck(CStateManager& mgr) {
   }
   const bool accepted = sResumeAccepted.load();
   decided = true;
+  sResumeBoot = false; // a load that starts below holds the picture from here (sPlace)
   if (!accepted) {
     if (!ResumeActive() || !PortSkipFrontEnd::Started()) {
       return;
@@ -1186,8 +1241,26 @@ bool ResumeBootArea(uint32_t& world, uint32_t& area) {
       gpMain == nullptr || PortWarp::Pending()) {
     return false;
   }
+  // The game boots the card's state, and the resume's load only replaces it once that world runs.
+  // A new game's card (0%, never saved) would first play its whole opening there: the mission text
+  // of the level load (CMFGameLoader shows it while the first spawn is still to come) and Landing
+  // Site's intro cinematic layer. Boot with the resume's own first-spawn flag, and its layer bits
+  // and mailbox for its world.
+  {
+    CMemoryInStream stream(s.blob.data(), s.blob.size());
+    CBitStreamReader reader(stream);
+    CGameState* saved = rs_new CGameState(reader);
+    CWorldState& from = saved->StateForWorld(s.worldId);
+    CWorldState& to = gpGameState->StateForWorld(s.worldId);
+    to.GetLayerState() = from.GetLayerState();
+    to.Mailbox() = from.Mailbox();
+    gpGameState->SetDeferPowerupInit(saved->GetInitPowerupsAtFirstSpawn());
+    delete saved;
+  }
   world = static_cast< uint32_t >(s.worldId);
   area = static_cast< uint32_t >(s.areaAssetId);
+  sResumeBoot = true;
+  sResumeBootHeld = 0;
   return true;
 }
 
@@ -1303,6 +1376,19 @@ void Forget(const CStateManager* mgr) {
 void RequestModReload() { sModReloadRequest.store(true); }
 void RequestRoomReload() { sRoomReloadRequest.store(true); }
 bool LoadAwaitsCinematic() { return sPlace.active; }
+
+bool HidesPicture(CStateManager&) {
+  // A boot whose resume never gets to load (a world that never settles) shows again after this.
+  constexpr int kBootHoldCapFrames = 600;
+  if (sResumeBoot) {
+    if (++sResumeBootHeld <= kBootHoldCapFrames) {
+      return true;
+    }
+    sResumeBoot = false;
+  }
+  // A cinematic the rebuilt world starts is hidden too: the load skips it (LoadAwaitsCinematic).
+  return sPlace.active;
+}
 
 bool ModReloadActive() {
   return sModReloadRequest.load() || sModReloadPending.load() || sModReloadWorldStale.load();

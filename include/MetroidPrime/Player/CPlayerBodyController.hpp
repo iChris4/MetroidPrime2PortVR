@@ -84,6 +84,15 @@ public:
   void MultiplyPlaybackRate(float rate);
   void RequestAnimation(const CAnimPlaybackParms& parameters, bool looping, bool noTransition);
   void SelectAnimation(const CPASAnimParmData& parameters, CRandom16& random);
+#ifdef TARGET_PC
+  // FindBestAnimation on the PAS database; in third person (single player's body running
+  // multiplayer's FSM) a lookup the character lacks, such as the jump arc, double jump flip, dash
+  // or grapple, falls back to the same ANCS's character 0 (CAnimData::PortBorrowAnimation)
+  // when that matches better: PAS weighs partial matches, so Samus_SinglePlayer answers the jump
+  // arc with its landing or a flip at weight 60.
+  rstl::pair< float, int > PortFindBestAnimation(const CPASAnimParmData& parameters,
+                                                 CRandom16& random);
+#endif
   bool IsAnimationLooping() const;
 
   bool IsDeathReactionOver() const { return mDeathReactionOver; }
@@ -350,6 +359,15 @@ private:
   bool mMorphTransitionActive : 1;
   bool mDeathReactionOver : 1;
   bool mDeathReactionActive : 1;
+#ifdef TARGET_PC
+  // Port third person: single player's body FSM (SinglePlayerAnimCtrl) has no jump, dash,
+  // grapple or knockback states, so the drawn body would never jump or flip. While third person
+  // is on, the body runs multiplayer's FSM (PlayerAnimCtrl, a superset of the same states).
+  void PortUpdateThirdPersonFsm(CStateManager& mgr);
+  void PortSetupMachine(CStateManager& mgr, const CStateMachine* machine);
+  rstl::optional_object< TCachedToken< CStateMachine > > mPortThirdPersonFsm;
+  bool mPortThirdPersonFsmActive;
+#endif
 };
 CHECK_SIZEOF(CPlayerBodyController, 0x794)
 

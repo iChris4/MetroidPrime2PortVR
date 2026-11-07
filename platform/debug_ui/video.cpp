@@ -9,6 +9,7 @@
 #include "port_overlay.h"
 #include "port_savestate.h"
 #include "port_suit_colours.h"
+#include "port_third_person.h"
 #include "port_build_info.h"
 #include "port_update_check.h"
 #include "port_video.h"
@@ -176,7 +177,8 @@ void DrawVideoDisplay() {
   if (sAimCrosshair) {
     Changed(ImGui::SliderInt("Crosshair opacity", &sCrosshairOpacity, PortOverlay::kCrosshairOpacityMin,
                              PortOverlay::kCrosshairOpacityMax, "%d%%"));
-    ImGui::SetItemTooltip("The crosshair in the middle of the screen (mouse aim, twin stick, touch).");
+    ImGui::SetItemTooltip("The crosshair in the middle of the screen (mouse aim, twin stick, touch).\n"
+                          "100%% is the game's own; above it brightens the dim GameCube crosshair.");
     int style = sCrosshairStyle;
     static const char* const kStyles[] = {"Classic", "Remastered", "GameCube"};
     if (ImGui::Combo("Crosshair style", &style, kStyles, 3)) {
@@ -196,6 +198,14 @@ void DrawVideoDisplay() {
     ImGui::EndDisabled();
   }
   Changed(ImGui::Checkbox("Hide helmet", &sHideHelmet));
+  bool thirdPerson = PortThirdPerson::Enabled();
+  if (Changed(ImGui::Checkbox("Third-person camera", &thirdPerson))) {
+    PortThirdPerson::SetEnabled(thirdPerson);
+  }
+  ImGui::SetItemTooltip(
+      "Plays from behind Samus's shoulder (single player; not the morph ball or cutscenes),\n"
+      "showing her body and hiding the arm cannon and helmet. Distance, shoulder and height:\n"
+      "console `thirdperson`, or third_person_* in the settings file.");
   Changed(ImGui::Checkbox("Hide visor effects", &sHideVisorEffects));
   ImGui::SetItemTooltip("The scan visor's window and edges are what a visor effect draws here.");
   Changed(ImGui::Checkbox("Cutscene black bars", &sCinemaBars));
@@ -224,6 +234,28 @@ void DrawVideoDisplay() {
   }
   ImGui::EndDisabled();
   ImGui::SetItemTooltip("Back to the retail 55 deg.");
+  Changed(ImGui::Checkbox("Arm cannon follows FOV", &sGunFollowsFov));
+  ImGui::SetItemTooltip("Off: the arm cannon is drawn at its own FOV (below) whatever the field\n"
+                        "of view, so it keeps its size and place. On: it shares the world's\n"
+                        "perspective, so a wider FOV draws it smaller and further into the corner.\n"
+                        "Off under Original experience.");
+  ImGui::BeginDisabled(sGunFollowsFov);
+  float gunFov = sGunFov;
+  if (ImGui::SliderFloat("Arm cannon FOV", &gunFov, PortOverlay::kGunFovMin, PortOverlay::kGunFovMax,
+                         "%.0f deg")) {
+    sGunFov = std::isfinite(gunFov) ? std::round(gunFov) : PortOverlay::kGunFovRetail;
+    Changed(true);
+  }
+  ImGui::SetItemTooltip("The FOV the arm cannon is drawn at (retail 55), apart from the world's:\n"
+                        "higher draws it smaller and further into the corner. Retail under\n"
+                        "Original experience.");
+  ImGui::SameLine();
+  if (ImGui::Button("Retail##gunfov")) {
+    sGunFov = PortOverlay::kGunFovRetail;
+    Changed(true);
+  }
+  ImGui::SetItemTooltip("Back to the retail 55 deg.");
+  ImGui::EndDisabled();
   {
     float offset[3] = {sGunOffset[0], sGunOffset[1], sGunOffset[2]};
     bool changed = ImGui::SliderFloat("Arm cannon right", &offset[0], -PortOverlay::kGunOffsetMax,

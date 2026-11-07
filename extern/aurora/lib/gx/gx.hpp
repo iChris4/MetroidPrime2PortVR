@@ -79,6 +79,8 @@ constexpr u32 MaxIndStages = GX_MAX_INDTEXSTAGE;
 constexpr u32 MaxIndTexMtxs = 3;
 constexpr u32 MaxVtxFmt = GX_MAX_VTXFMT;
 constexpr u32 MaxPnMtx = (GX_PNMTX9 / 3) + 1;
+// A texgen's GX_IDENTITY as its postex_mtx index in the uniform (past the last matrix).
+constexpr u32 TexMtxIdentity = MaxPnMtx + MaxTexMtx;
 constexpr u32 MaxIndexAttr = 12; // VA_POS -> VA_TEX7
 constexpr u32 MaxUniformSize = 8192; // WebGPU guarantees maxUniformBufferBindingSize >= 16384
 constexpr u32 XfRegCount = 0x58; // 0x1000-0x1057
@@ -330,10 +332,10 @@ struct Fog {
   float a = 0.f;
   float b = 0.5f;
   float c = 0.f;
-  float rangeCenter = 0.f;
-  std::array<Vec4<float>, 3> rangeK;
+  // The GXFogType: the curve is chosen in the shader, not by the pipeline (ShaderConfig::fogType).
+  u32 type = GX_FOG_NONE;
 };
-static_assert(sizeof(Fog) == 80);
+static_assert(sizeof(Fog) == 32);
 struct AttrArray {
   const void* data;
   u32 size;
@@ -656,6 +658,8 @@ enum : u8 {
   VolFogPremultiplied = 4, // ONE, INVSRCALPHA, per vertex: colour T + in-scatter alpha
 };
 struct ShaderConfig {
+  // GX_FOG_PERSP_LIN, or GX_FOG_NONE for a draw that never fogs (pipeline_fog): the curve, and
+  // whether there is fog at all, is the Fog uniform's, so a fog change needs no new pipeline.
   u8 fogType = GX_FOG_NONE;
   u8 vtxStride = 0;
   u8 lineMode : 2 = 0; // 1 = GX_LINES, 2 = GX_LINESTRIP, 3 = GX_POINTS
@@ -742,6 +746,62 @@ static_assert(offsetof(ShaderConfig, pbrKind) == 6);
 static_assert(offsetof(ShaderConfig, volFog) == 7);
 static_assert(offsetof(ShaderConfig, pbrLightmapAttr) == 8);
 static_assert(offsetof(ShaderConfig, hudSample) == 9);
+// The fog as the pipeline sees it: GX_FOG_NONE only for the drawid view and the actor decal, which
+// never fog; every other draw takes the fogged pipeline and the Fog uniform's kind (0 = none)
+// turns it off, so a draw fogged in one room and not in another is one pipeline. The range
+// table only matters with fog on (a row recorded with fog none drops it).
+constexpr void pipeline_fog(ShaderConfig& config) noexcept {
+  if (config.drawId || config.actorDecal != 0 || config.shell != 0) {
+    config.fogType = GX_FOG_NONE;
+    config.fogRangeEnabled = false;
+    return;
+  }
+  if (config.fogType == GX_FOG_NONE) {
+    config.fogRangeEnabled = false;
+  }
+  config.fogType = GX_FOG_PERSP_LIN;
+}
+// An alpha compare reference the shader reads from the alpha_ref uniform (ShaderInfo::usesAlphaRef).
+constexpr u32 AlphaRefUniform = 0x100;
+// The reference as the pipeline sees it: only the values that make the compare constant (0 for
+// LESS/GEQUAL, 255 for LEQUAL/GREATER) stay, any other is the uniform's, so a fading cut-out
+// needs no new pipeline per reference.
+constexpr u32 pipeline_alpha_ref(GXCompare comp, u32 ref) noexcept {
+  switch (comp) {
+  case GX_LESS:
+  case GX_GEQUAL:
+    return ref == 0 ? 0 : AlphaRefUniform;
+  case GX_LEQUAL:
+  case GX_GREATER:
+    return ref == 255 ? 255 : AlphaRefUniform;
+  case GX_EQUAL:
+  case GX_NEQUAL:
+    return AlphaRefUniform;
+  default:
+    return 0;
+  }
+}
+constexpr AlphaCompare pipeline_alpha_compare(AlphaCompare ac) noexcept {
+  ac.ref0 = pipeline_alpha_ref(ac.comp0, ac.ref0);
+  ac.ref1 = pipeline_alpha_ref(ac.comp1, ac.ref1);
+  return ac;
+}
+// The konst selections are the tev_konst uniform's (ShaderInfo::usesTevKonst), not the pipeline's.
+constexpr void pipeline_tev_konst(ShaderConfig& config) noexcept {
+  for (auto& stage : config.tevStages) {
+    stage.kcSel = GX_TEV_KCSEL_1;
+    stage.kaSel = GX_TEV_KASEL_1;
+  }
+}
+// GXSetDstAlpha's constant is the draw's blend constant (DrawData::dstAlpha); the pipeline only
+// tells off (UINT32_MAX) from on (issue #78: CCubeRenderer writes each area's PVS alpha there, and
+// every value keyed its own pipeline). Zero keys as on too: Replace or DualSource still writes the
+// zero constant, and without dual source the draw falls back to None as before.
+constexpr u32 pipeline_dst_alpha(u32 dstAlpha) noexcept {
+  return dstAlpha == UINT32_MAX ? dstAlpha : 0xFF;
+}
+// Resets what the shader never reads (shader_info.cpp), so draws differing only there share a pipeline.
+void pipeline_unused_inputs(ShaderConfig& config) noexcept;
 // Whether a draw samples the sun's shadow map: a lit PBR surface drawn in colour without per-pixel fog.
 inline bool shadow_receives(const ShaderConfig& sc) noexcept {
   return sc.shadow && (sc.pbr != 0 || sc.actorDecal != 0) && sc.volFog == VolFogNone && sc.depthOnly == 0 && sc.lineMode == 0 && !sc.drawId;
@@ -771,7 +831,7 @@ struct GXBindGroups {
 struct ShaderInfo {
   std::bitset<MaxTexCoord> sampledTexCoords;
   std::bitset<MaxTextures> sampledTextures;
-  std::bitset<MaxKColors> sampledKColors;
+  u8 tevStageCount = 0; // the tev_konst uniform's length (usesTevKonst)
   std::bitset<MaxColorChannels / 2> sampledColorChannels;
   std::bitset<MaxTevRegs> loadsTevReg;
   std::bitset<MaxTevRegs> writesTevReg;
@@ -796,6 +856,8 @@ struct ShaderInfo {
   bool usesShell : 1 = false;
   bool usesPbrThermal : 1 = false; // ShaderConfig::pbrThermal: the pbr_thermal uniform
   bool shellScene : 1 = false; // the shell's colour pass: texture slot 2 holds the scene copy     // ShaderConfig::shell: the shell uniforms; colour: the scene copy on slot 2
+  bool usesTevKonst : 1 = false; // a stage reads a konst input: the tev_konst uniform
+  bool usesAlphaRef : 1 = false;  // an alpha compare reference is AlphaRefUniform: the alpha_ref uniform
 };
 // As texture_layout(const ShaderConfig&), from the info built of that config.
 inline TextureLayout texture_layout(const ShaderInfo& info) noexcept {

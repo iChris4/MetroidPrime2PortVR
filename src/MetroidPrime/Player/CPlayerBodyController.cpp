@@ -14,6 +14,12 @@
 
 #include <string.h>
 
+#ifdef TARGET_PC
+#include "Kyoto/CResFactory.hpp"
+#include <float.h>
+#include "port_third_person.h"
+#endif
+
 const TStateMachineState< CPlayerBodyController >::STriggerFunction
     CPlayerBodyController::skTriggerFunctions[22] = {
         {"StateOver", &CPlayerBodyController::StateOver},
@@ -90,7 +96,11 @@ CPlayerBodyController::CPlayerBodyController(CPlayer& player, CAssetId stateMach
 , mUnfreezing(false)
 , mMorphTransitionActive(false)
 , mDeathReactionOver(false)
-, mDeathReactionActive(false) {
+, mDeathReactionActive(false)
+#ifdef TARGET_PC
+, mPortThirdPersonFsmActive(false)
+#endif
+{
   mStateMachineResource.Lock();
 
   const CAnimData& animData = *player.GetAnimationData();
@@ -122,6 +132,9 @@ void CPlayerBodyController::Update(float dt, CStateManager& mgr) {
     mAnimationOver =
         !mPlayer->GetAnimationData()->IsAnimTimeRemaining(dt, rstl::string_l("Whole Body"));
     CheckDeathCommands(mgr);
+#ifdef TARGET_PC
+    PortUpdateThirdPersonFsm(mgr);
+#endif
     mBodyState.Update(mgr, *this, dt);
     mAdditiveState.Update(mgr, *this, dt);
     mCommandMgr.ClearCmds();
@@ -164,13 +177,21 @@ const CPASDatabase& CPlayerBodyController::GetPASDatabase() const {
 }
 
 void CPlayerBodyController::SelectAnimation(const CPASAnimParmData& parameters, CRandom16& random) {
+#ifdef TARGET_PC
+  const int animation = PortFindBestAnimation(parameters, random).second;
+#else
   const int animation = GetPASDatabase().FindBestAnimation(parameters, random, -1).second;
+#endif
   RequestAnimation(CAnimPlaybackParms(animation, -1, 1.f, true), false, false);
 }
 
 void CPlayerBodyController::SelectLoopingAnimation(const CPASAnimParmData& parameters,
                                                    CRandom16& random) {
+#ifdef TARGET_PC
+  const int animation = PortFindBestAnimation(parameters, random).second;
+#else
   const int animation = GetPASDatabase().FindBestAnimation(parameters, random, -1).second;
+#endif
   RequestAnimation(CAnimPlaybackParms(animation, -1, 1.f, true), true, false);
 }
 
@@ -197,6 +218,87 @@ void CPlayerBodyController::SetupStateMachines(CStateManager& mgr) {
   mStateMachinesInitialized = true;
   ResetStates(mgr);
 }
+
+#ifdef TARGET_PC
+void CPlayerBodyController::PortSetupMachine(CStateManager& mgr, const CStateMachine* machine) {
+  const rstl::string body(mBodyState.GetName());
+  const char* additiveName = mAdditiveState.GetName();
+  const rstl::string additive(additiveName != nullptr ? additiveName : "AdditiveIdle");
+  mBodyState.Reset(mgr, *this);
+  mAdditiveState.Reset(mgr, *this);
+  mBodyState.Setup(machine);
+  mAdditiveState.Setup(machine);
+  mBodyState.SetTriggerFunctions(skTriggerFunctions, 22);
+  mBodyState.SetStateFunctions(skStateFunctions, 26);
+  mAdditiveState.SetTriggerFunctions(skTriggerFunctions, 22);
+  mAdditiveState.SetStateFunctions(skStateFunctions, 26);
+  mBodyState.SetState(mgr, *this, body);
+  mAdditiveState.SetState(mgr, *this, additive);
+}
+
+rstl::pair< float, int > CPlayerBodyController::PortFindBestAnimation(
+    const CPASAnimParmData& parameters, CRandom16& random) {
+  const rstl::pair< float, int > best = GetPASDatabase().FindBestAnimation(parameters, random, -1);
+  if (best.first > 99.999f || !mPortThirdPersonFsmActive) {
+    return best;
+  }
+  CAnimData* animData = GetPlayer().AnimationData();
+  if (animData == nullptr || animData->GetCharacterIndex() == 0) {
+    return best;
+  }
+  // A partial match of our own (a landing played for the jump arc) only yields to an exact one, so a
+  // fast landing keeps its own landing over the donor's partly matching jump.
+  const float minWeight = best.first > FLT_EPSILON ? 99.999f : 0.f;
+  const rstl::pair< float, int > borrowed =
+      animData->PortBorrowAnimation(0, parameters, random, minWeight);
+  return borrowed.second >= 0 ? borrowed : best;
+}
+
+void CPlayerBodyController::PortUpdateThirdPersonFsm(CStateManager& mgr) {
+  // Multiplayer already runs PlayerAnimCtrl.
+  const bool want = PortThirdPerson::Enabled() && !mgr.IsMultiplayer();
+  if (mPortThirdPersonFsmActive) {
+    // Single player disables locomotion's animation changes (CPlayer::AcceptScriptMsg, also after
+    // this swap), so the shown body would hold its idle or walk cycle until the next forced change.
+    mLocomotion.SetAnimationChangeDisabled(false);
+  }
+  if (want == mPortThirdPersonFsmActive) {
+    return;
+  }
+  // Swap only between the resting states both machines share, so no jump, morph or screw
+  // attack is cut short.
+  const char* name = mBodyState.GetName();
+  if (name == nullptr || (strcmp(name, "Locomotion") != 0 && strcmp(name, "Morphball") != 0)) {
+    return;
+  }
+  const CStateMachine* machine = nullptr;
+  if (want) {
+    if (!mPortThirdPersonFsm) {
+      const SObjectTag* tag = gpResourceFactory->GetResourceIdByName("PlayerAnimCtrl");
+      if (tag == nullptr) {
+        mPortThirdPersonFsmActive = want; // no such resource: keep single player's machine
+        return;
+      }
+      mPortThirdPersonFsm = TCachedToken< CStateMachine >(gpSimplePool->GetObj(*tag));
+      mPortThirdPersonFsm->Lock();
+    }
+    if (!mPortThirdPersonFsm->TryCache()) {
+      return;
+    }
+    machine = mPortThirdPersonFsm->GetObject();
+  } else {
+    machine = GetStateMachine();
+  }
+  if (machine == nullptr) {
+    return;
+  }
+  PortSetupMachine(mgr, machine);
+  mPortThirdPersonFsmActive = want;
+  if (!want) {
+    mLocomotion.SetAnimationChangeDisabled(true);  // single player's setting
+  }
+}
+#endif
 
 void CPlayerBodyController::CheckDeathCommands(CStateManager& mgr) {
   if (mCommandMgr.GetCmd(kPBSC_DeathReaction) != nullptr &&

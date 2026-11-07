@@ -25,21 +25,50 @@ void DrawEnhancementsTab() {
   ImGui::SeparatorText("Ammo");
   Changed(ImGui::Checkbox("Infinite Light and Dark Ammo", &sInfiniteBeamAmmo));
 
+  ImGui::SeparatorText("Music");
+  // Read when the next track starts: a room change or a portal hop.
+  Changed(ImGui::Checkbox("Light world music in Dark Aether", &sDarkWorldLightMusic));
+
   ImGui::SeparatorText("Pace");
   // The game reads this every frame in its cinematic flow state.
   Changed(ImGui::Checkbox("Skippable cutscenes", &sSkipCinematics));
+  // Read when a pickup is touched and when a map station's message box comes up.
+  int seamless = sSeamlessPickups;
+  if (ImGui::Combo("Seamless item pickups", &seamless, "Off\0" "All\0" "Repeats only\0")) {
+    sSeamlessPickups = std::clamp(seamless, static_cast< int >(PortOverlay::kSeamlessPickups_Off),
+                                  static_cast< int >(PortOverlay::kSeamlessPickups_Repeats));
+    Changed(true);
+  }
+  ItemHelp("No control lock, message box or item cutscene: the item's name shows as a HUD memo. "
+           "All: every pickup and map station. Repeats only: pickups of an item you already have, "
+           "such as a second Missile Expansion or Energy Tank, so each kind's first box still "
+           "shows.");
+  // Off walks at retail speed; a custom action bound to this switch makes the slider a sprint.
+  Changed(ImGui::Checkbox("Custom walk speed", &sWalkSpeedEnabled));
+  ImGui::SetItemTooltip("Off: retail speed. Bind a custom action to this setting (Toggle or While\n"
+                        "held) in Controls to sprint at the speed below.");
+  ImGui::BeginDisabled(!sWalkSpeedEnabled);
   int walkSpeed = sWalkSpeed;
   if (ImGui::SliderInt("Walk speed", &walkSpeed, PortOverlay::kWalkSpeedMin,
                        PortOverlay::kWalkSpeedMax, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
     sWalkSpeed = walkSpeed;
     Changed(true);
   }
+  ImGui::EndDisabled();
   int scanSpeed = sScanSpeed;
   if (ImGui::SliderInt("Scan speed", &scanSpeed, PortOverlay::kScanSpeedMin,
                        PortOverlay::kScanSpeedMax, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
     sScanSpeed = scanSpeed;
     Changed(true);
   }
+  int beamSwitchSpeed = sBeamSwitchSpeed;
+  if (ImGui::SliderInt("Beam switch speed", &beamSwitchSpeed, PortOverlay::kBeamSwitchSpeedMin,
+                       PortOverlay::kBeamSwitchSpeedMax, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
+    sBeamSwitchSpeed = beamSwitchSpeed;
+    Changed(true);
+  }
+  ItemHelp("How fast the cannon closes, morphs and opens on a beam change; 100% is retail. The "
+           "rest of the gun keeps its speed.");
   // Elevator and portal share a row: same choices, short labels.
   const float rideWidth = ImGui::GetFontSize() * 6.f;
   int elevatorRide = sElevatorRide;

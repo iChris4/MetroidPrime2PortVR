@@ -17,6 +17,10 @@
 #include "MetroidPrime/Tweaks/CTweakPlayerControls.hpp"
 #include "MetroidPrime/Tweaks/CTweakPlayerGun.hpp"
 
+#ifdef TARGET_PC
+#include "port_overlay.h"
+#endif
+
 static uint ReleasedFlags(uint last, uint current);
 static uint PressedFlags(uint last, uint current);
 
@@ -256,12 +260,22 @@ void CPlayerGunBase::UpdateGunHolster(const CFinalInput& input, CStateManager& m
       }
     }
     CPlayerState* playerState = player->GetPlayerState();
+#ifdef TARGET_PC
+    const bool scanBlocks = !PortOverlay::ScanShoot() &&
+                            (playerState->GetCurrentVisor() == CPlayerState::kPV_Scan ||
+                             playerState->GetTransitioningVisor() == CPlayerState::kPV_Scan);
+    if (scanBlocks || player->GetMorphballTransitionState() != CPlayer::kMS_Unmorphed ||
+        mGunDrawBlockCount != 0) {
+      draw = false;
+    }
+#else
     if (playerState->GetCurrentVisor() == CPlayerState::kPV_Scan ||
         playerState->GetTransitioningVisor() == CPlayerState::kPV_Scan ||
         player->GetMorphballTransitionState() != CPlayer::kMS_Unmorphed ||
         mGunDrawBlockCount != 0) {
       draw = false;
     }
+#endif
     if (draw) {
       DrawGun(mgr);
     }
@@ -308,7 +322,12 @@ void CPlayerGunBase::UpdateTransform(CStateManager& mgr, const CVector3f& positi
   }
   case kGHS_Holstering: {
     float t = 1.f - CMath::Limit(mGunHolsterRemTime / gpTweakPlayerGun->GetGunHolsterTime(), 1.f);
+#ifdef TARGET_PC
+    // Retail 0x801DD9A8 lwz r0,0x38c(r3); 0x801DD9AC cmpwi r0,0x2 = kMS_Morphing.
+    if (GetPlayer(mgr)->GetMorphballTransitionState() == CPlayer::kMS_Morphing) {
+#else
     if (GetPlayer(mgr)->GetMorphballTransitionState() == CPlayer::kMS_Morphed) {
+#endif
       t = 1.f - CMath::Limit(mGunHolsterRemTime / 0.1f, 1.f);
     }
     if (t > 0.01f) {

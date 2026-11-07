@@ -23,6 +23,13 @@ static int sPortalTraversalDepth;
 // portals are seen from, and ClipPortal passes the headset's frustum through a portal unchanged.
 static bool sPortVrPortals = false;
 static CVector3f sPortVrEye;
+#include "Kyoto/Graphics/CGraphics.hpp"
+
+// Port: the drawn view PreRender walks the portals from (ClipPortal reads it); retail takes the
+// game camera's own transform and projection, which vert+, photo mode and the free camera change.
+static CTransform4f sPortView(1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f);
+static CMatrix4f sPortPerspective(1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f,
+                                  0.f, 0.f, 1.f);
 #endif
 
 CPortalArea::SActorPool::SActorPool() : mNodes(SActorNode()) {
@@ -120,34 +127,37 @@ void CPortalArea::UpdateActor(CStateManager& mgr, CActor& actor) {
   AddActor(mgr, actor);
 }
 
-void CPortalArea::PreRender(CStateManager& mgr, const CGameCamera& camera, const CTransform4f& xf) {
+#ifdef TARGET_PC
+void CPortalArea::PreRender(CStateManager& mgr, const CGameCamera& camera, const CTransform4f& xf,
+                            float fovDegrees) {
   mVisibleActors.Clear();
   ++mVisibilityGeneration;
 
+  sPortView = xf;
+  sPortPerspective = CGraphics::CalculatePerspectiveMatrix(
+      fovDegrees, camera.GetAspectRatio(), camera.GetNearClipDistance(),
+      camera.GetFarClipDistance());
   const float radius = 0.25f * camera.GetNearClipDistance();
   const CVector3f extent(radius, radius, radius);
-#ifdef TARGET_PC
-  // PortVr: every actor of a room with portal data is drawn only when this list holds it
-  // (CStateManager::IsActorVisible, CActor::mUsePortalVisibility), so in the headset it is built
-  // for what the eyes see: the headset's wide frustum around the head's facing (as the world's,
-  // CStateManager::PreRender), walked from the volume the head is in. Without planes (culling off,
-  // or the head untracked) every volume's actors are kept.
-  CFrustumPlanes frustum(xf, CRelAngle::FromDegrees(camera.GetFov()).AsRadians(),
+  CFrustumPlanes frustum(xf, CRelAngle::FromDegrees(fovDegrees).AsRadians(),
                          camera.GetAspectRatio(), camera.GetNearClipDistance(), false, 100.f);
   sPortVrPortals = PortVr::VrCullingFrustum(xf, camera.GetNearClipDistance(), frustum);
-  CVector3f portVrGaze;
-  if (!sPortVrPortals || !PortVr::VrHeadGaze(xf, sPortVrEye, portVrGaze)) {
-    sPortVrEye = camera.GetTranslation();
-  }
+  CVector3f gaze;
+  sPortVrEye = xf.GetTranslation();
+  if (sPortVrPortals) PortVr::VrHeadGaze(xf, sPortVrEye, gaze);
   const CAABox bounds(sPortVrEye - extent, sPortVrEye + extent);
-  rstl::reserved_vector< short, 64 > volumes;
+  rstl::reserved_vector<short, 64> volumes;
   mData->FindOverlappingVolumes(bounds, volumes);
   if (volumes.empty() || (sPortVrPortals && frustum.GetPlanes().empty())) {
 #else
+void CPortalArea::PreRender(CStateManager& mgr, const CGameCamera& camera, const CTransform4f& xf) {
+  mVisibleActors.Clear();
+  ++mVisibilityGeneration;
+  const float radius = 0.25f * camera.GetNearClipDistance();
+  const CVector3f extent(radius, radius, radius);
   const CAABox bounds(camera.GetTranslation() - extent, camera.GetTranslation() + extent);
-  rstl::reserved_vector< short, 64 > volumes;
+  rstl::reserved_vector<short, 64> volumes;
   mData->FindOverlappingVolumes(bounds, volumes);
-
   const CFrustumPlanes frustum(xf, CRelAngle::FromDegrees(camera.GetFov()).AsRadians(),
                                camera.GetAspectRatio(), camera.GetNearClipDistance(), false, 100.f);
   if (volumes.empty()) {
@@ -221,7 +231,7 @@ static rstl::pair< bool, CFrustumPlanes > ClipPortal(const CGameCamera& camera,
                                                      const CPortalAreaData::SPortal& portal) {
   typedef rstl::pair< bool, CFrustumPlanes > Result;
 #ifdef TARGET_PC
-  const CVector3f& position = sPortVrPortals ? sPortVrEye : camera.GetTranslation();
+  const CVector3f position = sPortVrPortals ? sPortVrEye : sPortView.GetTranslation();
 #else
   const CVector3f& position = camera.GetTranslation();
 #endif
@@ -290,7 +300,14 @@ static rstl::pair< bool, CFrustumPlanes > ClipPortal(const CGameCamera& camera,
   float minY = FLT_MAX;
   float maxY = -FLT_MAX;
   for (int i = 0; i < polygon.size(); ++i) {
+#ifdef TARGET_PC
+    // CGameCamera::ConvertToScreenSpace through the drawn view.
+    const CVector3f local = sPortView.TransposeMultiply(polygon[i]);
+    const CVector3f screen = local.IsNonZero() ? sPortPerspective.MultiplyOneOverW(local)
+                                               : CVector3f(-1.f, -1.f, 1.f);
+#else
     const CVector3f screen = camera.ConvertToScreenSpace(polygon[i]);
+#endif
     minX = rstl::min_val(minX, screen.GetX());
     maxX = rstl::max_val(maxX, screen.GetX());
     maxY = rstl::max_val(maxY, screen.GetY());
@@ -305,8 +322,13 @@ static rstl::pair< bool, CFrustumPlanes > ClipPortal(const CGameCamera& camera,
   }
 
   const float nearZ = camera.GetNearClipDistance();
+#ifdef TARGET_PC
+  const CMatrix4f inverse = sPortPerspective.GetInverse();
+  const CTransform4f& xf = sPortView;
+#else
   const CMatrix4f inverse = camera.GetPerspectiveMatrix().GetInverse();
   const CTransform4f& xf = camera.GetTransform();
+#endif
   const CVector3f lowerRight = xf * inverse.MultiplyOneOverW(CVector3f(maxX, minY, nearZ));
   const CVector3f upperLeft = xf * inverse.MultiplyOneOverW(CVector3f(minX, maxY, nearZ));
   const CVector3f upperRight = xf * inverse.MultiplyOneOverW(CVector3f(maxX, maxY, nearZ));

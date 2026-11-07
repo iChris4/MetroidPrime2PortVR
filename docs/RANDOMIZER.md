@@ -93,6 +93,7 @@ is no longer the only source of locations. Plan, each step checkable on its own:
 
    - Requirements: `any`, `never`, item names as spelled in `port_randomizer.cpp`'s table,
      `Name>=N` for counts, `&`, `|`, parentheses. `Missile` means at least one Missile.
+     `ScrewAttack` also asks for `SpaceJumpBoots` (IMPLIES: it starts out of a double jump).
    - Every obstacle of the area (`--dump-obstacles`) must be in a `covers` or an `ignore` line,
      and every `dockN`/`locX`/`telX` must exist in the area, or the compiler fails.
    - Fail closed: an area with no block connects nothing, so its docks are dead ends.
@@ -115,6 +116,59 @@ is no longer the only source of locations. Plan, each step checkable on its own:
      worst areas.
    - When unsure whether a route works without an item, require the item. A rule that is too
      strict only shrinks the seed space; one that is too loose makes unbeatable seeds.
+   - Terrain check (enforced, 2026-11-03): `tools/rando_terrain.py` reads each area's static
+     collision (MREA CAreaOctTree), finds standable spots (`IsFloor`: Floor material or normal
+     z > 0.85, facing up: a ceiling's top is no floor), and links them by walking (step 1.0),
+     falling straight down, rolling and analytical jumps (apex 3.78, Space Jump 7.68), including a
+     jump that morphs into a raised tunnel mouth and a ball rolling off a tunnel lip. For each rule
+     edge it reports what the mesh needs (the item sets below, or no path); MorphBall is in the
+     start inventory, so it never refutes. Script platforms and
+     solid actors (PLAT, ACTR with isSolid) on default-on layers are added at their initial place
+     (DCLN, else collision box, else model bounds) in two states: as the area starts (breakable
+     crates included) and once switches are thrown (ACTV, never DCTV or destroyed); an edge that
+     passes only with them says "(with platforms)". Docks are anchored by shape (DOCK XFRM scale;
+     a tall door's floor is searched deeper);
+     virtual docks are skipped; a pickup is reached within jump touch range (6.2, 10.1 with Space
+     Jump). Water (WATR boxes that stay on) changes the jump per take-off depth, simulated from
+     CPlayerDynamics: fluid gravity 10, jump factor 0.37 submerged, Gravity Boost 45 for 1.5 s, dark
+     water low gravity unless the Light Suit; never below the dry jump (the vanilla route climbs
+     0r_swamp_hall's underwater stairs, steps 1.5 to 2.5, before Gravity Boost: the simulated 1.65
+     walk jump can't, step-up and slopes being unmodelled), so water only adds height. Spider tracks (material bit 61) join the floors
+     within 1.9 below them to every floor beside or below the same track (needs MorphBall and
+     SpiderBall). Half-pipes (material bit 13) join the floors within 1.0 below them to every
+     floor beside a cell of the same pipe up to 3.2 (ballHalfPipeBoostHeight) above or below it
+     (needs MorphBall and BoostBall; boosted gap jumps and ramps are not modelled). Bomb jumps
+     (MorphBallBombs) lift the ball 3.64 (CPlayer::BombJump: sqrt(2 * 35 * bombJumpHeight 7.9)
+     against ball gravity 76) from any spot, drifting at the ball's air speed 10 onto a spot up to
+     3.24 higher; one bomb only (the 1.0 s fuse outlasts the 0.62 s air time; double bomb jumps are a
+     timing trick). Power Bombs don't
+     bomb-jump in Echoes (only kPA_TriggerBomb calls BombJump, DOL 0x8003CA5C). Screw Attack
+     starts on the third press out of a double jump, dry; each hop (up to 5, 20 a second across)
+     peaks 5.0 over the double jump's spot and is allowed down to 4.5 under it
+     (CMorphBall::ComputeScrewAttackMovement, disc TweakBall), so it needs the Space Jump Boots
+     (without them that spot is stale) and reaches spots up to 8.78 over the take-off, searched
+     40 away; screw wall jumps are a trick. Each edge's
+     verdict is the minimal sets of MorphBall, SpaceJumpBoots, GravityBoost, SpiderBall, LightSuit,
+     BoostBall, MorphBallBombs and ScrewAttack that make it. Terms with grapple are not refuted
+     (UNMODELLED). An edge only a Screw Attack set crosses reads nopath for its other terms (the
+     mesh misses their route, mostly moving platforms). Not modelled: swimming, moving platforms, story layer switches (GFMC
+     Compound's Kinetic Orb Cannon sits on "Load After Movie"), cannons, elevators,
+     air drift during a long fall (Sanctum Access).
+     Verdicts are cached per area in `~/.cache/mp2-rando-terrain/` (key: the tool's model, i.e. its
+     bytes above `check()`, mesh, edges, platforms): a cold run takes ~60 min, a warm one seconds; the key holds rule line
+     numbers, so a rule edit rechecks every area below it in that file. Full run: 959 edge
+     directions, ok 569, refuted 16, nopath 208 (84 crossed only by Screw Attack), unanchored 28, virtual 138.
+     `tools/rando_rules.py` fails on a refuted edge unless `tools/rando_rules/terrain_accepted.txt`
+     lists it (`area src > dst: reason`), and on an accepted line nothing refutes any more
+     (`--no-terrain` skips; no disc skips too). Every one of the 65 refutations of the 2026-11-03
+     baseline is triaged: most were Space Jump ledges the rules missed (measured steps of 4.2 to
+     7.2 in each rule's comment); signed floors cleared 11. The accepted ones (13 with Hydrodynamo Shaft's water cannon) are model gaps
+     with reasons: moving platforms (Kinetic Orb Cannons, Sacred Path's ball cannon, the Elevator
+     platforms of 0h_temple_hall and 08_sand_casualpirates, Torvus Lagoon's Swamp Bridge, the hidden half-pipe's Sliding Coffins), a
+     drifting fall. Rule fixes also moved Torvus's 0f_swamp_hall energy tank to the upper
+     corridor (its tunnel plug is in that floor; the lower blocker opens only from inside). Early
+     vanilla areas crossed before Space Jump are model gaps, not rule errors (`TestVanillaSpheres`
+     guards that).
    - State (2026-10-27): all five worlds have rules (284 areas). With every item, all 114
      locations are reachable from the Landing Site. With the starting inventory and the vanilla
      placement all 114 open in 9 spheres (`TestVanillaSpheres` in `tests/port_rando_logic.cpp`,

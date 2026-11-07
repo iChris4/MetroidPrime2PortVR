@@ -55,6 +55,7 @@ extern "C" __declspec(dllimport) unsigned int __stdcall SetErrorMode(unsigned in
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <string_view>
 // SDL owns the app's private directories on Android, where the port's own three are resolved
 // beneath them, and shows the disc message and picker everywhere. The include directory is
 // attached to this target in CMakeLists.txt, in the AURORA_SDL3_TARGET block.
@@ -822,6 +823,45 @@ std::string EnsureDiscImage(const std::string& resolved, const std::string& defa
   }
 }
 
+// Android's DesktopDiscFallback: MP2_DISC, else the image F1 > System > Disc image > Replace
+// remembered (its copy in the user folder, settings.cfg `disc_path`) while it is still usable,
+// else the resolved `<files>/disc.iso`. A `disc=` in port_paths.txt is a debugging push and keeps
+// winning. Without this the replaced image was copied and remembered but never booted (#76).
+// The activity always writes `disc=` with getFilesDir()'s /data/user/0/... spelling while SDL's
+// pref path (paths.base) is the canonical /data/data/..., so the default is told by its folder's
+// identity, not its text; the folder exists even before a first disc.iso does.
+bool IsDefaultAndroidDisc(const PortPaths& paths) {
+  if (paths.disc == paths.base + "disc.iso") {
+    return true;
+  }
+  const std::filesystem::path disc = PortUtf8::FromUtf8(paths.disc);
+  std::error_code ec;
+  return !paths.base.empty() && disc.filename() == "disc.iso" &&
+         std::filesystem::equivalent(disc.parent_path(), PortUtf8::FromUtf8(paths.base), ec) && !ec;
+}
+
+std::string AndroidDiscFallback(const PortPaths& paths) {
+  if (const char* env = std::getenv("MP2_DISC"); env != nullptr && env[0] != '\0') {
+    return env;
+  }
+  const std::string saved = PortOverlaySettings::DiscPath();
+  if (saved.empty()) {
+    return paths.disc;
+  }
+  if (!IsDefaultAndroidDisc(paths)) {
+    std::fprintf(stderr, "metroid_prime2_port: port_paths.txt disc=%s wins over the remembered disc image %s\n",
+                 paths.disc.c_str(), saved.c_str());
+    return paths.disc;
+  }
+  if (DiscImageIsUsable(saved)) {
+    std::fprintf(stderr, "metroid_prime2_port: using the remembered disc image: %s\n", saved.c_str());
+    return saved;
+  }
+  std::fprintf(stderr, "metroid_prime2_port: the remembered disc image is gone or unusable: %s\n",
+               saved.c_str());
+  return paths.disc;
+}
+
 #else
 
 // The desktop keeps its console and its environment: fd 1 and fd 2 already arrive where the
@@ -1182,6 +1222,25 @@ int main(int argc, char** argv) {
   if (!optionsOnly) PortVr::ApplyVrEnvironmentOverrides();
   PortVr::PushVrSettingsToAurora();
 
+  // The disc, resolved and - if the image is missing or is not this game - picked from the
+  // user's storage, all before Aurora comes up: `EnsureDiscImage` says why the trigger is the
+  // image not being usable rather than the disc check after the renderer starts. After the
+  // settings, for the image F1 > System > Disc image > Replace remembered (issue #76). The
+  // desktop keeps the resolution it always had, below.
+#if defined(__ANDROID__)
+  const std::string androidDiscImage =
+      EnsureDiscImage(port::entry::ResolveDiscPath(argc, argv, AndroidDiscFallback(appPaths).c_str(),
+                                                   ExecutableDir(argc > 0 ? argv[0] : nullptr)),
+                      appPaths.disc);
+  if (androidDiscImage.empty()) {
+    // Nothing was picked, so there is nothing to boot: exiting here, before Aurora is up,
+    // rather than at the disc check below, which would bring the renderer up only to close it.
+    std::fprintf(stderr, "metroid_prime2_port: no disc image to boot\n");
+    PortLogDrain();
+    return 1;
+  }
+#endif
+
   // The log file (platform/port_logfile.cpp) starts here, before aurora_initialize below, so
   // Aurora's own startup lines and anything that aborts during it land in the file too.
   PortLogFile::Start(touchUser != nullptr ? touchUser : std::string());
@@ -1240,6 +1299,9 @@ int main(int argc, char** argv) {
       .cachePath = optionsOnly ? optionsCache.c_str() : EnvOrFallback("MP2_CACHE_PATH", appPaths.cache),
       .resourcesPath = nullptr,
       .desiredBackend = BACKEND_AUTO,
+      // The `msaa` setting from the start, not from the first frame's ApplyGraphicsQuality: the
+      // pipeline cache queues its startup rows at this sample count (its MSAA variants).
+      .msaa = static_cast<uint32_t>(PortOverlay::Msaa()),
       .vsync = false, // the `vsync` setting (platform/port_overlay.cpp) is the source of truth
       .startFullscreen = !optionsOnly && PortOverlay::Fullscreen(),
       // MP2_DUMP_TEXTURES=1 writes every texture the game loads to <cache>/texture_dumps, named
@@ -1322,6 +1384,22 @@ int main(int argc, char** argv) {
                    trimMib, severeMib);
     }
   }
+  // Texture replacements (MP1 issue #266: an 8 GB PC with an HD pack ran out entering a room):
+  // under 1024 MiB of headroom (RAM, commit or the GPU budget, whichever is least) Aurora frees
+  // idle replacements and loads new ones smaller, under 512 MiB more of both. Overrides:
+  // MP2_TEXTURE_PRESSURE_MIB and MP2_TEXTURE_PRESSURE_SEVERE_MIB (0 turns a level off).
+  {
+    const int textureMib = port::EnvInt("MP2_TEXTURE_PRESSURE_MIB", 1024);
+    const int textureSevereMib = port::EnvInt("MP2_TEXTURE_PRESSURE_SEVERE_MIB", 512);
+    PortMemoryLog::SetTexturePressure(textureMib, textureSevereMib);
+    if (std::getenv("MP2_TEXTURE_PRESSURE_MIB") != nullptr ||
+        std::getenv("MP2_TEXTURE_PRESSURE_SEVERE_MIB") != nullptr) {
+      std::fprintf(stderr,
+                   "port: texture pressure under %d MiB headroom, severe under %d MiB "
+                   "(MP2_TEXTURE_PRESSURE_MIB/MP2_TEXTURE_PRESSURE_SEVERE_MIB)\n",
+                   textureMib, textureSevereMib);
+    }
+  }
   if (const char* env = std::getenv("MP2_PIPELINE_EVICT"); env != nullptr && env[0] != '\0') {
     config.pipelineEvictFrames = static_cast< uint32_t >(std::strtoul(env, nullptr, 10));
     std::fprintf(stderr, "port: pipeline eviction %u frames (MP2_PIPELINE_EVICT)\n",
@@ -1337,13 +1415,50 @@ int main(int argc, char** argv) {
   // that, so whenever an X display is available ask for the X11 backend instead. SDL_VIDEODRIVER
   // still wins, which is also how anyone who wants Wayland opts back in, and MP2_HEADLESS's
   // "offscreen" above is honoured the same way.
+  //
+  // Launched by Steam, X11 matters for a second reason: Steam Input picks the active controller
+  // layout from the focused window, and it only tracks X11 windows. A Wayland window is never seen
+  // taking focus, so Steam keeps its Desktop layout and the game's own layout (back buttons, gyro)
+  // never applies. Distributions that set SDL_VIDEODRIVER=wayland,x11 system-wide (Garuda's
+  // /etc/environment does) would otherwise land there, so under Steam a list that allows x11 is
+  // narrowed to x11. A list without x11 (SDL_VIDEODRIVER=wayland) is still honoured.
 #if !defined(_WIN32) && !defined(__ANDROID__) && !defined(__APPLE__)
   {
     const char* requested = SDL_GetHint(SDL_HINT_VIDEO_DRIVER);
     const char* x11 = std::getenv("DISPLAY");
     const auto present = [](const char* v) { return v != nullptr && v[0] != '\0'; };
     const bool unnamed = !present(requested);
-    if (unnamed && present(x11)) {
+    // A headless run has no window for Steam Input to focus, so its "offscreen" is left alone.
+    const bool underSteam = !port::EnvFlag("MP2_HEADLESS") &&
+                            (present(std::getenv("SteamAppId")) || present(std::getenv("SteamGameId")));
+    // SDL matches driver names case-insensitively, so X11 counts too.
+    const auto isX11 = [](std::string_view name) {
+      return name.size() == 3 && SDL_strncasecmp(name.data(), "x11", 3) == 0;
+    };
+    const auto listsX11 = [&](const char* list) {
+      std::string_view rest = list;
+      while (!rest.empty()) {
+        const size_t comma = rest.find(',');
+        if (isX11(rest.substr(0, comma))) return true;
+        if (comma == std::string_view::npos) break;
+        rest.remove_prefix(comma + 1);
+      }
+      return false;
+    };
+    if (!unnamed && underSteam && present(x11) && !isX11(requested) && listsX11(requested)) {
+      // The environment variable outranks a normal-priority hint, hence OVERRIDE.
+      SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "x11", SDL_HINT_OVERRIDE);
+      std::fprintf(stderr,
+                   "port: launched by Steam, so using SDL's x11 video driver instead of "
+                   "SDL_VIDEODRIVER=%s; Steam Input only applies the game's controller layout to "
+                   "X11 windows. Set SDL_VIDEODRIVER=wayland to keep Wayland.\n",
+                   requested);
+    } else if (!unnamed && underSteam && !listsX11(requested)) {
+      std::fprintf(stderr,
+                   "port: SDL_VIDEODRIVER=%s under Steam; Steam Input will not see this window "
+                   "focused and keeps its Desktop controller layout.\n",
+                   requested);
+    } else if (unnamed && present(x11)) {
       SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "x11");
       std::fprintf(stderr,
                    "port: using SDL's x11 video driver on %s; its wayland backend hangs on window "
@@ -1362,6 +1477,10 @@ int main(int argc, char** argv) {
   // F1 > Video > Compatibility (PortVideo, f1b): OpenGL ES, the storage clamp, the low-power
   // adapter and the driver workarounds' Dawn toggles, all read when the GPU device is made.
   PortVideo::BeginGpuStart(config.userPath != nullptr ? config.userPath : "", config);
+  // Before the pipeline cache loads in aurora_initialize: its rows take the running per-pixel
+  // lighting key, so the seed's lit pipelines build at boot instead of on each room's first draw
+  // (issue #44). PortVideo::Frame keeps it in step afterwards.
+  aurora_set_per_pixel_lighting(PortOverlay::PerPixelLighting());
   // PrimedGun Echoes: the OpenXR instance and the adapter it wants come before Aurora picks a
   // device, so the eyes are copied on the compositor's own GPU (D3D12 on Windows; a renderer
   // chosen in F1 other than Auto or D3D12 leaves the headset off for the run). A runtime that is
@@ -1564,14 +1683,13 @@ int main(int argc, char** argv) {
 #else
     const bool kCanPick = !discFromArgs;
 #endif
-#if !defined(__ANDROID__)
     if (PortOverlaySettings::DiscPath() == discImage) {
-      // A refused remembered disc would be refused again on every launch (MP1's main.cpp:498).
+      // A refused remembered disc would be refused again on every launch (MP1's main.cpp:498);
+      // on Android the next start goes back to <files>/disc.iso.
       PortOverlaySettings::SetDiscPath({});
       PortOverlaySettings::SaveSettings();
       std::fprintf(stderr, "metroid_prime2_port: forgot the remembered disc image\n");
     }
-#endif
     if (!ShowDiscError(problem, discImage, kCanPick)) {
       PortVr::OpenXRShutdownBeforeAurora();
       aurora_shutdown();

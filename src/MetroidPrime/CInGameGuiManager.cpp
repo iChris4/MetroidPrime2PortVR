@@ -46,6 +46,7 @@
 #ifdef TARGET_PC
 #include "port_entry.h"
 #include "port_freecam.h"
+#include "port_third_person.h"
 #include "port_overlay.h"
 #include "port_pointer.h"
 #include "GuiSys/CGuiModel.hpp"
@@ -207,18 +208,20 @@ void CInGameGuiManager::PreDraw(CStateManager& mgr, bool cameraActive) {
 }
 
 void CInGameGuiManager::DrawDarkVisorMask(const CStateManager& mgr) const {
-  if (mDarkMaskFrame.get() != nullptr) {
+  if (mDarkOuterMask != nullptr) {
     CGraphics::SetDepthRange(1.f / 512.f, 1.f / 256.f);
 #ifdef TARGET_PC
-    // PortVr: the mask is the HUD's frame and the lens's, drawn through the HUD camera, so it is
-    // head-locked as the HUD it masks is (Draw), not left in front of the body.
+    // Port: the HUD camera scales the lens with the HUD scale (CSamusHud::Draw), so the mask that
+    // keeps the visor's highlight inside the lens scales with it.
     AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED);
-    mSamusHud->GetLoadedHudFrame()->GetRootWidget()->Draw(CGuiWidgetDrawParms::Default());
-    mDarkMaskFrame->GetRootWidget()->Draw(CGuiWidgetDrawParms::Default());
+    PortOverlay::SetHudScalingActive(PortOverlay::HudScale() != PortOverlay::kHudScaleMax);
+#endif
+    // The HUD frame's camera (not its root, whose Draw draws nothing), then the outer mask under it.
+    mSamusHud->GetLoadedHudFrame()->GetFrameCamera()->Draw(CGuiWidgetDrawParms::Default());
+    mDarkOuterMask->Draw(CGuiWidgetDrawParms::Default());
+#ifdef TARGET_PC
+    PortOverlay::SetHudScalingActive(false);
     AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_WORLD);
-#else
-    mSamusHud->GetLoadedHudFrame()->GetRootWidget()->Draw(CGuiWidgetDrawParms::Default());
-    mDarkMaskFrame->GetRootWidget()->Draw(CGuiWidgetDrawParms::Default());
 #endif
   }
 }
@@ -321,9 +324,7 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
 #ifdef TARGET_PC
       // Port: MP2_NO_HELMET=1 / F1 > HUD draws the world without the helmet frame. The non-PC body is
       // repeated rather than wrapped, so the matching build's bytes for it do not change.
-      // PortVr: the headset leaves it out too unless VISOR HELMET is on (PortVr::VrHideHelmet).
-      if (!PortOverlay::HideHelmet() && !PortFreeCam::Active() &&
-          !(mPlayerIndex == 0 && PortVr::VrHideHelmet())) {
+      if (!PortOverlay::HideHelmet() && !PortFreeCam::Active() && !PortThirdPerson::Active() && !(mPlayerIndex == 0 && PortVr::VrHideHelmet())) {
         CGraphics::SetDepthRange(1.f / 512.f, 1.f / 256.f);
         // PortVr: the helmet frame is drawn in its GUI camera's space: head-locked.
         AuroraSetStereoDrawRoute(AURORA_STEREO_ROUTE_HEAD_LOCKED);
@@ -382,6 +383,10 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
       }
       mPlayerVisor->Draw(mgr, nullptr);
     }
+#ifdef TARGET_PC
+    // Port: no face on the visor glass behind her (third person).
+    if (!PortThirdPerson::Active())
+#endif
     if (!mSamusReflection.null()) {
       mSamusReflection->Draw(mgr);
     }

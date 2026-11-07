@@ -288,6 +288,8 @@ public:
   float GetRadarXYRadiusOverride() const { return mRadarXYRadiusOverride; }
   float GetRadarZRadiusOverride() const { return mRadarZRadiusOverride; }
 #ifdef TARGET_PC
+  // Third person: a shot from the body's cannon heads for the locked target's assisted aim.
+  const CVector3f& PortAssistedTargetAim() const { return mAssistedTargetAim; }
   // Inlined in retail (SwampBossStage2 fn_79_9F4C writes the three fields directly).
   void SetRadarRadiusOverride(float xy, float z) {
     mOverrideRadarRadius = true;
@@ -408,6 +410,9 @@ public:
   // The gun position moved down so the arm cannon stays on the screen's 4:3 bottom edge when the
   // view is Vert+ widened (MP1 af5e42ade); the position unchanged at 4:3 and wider.
   CVector3f PortAnchorGunDown(const CVector3f& pos) const;
+  // Next/Previous target (MP1 8c7d45fab): the visible lock-on target right (dir > 0) or left of
+  // the current one on screen, wrapping; kInvalidUniqueId when there is none.
+  TUniqueId PortCycleOrbitTarget(int dir, CStateManager& mgr) const;
 #endif
   void UpdateArmAndGunTransforms(float dt, CStateManager& mgr);
   void ForceGunOrientation(const CTransform4f& transform, CStateManager& mgr);

@@ -1816,11 +1816,14 @@ void CIng::CreateBlob(CStateManager& mgr) {
         LoadGeomBlobV2(*desc, mBlobId, GetAreaIdForPersistence(), true,
                        rstl::string_l("IngBlobEffect"), CTransform4f::Translate(GetTranslation()),
                        GetUniqueId(), 0);
-    mgr.AddObject(blob);
     // fn_25_256C: the member at 0x190 - the particle generator's rate (the retail's own code
     // reads it at 0x2B60 and hands it to CElementGen::SetGeneratorRate) - set to 0, so the blob
     // emits no particles.
     static_cast< CCollisionTracker * >(blob)->SetParticleEmissionRateScalar(0.f);
+    // asm 0x4930-0x4948: the blob draws after the Ing (its id at 0x8 into the blob's next draw
+    // node at +0x12a), then it is added.
+    blob->SetNextDrawNode(GetUniqueId());
+    mgr.AddObject(blob);
   }
 }
 
@@ -4028,8 +4031,11 @@ void CIng::DoUserAnimEvent(CStateManager& mgr, const CInt32POINode& node, EUserE
 // logic, the dark-visor highlight and the unpossess step are not part of the Ing's death. The
 // body: the body controller's time scale, the FSM's "Dead" state (only when the state machine
 // has one), the ground collider's material, the vertical movement flag (unless the Ing burns),
-// the alive bit, the death body command in the forms 2 and 6..9 - and the script messages, which
-// the retail sends whether the Ing was alive or not.
+// the alive bit, the death body command in the forms 2 and 6..9 - and the script messages. All of
+// it, the messages included, runs only while the Ing is alive: a dead Ing branches straight to the
+// epilogue (asm 0x0000B3F8 beq .L_0000B514). A second Death (the killing hit's knock-back DETH
+// follow-up, a burn) must not send DeathRattle again: Battleground's "Dead Ings" counter (max 6)
+// counted the extra RATLs and ended the fight after four kills, before the last wave (issue #46).
 //
 // The arms (the area 57 runs of 2026-10-21, a probe in the body):
 //   - the Ing is alive (asm 0x0000B3F0: the byte at 0x420's bit 1) and it is not (the same body
@@ -4064,11 +4070,11 @@ void CIng::Death(CStateManager& mgr, const CVector3f& direction, EScriptObjectSt
         (mForm >= kForm_BecomingCorporeal && mForm <= kForm_BecomingWallProjectile)) {
       IssueDeathBodyCommand(mgr, direction); // asm 0x0000B4C8-0x0000B4E0
     }
-  }
-  // asm 0x0000B4E4-0x0000B508: the state argument (-1 is kSS_InvalidState) and the message (-1
-  // is kSM_None); the source is the invalid id, not the Ing's own.
-  if (state != kSS_InvalidState) {
-    SendScriptMsgs(state, mgr, kSM_None);
+    // asm 0x0000B4E4-0x0000B508: the state argument (-1 is kSS_InvalidState) and the message (-1
+    // is kSM_None); the source is the invalid id, not the Ing's own.
+    if (state != kSS_InvalidState) {
+      SendScriptMsgs(state, mgr, kSM_None);
+    }
   }
 }
 

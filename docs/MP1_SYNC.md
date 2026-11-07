@@ -55,7 +55,7 @@ the work list.
 
 ### MP1 after 174975c2c (to `3dde164eb`, 2026-10-25, 172 commits)
 
-About 120 are Remastered/HDR, Dread Samus import or third-person camera (not portable). The rest:
+About 120 are Remastered/HDR, Dread Samus import or third-person camera (not portable then; third person since ported, package 33). The rest:
 
 9. **Follow-ups to merged packages** (small, low risk): dynamic resolution UI rework and review
    fixes (`5cf4ac1f4`, `429fdb7bf`, `278f7923c`, issue #186); Remap Presets button (`ffaa3d4ab`,
@@ -166,6 +166,40 @@ Each needs MP2 game-side hooks found fresh; a row with no possible MP2 backend i
     they pressed the virtual pad, which port 0's preset remaps (Remastered: touch B dead, START = map).
     Turbo's pulse is touch code 33 (A) for the same reason. Console `touchctl` holds a touch code;
     `touchctl b 1` jumps on a new game. Skipped: `c3d086188` (third-person shoulder).
+30. **Range `b6b6f60e8..5e1a88514`** (2026-11-02). Taken: flick stick `81cd66195 48c19cffc 4511169d0
+    9d0024ae9` (#251; `402f95cef`), `e0808c4d5` pad preset sticks to later controllers (`d39145329`,
+    uinput fake pad checked), `5e1a88514` mouse aim leaves an in-use pad its classic controls
+    (`3988a982b`, build only), `5ef1edfe1` Visor/Beam wheels are addable touch buttons, F1 checkbox
+    retired, touch.cfg `wheels=1` migrated once (`965341707`; C++ built, Java javac-checked, not run
+    on a device), `2183f90b2` empty-lock marker on the view ray (`72ef472b7`, build only).
+    `bf49ed7d2` is our #44 work (42fea9ab1/472b1cf1a) ported to MP1: nothing differs, nothing taken.
+    Skipped: `4512ddbf8` (R-jump), every remastered/roomfx/roomenv commit,
+    third person `8b42ffa6c 35de50d42`, `cfa7a69eb` FUNDING.yml.
+31. **Range `5e1a88514..16eb691fe`** (2026-11-03). Taken: `db00839c7` Dawn cache without the startup
+    `quick_check`, LRU-pruned to 256 MiB 30 s after start (clean apply; schema 3 files are replaced;
+    `Dawn cache: N entries` seen at 30 s with `MP2_PIPELINE_LAZY=1`, rows reused on the next launch);
+    `565e5fa2c` parent-matrix half (CreateNewParticles grows `mParentMatrices` past MAXP's first
+    value; Echoes' ADV reserve already covers a burst; build only); `2ec8fa64f` Trilogy GameCube
+    crosshair scales about its centre (MP1 issue 255; build only, not seen on screen). Not taken again:
+    `4ab18ced5` (see 28). Skipped: remastered/roomfx/effects import (`7b191f9a7 366d01363`),
+    `bc800213d` release.
+32. **Range `16eb691fe..ed1fb93c7`** (2026-11-04). Taken: `c90e5448a` a Toggle-trigger L lets go when
+    its lock ends (`c7faf8b38`); `8c7d45fab` + `6e43ee11f` beam switch speed and Next/Previous target,
+    unbound by default (`f7f6d9251`); `bb7321203` + `ae213ea30` arm cannon FOV and follows-FOV
+    (`38e2fded4`; MP2 has no muzzle/model-aim remap or hard-coded pause rows, so those parts don't
+    apply); `f3cfa6ff1` console `areas` prints the current area's transform (this commit; seen in a
+    run). All build only except `areas`. Skipped: `beam_switch_fire` (user), `a8e0b562f`, `ead1cb698`,
+    `72d530b0f`, remastered/decals.
+33. **Third-person camera** (2026-11-06, from MP1 at `6e921f77f`): `port_third_person.{h,cpp}` +
+    tests as MP1's, hooked per player 0 (single player only); MP1's `PortThirdPersonBody` is not
+    needed (CPlayer's own model is drawn, the cannon at GUN_LCTR). Morph-ball camera handoff
+    (`MorphCameraPosition` in CBallCamera) and body charge/muzzle effects added the same day.
+34. **Range `ed1fb93c7..b601be339`** (2026-11-06). Taken: `5991eb3ab` texture packs thin out under
+    memory pressure + `8ef516364` user_textures created at startup (`1e44f03e3`, build only);
+    `45c288c28` + `e9ad2a939` damage taken/dealt sliders (`4b6f85f3e`, build only); `c67662b03`
+    Shoot in Scan Visor (`71f3fbe28`, Xvfb); `d2187f77a` + `6e921f77f` moon jump, Boost Ball
+    speed/duration/anywhere/steer, move Samus to the free camera (`7efb40368`, Xvfb). Open (maybe):
+    `59e55a8ad` beam colours. The rest: releases, MP1-only fixes, remastered, decomp.
 
 Skipped from this range: Phazon Beam cheat and stacked beam rate (MP1 items), mods page/import
 fixes (wait for package 8), decomp matches.
@@ -175,9 +209,9 @@ set differs; the approach can be reused), Archipelago, MP1 randomizer logic.
 
 ## Status
 
-Packages 1-29 are merged; the dated per-merge log moved verbatim to
+Packages 1-34 are merged; the dated per-merge log moved verbatim to
 `docs/history/MP1_SYNC-to-2026-10-29.md`. MP1 was last reviewed through `e3d8c8940`
-(2026-10-29), then through `b6b6f60e8` (2026-11-01, package 29); take later commits by `git -C ../MetroidPrimePort log --no-merges b6b6f60e8..HEAD`.
+(2026-10-29), then through `5e1a88514` (2026-11-02, package 30), then through `16eb691fe` (2026-11-03, package 31), then through `ed1fb93c7` (2026-11-04, package 32), then through `b601be339` (2026-11-06, package 34); take later commits by `git -C ../MetroidPrimePort log --no-merges b601be339..HEAD`.
 
 Still unrun/unverified per that log (no device or hardware available then):
 

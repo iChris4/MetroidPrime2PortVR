@@ -4,6 +4,7 @@
 // Ported from the Prime 1 port's platform/input/port_input_devices.cpp. What MP2 has no backend or
 // setting for is left out, each at the place it would go: see the header for the list.
 
+#include "port_controls.h"
 #include "port_custom_actions.h"
 #include "port_debug.h"
 #include "port_input_remap_ui.h"
@@ -15,6 +16,7 @@
 #include "port_radial.h"
 #include "port_overlay.h"
 #include "port_photo.h"
+#include "port_prompts.h"
 #include "port_pointer.h"
 #include "port_savestate.h"
 #include "port_touch.h"
@@ -267,11 +269,13 @@ void BindController(Profile& p, u32 port) {
   const PADButtonMapping* buttons = PADGetButtonMappings(port, &buttonCount);
   const PADAxisMapping* axes = PADGetAxisMappings(port, &axisCount);
   const PADDeadZones* dz = PADGetDeadZones(port);
-  // No controller on the port: bind the standard defaults anyway, so a remap page
-  // shows what a pad would get (nothing reads them until one connects).
+  // No controller on the port: bind the standard defaults with the port's last pad
+  // preset anyway, so a remap page shows what a pad would get (nothing reads them
+  // until one connects).
   PADDefaultMapping fallback;
   if (buttons == nullptr || axes == nullptr) {
     PADGetDefaultMapping(&fallback, PAD_TYPE_STANDARD);
+    PortControls::ApplySavedPadPreset(port, fallback.buttons, PAD_BUTTON_COUNT, fallback.axes, PAD_AXIS_COUNT);
     buttons = fallback.buttons;
     axes = fallback.axes;
     buttonCount = PAD_BUTTON_COUNT;
@@ -341,8 +345,11 @@ bool PadButtonBoundBesidesL(s32 native, u32 port) {
 // The overlay's own Beam button works inside PortTouch. As in MP1 the shifts also spring the ball
 // in morph ball (the Spring Ball action, RouteDirectActions -> PortTouch::RequestSpringBall).
 // Players 2-4 (port > 0) have only their pad, and only its shift, under their own twin stick.
+// The touch layout's twin stick counts only while touch is the last-used input (MP1's TwinStick):
+// a pad played with Twin Stick Aim off keeps LB to itself (#58).
 void BindBeamChords(Profile& p, u32 port = 0) {
-  if (port == 0 ? !PortTouch::TwinStick() && !PortMouse::StickEnabled() : !PortMouse::StickEnabled(int(port))) return;
+  const bool touchTwin = port == 0 && PortTouch::Active() && PortTouch::TwinStick();
+  if (!touchTwin && !PortMouse::StickEnabled(int(port))) return;
   std::vector<Input> keyShifts;
   std::vector<Input> padShifts;
   bool lshiftTaken = false;
@@ -490,6 +497,16 @@ void FillPadState(PortInput::RawState& raw, u32 port) {
                                     useDz);
       }
     }
+    // Flick stick turns by the right stick's angle: a dead zone per axis zeroes the minor axis
+    // near each axis (a snap every 90 degrees while circling), so under it the dead zone is round.
+    if (useDz && PortMouse::FlickStick(static_cast<int>(port))) {
+      const float x = static_cast<float>(pad.axes[SDL_GAMEPAD_AXIS_RIGHTX]);
+      const float y = static_cast<float>(pad.axes[SDL_GAMEPAD_AXIS_RIGHTY]);
+      const float dzr = static_cast<float>(dz->substickDeadZone);
+      const bool inside = x * x + y * y <= dzr * dzr;
+      raw.padAxes[SDL_GAMEPAD_AXIS_RIGHTX] = inside ? 0.f : StickValue(pad.axes[SDL_GAMEPAD_AXIS_RIGHTX], 0, false);
+      raw.padAxes[SDL_GAMEPAD_AXIS_RIGHTY] = inside ? 0.f : StickValue(pad.axes[SDL_GAMEPAD_AXIS_RIGHTY], 0, false);
+    }
   }
 }
 
@@ -595,9 +612,13 @@ CPlayerState* PlayerInPlay(int player = 0) {
 // publishes it) adds Morph Ball, which the Morph Ball rows and the touch overlay's
 // Ball page need. The scan text (CStateManager::Update publishes the scan freeze) adds
 // scan text to gameplay and scan rather than switching to menu, so the held lock keeps
-// its gameplay binding (#11). MP1 also tells the map screen apart, which reads the
-// CStateManager. Players 2-4 read their own visor and morph state; the scan text is Player 1's.
+// its gameplay binding (#11). The map screen (CMFGame publishes it) is the map context
+// rather than menu, so the Map rows and Map-only bindings apply there (#31).
+// Players 2-4 read their own visor and morph state; the scan text is Player 1's.
 uint16_t GameContexts(int player) {
+  if (PortHarness::MapScreenOpen() && PortHarness::FlowState() == 2 /* CMFGame::kFS_Paused */) {
+    return PortInput::kCtxMap;
+  }
   const CPlayerState* state = PlayerInPlay(player);
   if (state == nullptr || PortTouch::PauseScreenOpen()) return PortInput::kCtxMenu;
   uint16_t contexts = PortInput::kCtxGameplay;
@@ -606,7 +627,24 @@ uint16_t GameContexts(int player) {
     if (player == 0 && PortTouch::ScanTextUp()) contexts |= PortInput::kCtxScanText;
   }
   if (PortTouch::Morphed(player)) contexts |= PortInput::kCtxMorphBall;
+  if (PortTouch::LockedOnObject(player) && !PortOverlay::OriginalExperience()) contexts |= PortInput::kCtxLockOn;
   return contexts;
+}
+
+// A Toggle-trigger L lets go when its lock ends, as Toggle Lock-On does: a killed
+// target leaves the player orbiting its carcass, a lost look angle a fixed point in
+// empty space (MP1 #243). A toggle that never locked stays on. `locked`: the
+// player's latch of whether this toggle has held a lock.
+static void ReleaseEndedToggleLock(PortInput::Runtime& runtime, bool& locked, int player) {
+  if (!runtime.Toggled(Action::PadL) && !runtime.Toggled(Action::LAnalog)) {
+    locked = false;
+  } else if (PlayerInPlay(player) != nullptr && PortTouch::OrbitLocked(player)) {
+    locked = true;
+  } else if (locked) {
+    runtime.Untoggle(Action::PadL);
+    runtime.Untoggle(Action::LAnalog);
+    locked = false;
+  }
 }
 
 // A next/previous pick the game hasn't taken yet, per player.
@@ -739,6 +777,8 @@ void RouteDirectActions(const PortInput::Output& out, double nowSec) {
   PushCyclePick(false, visorDir != 0 ? CycleTarget(false, visorDir) : -1);
   if (out.Pressed(Action::SpringBall)) PortTouch::RequestSpringBall();
   if (out.Pressed(Action::Dodge)) PortTouch::RequestDodge();
+  if (out.Pressed(Action::TargetNext)) PortTouch::RequestTargetCycle(1);
+  if (out.Pressed(Action::TargetPrev)) PortTouch::RequestTargetCycle(-1);
 }
 
 // RouteDirectActions for Players 2-4: their direct and next/previous beam and visor picks and
@@ -763,6 +803,8 @@ void RoutePlayerActions(const PortInput::Output& out, int player) {
   PushCyclePick(false, visorDir != 0 ? CycleTarget(false, visorDir, player) : -1, false, player);
   if (out.Pressed(Action::SpringBall)) PortTouch::RequestSpringBall(0.12f, player);
   if (out.Pressed(Action::Dodge)) PortTouch::RequestDodge(player);
+  if (out.Pressed(Action::TargetNext)) PortTouch::RequestTargetCycle(1, player);
+  if (out.Pressed(Action::TargetPrev)) PortTouch::RequestTargetCycle(-1, player);
 }
 
 // The port's own actions: polled every frame by PollPortActions, not with the game
@@ -1328,7 +1370,14 @@ bool PromptButtonInput(unsigned padButton, PortInput::Family family, Input& out)
 }
 
 bool PromptAxisInput(PADAxis axis, PortInput::Family family, Input& out) {
-  return PromptInputFor({PadAxisAction(axis)}, family, out);
+  // On the map a bound map row (rotate on the control stick, pan on the C-stick) comes first.
+  const Action game = PadAxisAction(axis);
+  if ((GameContexts() & PortInput::kCtxMap) != 0) {
+    for (const PortInput::MapRow& m : PortInput::kMapRows) {
+      if (m.game == game && PromptInputFor({m.row}, family, out)) return true;
+    }
+  }
+  return PromptInputFor({game}, family, out);
 }
 
 // `radial`: Player 1's radial selectors own the C-stick while they capture.
@@ -1344,10 +1393,18 @@ static PADStatus SynthesizeStatus(const PortInput::Output& out, bool radial) {
   for (const SMenuAction& m : kMenuActions) {
     if (m.padButton != 0 && out.Held(m.menu)) s.button |= static_cast<u16>(m.padButton);
   }
-  s.stickX = StickX(out.Value(Action::MainRight), out.Value(Action::MainLeft));
-  s.stickY = StickY(out.Value(Action::MainDown), out.Value(Action::MainUp));
-  s.substickX = StickX(out.Value(Action::CRight), out.Value(Action::CLeft));
-  s.substickY = StickY(out.Value(Action::CDown), out.Value(Action::CUp));
+  // A stick direction or its map row (only live on the map), the stronger.
+  const auto stick = [&](Action game) {
+    float v = out.Value(game);
+    for (const PortInput::MapRow& m : PortInput::kMapRows) {
+      if (m.game == game) v = std::max(v, out.Value(m.row));
+    }
+    return v;
+  };
+  s.stickX = StickX(stick(Action::MainRight), stick(Action::MainLeft));
+  s.stickY = StickY(stick(Action::MainDown), stick(Action::MainUp));
+  s.substickX = StickX(stick(Action::CRight), stick(Action::CLeft));
+  s.substickY = StickY(stick(Action::CDown), stick(Action::CUp));
   if (radial && (PortRadial::Capturing() || sConsumeRadialPoll)) s.substickX = s.substickY = 0;
   s.triggerLeft = Trigger(std::max(out.Value(Action::LAnalog), out.Value(Action::MenuLAnalog)),
                           (s.button & PAD_TRIGGER_L) != 0);
@@ -1406,10 +1463,9 @@ static void ApplyTwinStickFreeAim(Profile& p, uint16_t contexts, int player = 0)
 // PortMouse::StickOwnsCStick.
 static bool KeyboardCStickHeld(const Profile& p, const PortInput::RawState& raw, uint16_t contexts) {
   for (const Binding& b : p.bindings) {
-    if (b.action != Action::CUp && b.action != Action::CDown && b.action != Action::CLeft &&
-        b.action != Action::CRight) {
-      continue;
-    }
+    const PortInput::MapRow* map = PortInput::FindMapRow(b.action);
+    const Action a = map != nullptr ? map->game : b.action;
+    if (a != Action::CUp && a != Action::CDown && a != Action::CLeft && a != Action::CRight) continue;
     if (b.count == 0 || (b.contexts & contexts) == 0 || (b.blocked & contexts) != 0) continue;
     if (std::all_of(b.inputs.begin(), b.inputs.begin() + b.count,
                     [&](const Input& in) { return IsKeyboardFamily(in) && raw.Value(in) > 0.f; })) {
@@ -1419,15 +1475,37 @@ static bool KeyboardCStickHeld(const Profile& p, const PortInput::RawState& raw,
   return false;
 }
 
+// Hands flick stick the engine's right stick from before PADClamp, its tilt running from the
+// C-stick dead zone to the outer one, so a pad that never reaches its edge still flicks.
+static void PublishFlickStick(const PortInput::Output& out, int port) {
+  const float x = std::clamp(out.Value(Action::CRight) - out.Value(Action::CLeft), -1.f, 1.f);
+  const float y = std::clamp(out.Value(Action::CUp) - out.Value(Action::CDown), -1.f, 1.f);
+  const float length = std::sqrt(x * x + y * y);
+  if (!(length > 0.f)) {
+    PortMouse::SetFlickRawStick(port, 0.f, 0.f);
+    return;
+  }
+  const PADDeadZones* zones = PADGetDeadZones(static_cast<u32>(port));
+  const float inner =
+      zones != nullptr && zones->useDeadzones ? static_cast<float>(zones->substickDeadZone) / 32767.f : 0.f;
+  const float span = std::max(1.f - PortMouse::FlickOuterDeadZone() / 100.f - inner, 0.05f);
+  const float scale = std::clamp((length - inner) / span, 0.f, 1.f) / length;
+  PortMouse::SetFlickRawStick(port, x * scale, y * scale);
+}
+
 SPoll Poll(unsigned mouseHeld, bool focused) {
   static Profile sProfile;
   static PortInput::Runtime sRuntime;
   static bool sInit = false;
 
+  // Every pad port's, before PollPlayer builds ports 1-3 from them.
+  PortControls::ApplySavedPadPresets();
   Profile next;
   BuildProfile(next);
   ApplyMenuButtons(next);
   PortInput::ApplyBallButtons(next);
+  PortInput::ApplyMapRows(next);
+  PortInput::ApplyTargetRows(next);
   const uint16_t contexts = GameContexts();
   ApplyTwinStickFreeAim(next, contexts);
   if (!sInit || next != sProfile) {
@@ -1436,6 +1514,8 @@ SPoll Poll(unsigned mouseHeld, bool focused) {
     sRuntime.SetProfile(&sProfile);
     sInit = true;
   }
+  static bool sToggleLocked = false;
+  ReleaseEndedToggleLock(sRuntime, sToggleLocked, 0);
 
   PortInput::RawState raw;
   FillRawState(raw, mouseHeld, focused);
@@ -1445,6 +1525,8 @@ SPoll Poll(unsigned mouseHeld, bool focused) {
   const PortInput::Output& out =
       sRuntime.Poll(raw, contexts, nowMs, 0);
   PortMouse::SetKeyboardCStickHeld(KeyboardCStickHeld(sProfile, raw, contexts));
+  PortMouse::SetMouseYieldsToPad(PortPrompts::PadActive() && !PortOverlay::GyroAim(0));
+  PublishFlickStick(out, 0);
   SPoll r;
   sConsumeRadialPoll = false;
   if (PortInputRemap::Capturing()) {
@@ -1486,6 +1568,8 @@ bool PollPlayer(int port, PADStatus& status) {
   BuildProfile(next, port);
   ApplyMenuButtons(next, port);
   PortInput::ApplyBallButtons(next);
+  PortInput::ApplyMapRows(next);
+  PortInput::ApplyTargetRows(next);
   const uint16_t contexts = GameContexts(port);
   ApplyTwinStickFreeAim(next, contexts, port);
   if (!sInit[port] || next != profile) {
@@ -1493,12 +1577,15 @@ bool PollPlayer(int port, PADStatus& status) {
     runtime.SetProfile(&profile);
     sInit[port] = true;
   }
+  static bool sToggleLocked[kUserFiles] = {};
+  ReleaseEndedToggleLock(runtime, sToggleLocked[port], port);
 
   PortInput::RawState raw;
   FillPadState(raw, static_cast<u32>(port));
   const double nowMs =
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
   const PortInput::Output& out = runtime.Poll(raw, contexts, nowMs, 0);
+  PublishFlickStick(out, port);
   // While F1 is open the picks wait, as Player 1's do; PortPumpEvents blocks the pads.
   if (!PortOverlay::Visible() && !PortInputRemap::Capturing()) RoutePlayerActions(out, port);
   status = SynthesizeStatus(out, false);
@@ -1572,18 +1659,23 @@ void PollPortActions() {
     }
   }
   // The player's own actions (controls.toml [[custom_action]]): each one runs as
-  // its binding is pressed, and the note it returns is the toast.
-  out.ForEachCustomPressed([](Action action) {
+  // its binding is pressed, and the note it returns is the toast. A "hold" one (a
+  // sprint, say) runs again on the release to switch back, without toasts.
+  auto runCustom = [](Action action, bool released) {
     const std::shared_ptr<const PortInput::UserBindings> user = UserBindings();
     const uint16_t id = PortInput::CustomId(action);
     for (const PortInput::CustomActionDef& def : user->customActions) {
       if (def.id == id) {
+        const bool hold = def.mode == "hold";
+        if (released && !hold) return;
         const std::string note = PortCustomActions::Run(def);
-        if (!note.empty()) PortDebug::ShowNote(note);
+        if (!note.empty() && !hold) PortDebug::ShowNote(note);
         return;
       }
     }
-  });
+  };
+  out.ForEachCustomPressed([&](Action action) { runCustom(action, false); });
+  out.ForEachCustomReleased([&](Action action) { runCustom(action, true); });
   if (out.Pressed(Action::Screenshot)) aurora::request_screenshot();
   if (out.Pressed(Action::PhotoMode)) {
     PortPhoto::RequestToggle();

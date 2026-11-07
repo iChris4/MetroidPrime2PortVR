@@ -558,6 +558,56 @@ static bool is_virtual_controller(const aurora::input::GameController* controlle
   return SDL_IsJoystickVirtual(controller->m_index);
 }
 
+// Port addition to the vendored Aurora (MetroidPrime2Port): the mapping file a controller reads and
+// writes, <name>_<vid>_<pid>.controller. Steam Input's virtual pad does not always report the same
+// name: usually its real one ("Steam Controller"), but on some launches Steam's untranslated
+// localization key ("#SettingsController_SteamController"). Each name had its own file, so one
+// controller had two independent mappings and a launch picked whichever its name pointed at (the
+// map on Start one playthrough and on Back the next). A name starting with '#' is never a real
+// device name, so for one the file of the same vid/pid under a real name is used, the most
+// recently written if there are several; only when there is none does the key name its own file.
+// Real names map to the same file as before.
+static std::filesystem::path controller_mapping_path(const std::filesystem::path& basePath, std::string_view name,
+                                                     uint16_t vid, uint16_t pid) {
+  const std::string suffix = fmt::format("_{:04X}_{:04X}.controller", vid, pid);
+  auto path = basePath / fmt::format("{}{}", name, suffix);
+  if (name.empty() || name.front() != '#') {
+    return path;
+  }
+  std::error_code ec;
+  std::filesystem::path best;
+  std::filesystem::file_time_type bestTime{};
+  for (const auto& entry : std::filesystem::directory_iterator(basePath, ec)) {
+    std::error_code entryEc;
+    if (!entry.is_regular_file(entryEc)) {
+      continue;
+    }
+    const std::string file = aurora::io::fs_path_to_string(entry.path().filename());
+    if (file.size() <= suffix.size() || file.front() == '#' ||
+        file.compare(file.size() - suffix.size(), suffix.size(), suffix) != 0) {
+      continue;
+    }
+    const auto time = entry.last_write_time(entryEc);
+    if (entryEc) {
+      continue;
+    }
+    if (best.empty() || time > bestTime) {
+      best = entry.path();
+      bestTime = time;
+    }
+  }
+  if (best.empty()) {
+    return path;
+  }
+  static std::string sLogged;
+  if (sLogged != name) {
+    sLogged = name;
+    Log.info("Controller reports Steam's name key \"{}\"; using its mappings in \"{}\"", name,
+             aurora::io::fs_path_to_string(best.filename()));
+  }
+  return best;
+}
+
 void __PADLoadMapping(aurora::input::GameController* controller) /*  NOLINT(*-reserved-identifier) */ {
   int32_t playerIndex = SDL_GetGamepadPlayerIndex(controller->m_controller);
   if (playerIndex < 0 || aurora::g_config.userPath == nullptr) {
@@ -574,9 +624,9 @@ void __PADLoadMapping(aurora::input::GameController* controller) /*  NOLINT(*-re
     return;
   }
 
-  const auto path = aurora::io::fs_path_from_string(aurora::g_config.userPath) /
-                    fmt::format("{}_{:04X}_{:04X}.controller", PADGetName(playerIndex), controller->m_vid,
-                                controller->m_pid);
+  const char* name = PADGetName(playerIndex);
+  const auto path = controller_mapping_path(aurora::io::fs_path_from_string(aurora::g_config.userPath),
+                                            name != nullptr ? name : "", controller->m_vid, controller->m_pid);
   auto file = aurora::io::open_file(path, "rb");
   if (!file) {
     return;
@@ -1729,9 +1779,8 @@ void PADSerializeMappings() {
     if (is_virtual_controller(&controller)) {
       continue;
     }
-    const auto filePath =
-        basePath / fmt::format("{}_{:04X}_{:04X}.controller", aurora::input::controller_name(controller.m_index),
-                               controller.m_vid, controller.m_pid);
+    const auto filePath = controller_mapping_path(basePath, aurora::input::controller_name(controller.m_index),
+                                                  controller.m_vid, controller.m_pid);
     const auto filePathStr = aurora::io::fs_path_to_string(filePath);
 
     auto file = aurora::io::open_atomic_file(filePath, aurora::io::AtomicFileMode::Preserve);
@@ -1915,6 +1964,27 @@ void PADRestoreDefaultMapping(const u32 port) {
   // A virtual controller is already at its defaults.
   __PADSetDefaultMapping(controller);
   controller->m_axisMapping = g_defaultAxes;
+}
+
+BOOL PADIsDefaultMapping(const u32 port) {
+  auto* controller = aurora::input::get_controller_for_player(port);
+  if (controller == nullptr) {
+    return FALSE;
+  }
+  EnsureMappingLoaded(controller);
+  const auto buttons = controller->m_buttonMapping;
+  __PADSetDefaultMapping(controller);
+  const bool same =
+      std::ranges::equal(controller->m_buttonMapping, buttons,
+                         [](const PADButtonMapping& a, const PADButtonMapping& b) {
+                           return a.nativeButton == b.nativeButton && a.padButton == b.padButton;
+                         }) &&
+      std::ranges::equal(controller->m_axisMapping, g_defaultAxes, [](const PADAxisMapping& a, const PADAxisMapping& b) {
+        return a.nativeAxis.nativeAxis == b.nativeAxis.nativeAxis && a.nativeAxis.sign == b.nativeAxis.sign &&
+               a.nativeButton == b.nativeButton && a.padAxis == b.padAxis;
+      });
+  controller->m_buttonMapping = buttons;
+  return same ? TRUE : FALSE;
 }
 
 void PADBlockInput(const bool block) {

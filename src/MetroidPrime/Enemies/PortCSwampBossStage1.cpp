@@ -252,6 +252,8 @@ CSwampBossStage1::CSwampBossStage1(TUniqueId uid, const rstl::string& name,
 , xd78_waitStart(-1000.f)
 , xd7c_projectileInfo(data.spitProjectile, LdrToDamageInfo(data.spitDamage))
 , xda4_spitVisor(MakeGenToken(data.spitVisorEffect)) {
+  // fn_78_141C locks the spit token after building it; LaunchProjectile's TryCache needs the lock.
+  xd7c_projectileInfo.Token().Lock();
   // Retail clears these +0x681 bits (0x40/0x10/0x08/0x04/0x02, then 0x80); shock stays enabled.
   CAiKnockBackMgr& kb = KnockBackController();
   kb.EnableFreeze(false);
@@ -631,9 +633,10 @@ void CSwampBossStage1::UpdateHeadTurn(CStateManager& mgr, float dt) {
       const CVector3f toLook(look.GetX() - xc0c_tonguePos.GetX(),
                              look.GetY() - xc0c_tonguePos.GetY(), 0.f);
       if (toLook.CanBeNormalized()) {
+        // the angle in radians over 25 degrees: `lfs f2, lbl_78_rodata_194` (0.43633232f) at
+        // 0x2F84, `fdivs f29, f1, f2` at 0x2F8C; Rad2Deg(a) / 25.f rounds differently
         const float frac = rstl::min_val(
-            CMath::Rad2Deg(CVector3f::GetAngleDiff(toSelf.AsNormalized(), toLook.AsNormalized())) /
-                25.f,
+            CVector3f::GetAngleDiff(toSelf.AsNormalized(), toLook.AsNormalized()) / 0.43633232f,
             1.f);
         const CVector3f cross = CVector3f::Cross(toSelf, toLook);
         // The mangled signature (EaseInOut(float, EEaseTypes, f, f, f, f, f)) fixes the order:
@@ -2041,9 +2044,8 @@ void CSwampBossStage1::AddToRenderer(const CStateManager& mgr) const {
   if (!GetAlive()) {
     return;
   }
-  // TODO(uncertain): retail queues both generators through IRenderer slot +0x44 (the overload
-  // with position and bounds, whose arguments the decompiler dropped); the host uses the
-  // one-argument overload.
+  // asm 0x2240-0x228C: IRenderer slot +0x44 with only r4 (the generator) set - the
+  // one-argument AddParticleGen.
   if (!xd60_ringGen.null()) {
     gpRender->AddParticleGen(*xd60_ringGen);
   }
@@ -2219,9 +2221,10 @@ void CSwampBossStage1::DoUserAnimEvent(CStateManager& mgr, const CInt32POINode& 
 
 // @ fn_78_A570
 CScannableObjectInfo* CSwampBossStage1::GetScannableObjectInfo() const {
-  // TODO(uncertain): retail hides the scan while body-controller state id 7 is current (the
-  // field at +0x580 of the object at this+0x48c, taken as the body state id).
-  if (static_cast< int >(GetBodyController()->GetCurrentStateId()) == 7 || !xb58_radarPresent) {
+  // asm 0xA57C-0xA588: the body controller's (0x48c) word at 0x580 is its locomotion type (DOL
+  // SetLocomotionType 0x800F73EC: stw r4, 0x580(r3)), not the body state; type 7 is the one
+  // ResetPlatform sets, so the scan is hidden while the platform resets.
+  if (GetBodyController()->GetLocomotionType() == pas::kLT_Internal7 || !xb58_radarPresent) {
     return nullptr;
   }
   return CPatterned::GetScannableObjectInfo();

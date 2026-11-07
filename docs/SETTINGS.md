@@ -76,11 +76,26 @@ Game page:
 
 - `original_experience`: Cutscenes > Original experience (default off); env
   `MP2_ORIGINAL_EXPERIENCE`, console `original`. While on, the port's gameplay and cutscene tweaks read
-  as retail and their rows are greyed: skippable cutscenes, world name on load, walk speed, hint
+  as retail and their rows are greyed: skippable cutscenes, seamless item pickups, world name on load, walk speed, hint
   delay, scan speed, elevator ride, portal transition, rotating rooms, fast morph, spring ball, the Enhancements page, toggle lock-on, sticky charge, remastered
   charge, auto-aim (on). Your saved values are kept and return when it is switched off. Mods, input,
   video and audio settings are not affected.
 - `skip_cinematics`: Enhancements > Pace > Skippable cutscenes.
+- `seamless_pickups`: Enhancements > Pace > Seamless item pickups: 0 Off (default), 1 All,
+  2 Repeats only (a saved checkbox's 0/1 reads the same); env `MP2_SEAMLESS_PICKUPS` (a flag, or
+  `2`/`repeats`), console `seamlesspickups`. Repeats only applies it to a pickup whose item the
+  player already had (`CPlayerState::HasPowerUp` before the pickup: the second and later expansion,
+  tank or beam ammo pickup), so each kind's first message box still explains it; map stations keep
+  theirs. Single player, as in the Prime 1 randomizer:
+  picking up an item keeps control (its "Disable Controls" hint is dropped), shows the message box's
+  headline ("Missile Expansion acquired!") as a HUD memo instead of pausing, and skips the cinematic
+  some items start (20 of the 124 item pickups) the way the skip button does, so the doors, platforms
+  and layers the scene changes still change. A map station's message box after its download shows
+  as a memo the same way (its cinematic and the map screen play as retail;
+  `PortPickupPresentation::IsMapStationMemo`). `CScriptPickup::Touch` walks the pickup's Arrived chain
+  through relays, memory relays, timers and sequence timers and marks those three targets
+  (`platform/port_pickup_presentation.cpp`); `tools/pickup_presentation.py` checks the rule against
+  every pickup and map station on the disc.
 - Boot logos and the world name card on load: no setting; they end on A or Start (shown as retail
   under Original experience). Env `MP2_BOOT_LOGOS`, `MP2_WORLD_NAME` (`show`, `skip`, `off`).
 - `walk_speed`: Enhancements > Pace > Walk speed (50 to 200 percent, default 100 = retail); env
@@ -89,9 +104,17 @@ Game page:
   orbit strafe and approach speeds are all multiplied by it, so she reaches k times the retail speed
   in the same time and stops in the same time. Jump height, sideways dashes, turning, the grapple
   and the Morph Ball are unchanged; speed carries into a jump. At 100 movement is exactly retail.
+- `walk_speed_enabled`: Enhancements > Pace > Custom walk speed (default on); env
+  `MP2_WALK_SPEED_ENABLED`, console `walkspeed on|off`. Off moves at retail speed whatever the
+  slider says. For a sprint, set the speed and bind a custom action to this switch (Settings >
+  Custom walk speed, Toggle or While held) in Controls.
 - `scan_speed`: Enhancements > Pace > Scan speed (50 to 400 percent, default 100 = retail); env
   `MP2_SCAN_SPEED`, console `scanspeed`. Scales how fast a scan fills (CPlayer::UpdateScanningState);
   the visor, scan-point and hint text are unchanged.
+- `beam_switch_speed`: Enhancements > Pace > Beam switch speed (100 to 400 percent, default 100 =
+  retail); env `MP2_BEAM_SWITCH_SPEED`, console `beamswitch`. Scales a beam change's close, wipe
+  and open animations while one runs; the rest of the gun keeps its speed. Retail under Original
+  experience.
 - `elevator_ride`: Enhancements > Pace > Elevator ride cutscene (0 original, 1 fast, 2 skip); env `MP2_ELEVATOR_RIDE`
   (`original|fast|skip`). Fast runs the world-transition ride at double speed; Skip ends it as soon as
   the next world has loaded (the load itself still takes its time). Text transitions are unchanged.
@@ -138,6 +161,11 @@ Game page:
   Stack beams (each shot also fires the other beams you own, at no extra ammo cost); env `MP2_UNLOCK_HARD_MODE`,
   `MP2_UNLOCK_GALLERIES`, `MP2_STACK_BEAMS`. Not written into the save, and Original experience
   greys them.
+- `damage_taken`, `damage_dealt`: Game > Difficulty > Damage taken / Damage dealt (x0.1 to x10, default
+  1; Reset difficulty sets both to 1); env `MP2_DAMAGE_TAKEN`, `MP2_DAMAGE_DEALT`. Single player only:
+  multiply the damage Samus takes (every type, Dark Aether's atmosphere included) and the damage she
+  deals to enemies, at the points Hard mode uses, on top of a Hard file's own multipliers. Original
+  experience reads 1.
 - `unlock_beam_doors`: Debug > Cheats > Unlock beam doors; env `MP2_UNLOCK_BEAM_DOORS`.
   Colour-locked doors (the door's own vulnerability, or a damageable-trigger lock) open to any of
   the four beams; missile locks stay. Saved, not written into the save file; Original experience
@@ -168,7 +196,9 @@ Controls > Options:
 - Quick setup > Use twin-stick controller: one click turns on Twin Stick Aim (`twin_stick`) and
   applies the Remastered layout to all controllers (Remap > Presets...), replacing your own
   controller bindings; greyed out with a GameCube adapter.
-- `lockon_toggle`: Buttons > Toggle Lock-On; env `MP2_LOCK_ON_TOGGLE`.
+- `lockon_toggle`: Buttons > Toggle Lock-On; env `MP2_LOCK_ON_TOGGLE`. An L binding whose own
+  trigger is Toggle (F1 Remap) also lets go once a lock or grapple it held ends; one that never
+  locked stays on until pressed again.
 - `spider_toggle`: Buttons > Toggle Spider Ball (default off, off under Original Experience; env
   `MP2_SPIDER_TOGGLE`): an R press on a Spider Ball track clings until the next press; leaving the
   track (more than 0.15 s) or the morph ball ending lets go. Away from a track, R works as usual.
@@ -179,6 +209,10 @@ Controls > Options:
   weighed by the aspect ratio) with line of sight still required. Retail prefers a target nearer the
   player by more than the orbit distance threshold even when it is off to the side. Grapple points
   and the scan visor keep retail's pick.
+- `scan_shoot`: Buttons > Shoot in Scan Visor (default off, off under Original Experience; env
+  `MP2_SCAN_SHOOT`): the arm cannon stays out in the Scan Visor and Fire, Missile and charge work
+  there; scanning stays on the Scan bind. Off, a fire or missile press switches to the Combat Visor
+  as in the original game.
 - Dodge (Controls > Remap > Move and aim, binding `dodge`, unbound by default): pressed on the
   ground while strafing (strafe at least as strong as forward/back), it dashes. Locked on, it does
   what a jump tapped while strafing does: retail's dash around the target. Not locked on, it does
@@ -186,6 +220,12 @@ Controls > Options:
   press, with mouse/stick look free during it. A press is kept for 0.12 s, so pressing just before
   the strafe works. Like any digital action it can be a touch button in the layout editor. Off under
   Original Experience; the jump-tap dash is unchanged.
+- Next/Previous target (Controls > Remap > Move and aim, bindings `target_next` and `target_prev`,
+  unbound by default; MP1 8c7d45fab): while locked on, a press moves the lock to the visible target
+  nearest to the right (Next) or left (Previous) of the current one, wrapping to the far side; grapple
+  points are skipped. The actions work only while locked on (input context `lockon`), where their
+  inputs do nothing else, so e.g. the mouse wheel can move the lock while locked on and still cycle
+  beams otherwise. Console `target next|prev`. Off under Original Experience.
 - `sticky_charge`, `rapid_charge`: Buttons > Sticky Charge, Remastered charge (rapid fire).
 - `auto_aim`: Aiming > Auto-aim.
 - `pointer_aim`, `pointer_aim_box`, `pointer_aim_turn`: Aiming > Pointer aim (Trilogy style),
@@ -208,14 +248,35 @@ Controls > Options:
   by default, recentres the pointer under pointer aim, else levels the view); env
   `MP2_RESET_AIM_BOTH`.
 - `pointer_menus`, `map_swap_fingers`: Options > Menus > Point and click menus (mouse and touch in
-  the pause screens and the map; default on; env `MP2_POINTER_MENUS`), Swap map finger gestures
+  the pause screens and the map, where a click on a room selects it; default on; env
+  `MP2_POINTER_MENUS`), Swap map finger gestures
   (touch: one finger pans the map, two rotate; env `MP2_MAP_SWAP_FINGERS`).
+- `menu_exit`: Options > Menus > Exit Game on the main menu (issue #80; default on): the main
+  menu shows "Exit Game" in its bottom-left corner with the Z button's prompt
+  (RB by default, View on the Remastered preset); holding it 1.5 s fills the letters orange and
+  quits as F1 > Game > Exit does. A finger or mouse button held on the legend does the same
+  (the touch overlay has no Z on pointer-menu screens). Env `MP2_MENU_EXIT`.
 - `prompt_glyphs`: Options > On-screen prompts > Button glyphs (Auto follows the last-used device;
   Xbox, PlayStation, Switch, GameCube or Keyboard forces the set in the F1 UI and the game's
   prompts; env `MP2_PROMPT_GLYPHS` 0-5, and `MP2_TEXTURE_DEVICE` still wins).
 - `minimap_tap`: Options > Menus > Tap minimap for map (a tap or click on the HUD minimap opens the
   map screen; default on; env `MP2_MINIMAP_TAP`; console `minimap`, `maptap`).
+- `map_pickups`: Tracker > Map > Pickups on the map (0 off, 1 rooms: tint the map rooms that still
+  hold a pickup, 2 all: a white dot per pickup not collected; default off; env `MP2_MAP_PICKUPS`
+  off/rooms/all; console `tracker`; off under Original experience).
+- `map_pickup_kinds`: Tracker > Map > Show pickup kinds (All mode: a ring for expansions and energy
+  tanks, a grey cross for collected pickups; the seed's item when randomized; env
+  `MP2_MAP_PICKUP_KINDS`).
+- `reveal_map`: Tracker > Map > Reveal map (every room of every world shows as a map station shows
+  it, Dark Aether's too, and the universe map lists every world; nothing is saved; default off; env
+  `MP2_REVEAL_MAP`; console `tracker reveal 0|1`; off under Original experience).
 - `fast_morph`, `spring_ball`: Enhancements > Morph Ball > Fast Morph, Spring Ball (one row; C-stick up, the Spring Ball binding on the Remap page, touch swipe up, or a gyro flick).
+- `ball_cam`, `ball_cam_speed`: Controls > Options > Morph Ball camera (issue #54; off by default,
+  speed 25-400%, 100 default; env `MP2_BALL_CAM`, `MP2_BALL_CAM_SPEED`; off under Original
+  experience). The mouse, twin stick, touch aim swipes and the C-stick turn the Morph Ball camera
+  around the ball and raise or lower it; the game's camera trails from where it is left, and the
+  Chase/Boost swing behind the ball waits 1.5 s after a turn. Hint, spline and fixed cameras and
+  the "no free look" hint keep control. With `spring_ball` on, the stick only turns it.
 - `map_invert_x`, `map_invert_y`: Map > Invert map rotate X, Invert map rotate Y (off by
   default; env `MP2_MAP_INVERT_X`, `MP2_MAP_INVERT_Y`). They flip which way the map turns on
   the rotate inputs, left/right and up/down: the game turns the map opposite to the stick,
@@ -243,6 +304,14 @@ Controls > Controller settings:
 - `stick_aim_rate`, `stick_aim_split`, `stick_aim_rate_y`: Stick aim > Stick aim speed,
   Separate vertical speed, Vertical stick aim speed (px/s, 50..10000; the slider runs
   100..8100).
+- `flick_stick`: Stick aim > Flick stick (`MP2_FLICK_STICK`; twin stick only): tilting the right
+  stick past 90% turns to face that way over 0.1 s, rotating it turns by the same angle; yaw only,
+  pitch is left to gyro aim. Under Pointer aim it flicks only while the gyro aims. The stick-speed
+  rows hide while it is on.
+- `flick_stick_outer_deadzone`: Flick outer deadzone (percent, 0..50, default 10): the tilt that
+  counts as full; the inner edge is the C-stick dead zone, round under flick stick.
+- `touch_flick_stick`: Touch controls > Flick stick (`MP2_TOUCH_FLICK_STICK`): the same for the
+  touch twin-stick layout while touch is the last-used input.
 
 Controls > Remap:
 
@@ -250,6 +319,11 @@ Controls > Remap:
   GameCube, Remastered, Modern or Southpaw to all controllers, replacing your own bindings
   there; a selected kind or model keeps its own on top. Reset... removes a device's own
   bindings (after a confirmation), bringing back the Classic and GameCube layouts.
+- `pad_preset` (`p2.`..`p4.pad_preset` for pad ports 2-4): the last controller preset picked
+  there (`gamecube`, `remastered`, `modern`, `southpaw`; empty = none). Aurora keeps mappings per
+  controller model, so a real controller connected to that port later, still on its defaults, gets
+  the preset's mapping (dual-stick ones skip a GameCube adapter), and Remap shows it with no
+  controller. Restoring My presets' controller mapping clears it.
 - My presets... (beside Presets...): "Save current as..." keeps your bindings as a preset of your own. One list; a
   preset covers every device it was saved with: keyboard & mouse, touch (when it has bindings) and, with a
   controller connected, the controller (its bindings, custom actions, button/axis mapping), plus twin stick and
@@ -273,6 +347,14 @@ Controls > Remap:
   overlay's Morph Ball page (Bomb, Boost, Power Bomb, Spider, Unmorph; touch codes 40..44)
   presses the rows; a remap moves a row off its button and relabels it. A touch: binding on a control
   counts as taking it over only where it applies.
+- Map rows (issue #31: Map rotate up/down/left/right, Map pan up/down/left/right;
+  `map_rotate_up`.. `map_rotate_right`, `map_pan_up`.. `map_pan_right` in controls.toml)
+  tilt the control stick (rotate) or the C-stick (pan) only on the map screen. They start
+  unbound and add to the sticks: their own inputs keep rotating and panning. An input bound
+  to a map row does only that on the map, bindings scoped to the map included, and what it
+  did before everywhere else, so WASD can pan the map without moving the gameplay C-stick.
+  Zoom stays on L/R (or the "Menus and map" L/R rows). The map screen is its own context
+  (Map), not Menus: a binding scoped to Menus alone no longer applies there.
 - Custom actions (advanced) (as MP1 issue #218) holds actions the player makes, as many as
   wanted: "+ Add action" picks what one does from a searchable list, then it binds like any
   row (chords, layers, triggers and touch buttons included); Edit and Delete are on its row,
@@ -283,7 +365,8 @@ Controls > Remap:
   a world starts; another world reloads it, a loaded room of this world is instant),
   Save states (save to or load from a given slot), Display (show a message on the HUD, text
   language) and Advanced (any debug console command line, `docs/CONSOLE.md`; it must be
-  given a name). The on/off ones take Toggle, Turn on or Turn off. Its name is made from
+  given a name). The on/off ones take Toggle, Turn on, Turn off or While held (switched the
+  other way while the binding is held and back on release, with no note). Its name is made from
   what it does ("God mode (on/off)", "Warp to Great Temple (Temple Grounds)") unless one is
   typed. A press shows what it did as a note at the top of the screen; Cheats, Travel and
   console commands refuse in the Original experience. Saved in `controls.toml` as
@@ -307,14 +390,20 @@ Controls > Touch & gyro (Gyro aim):
 Gyro aim needs mouse aim, twin stick or the touch controls' aim; without pointer aim it turns the
 camera at Sensitivity. Touch aim's Separate vertical speed and Vertical touch aim speed are
 touch.cfg's `aim_split` and `aim_speed_y` (env `MP2_TOUCH_AIM_SPLIT`, `MP2_TOUCH_AIM_SPEED_Y`).
+Beam and visor wheels: two round buttons, Visor and Beam, stock in the Default layout; any layout
+takes them as added buttons (Edit layout > Add a button > Visor wheel / Beam wheel, keys
+`visor_wheel` and `beam_wheel`, which only the overlay reads; a quick tap on Visor picks Scan with
+Tap Visor for Scan Visor). touch.cfg's retired `wheels=1` put the stock pair in the Classic and Twin
+layouts in place of the D-pad; such a layout becomes added wheel buttons where they were, without
+the D-pad, on its first draw (either overlay), and the line is dropped.
 
 Multiplayer (Player 1-4 selector; Player 1 edits the Controls keys above):
 
-- `p2.`..`p4.` + `twin_stick`, `stick_aim_rate`, `stick_aim_split`, `stick_aim_rate_y`, `lockon_toggle`,
+- `p2.`..`p4.` + `twin_stick`, `flick_stick`, `stick_aim_rate`, `stick_aim_split`, `stick_aim_rate_y`, `lockon_toggle`,
   `sticky_charge`, `rapid_charge`, `auto_aim`, `lock_on_free_aim`, `gyro_aim`, `gyro_mode`,
   `gyro_sensitivity`, `gyro_split`, `gyro_sensitivity_y`: that player's own value; a missing key follows
   Player 1 ("same as Player 1"; Reset and Reset to Player 1 remove keys). Each player's controller is the
-  pad port assignment, not a settings key; Remap... opens Controls > Remap on that port.
+  pad port assignment, not a settings key (its last controller preset is `p<N>.pad_preset`, above); Remap... opens Controls > Remap on that port.
 
 Video > Display:
 
@@ -326,7 +415,8 @@ Video > Display:
 - `scan_spread` (0-100; default 100, 0 on Android, env `MP2_SCAN_SPREAD`): HUD and view > Scan image
   spread; how far the widescreen HUD moves the scan visor's side panels. Scan text box and bar stay 4:3.
 - `crosshair_style` (`0` classic, `1` remastered, `2` gamecube; env `MP2_CROSSHAIR_STYLE` also takes
-  the names), `crosshair_opacity`: HUD and view > Crosshair style, Crosshair opacity.
+  the names), `crosshair_opacity` (0-500; default 100, the game's own alpha; above 100 brightens the
+  dim GameCube/Classic crosshair, #56): HUD and view > Crosshair style, Crosshair opacity.
 - `crosshair_color`, `crosshair_custom_color`: HUD and view > Custom crosshair colour (off: the
   game's own), which shows the colour picker; env `MP2_CROSSHAIR_COLOR`.
 - On Trilogy discs these crosshair settings act on Trilogy's own aiming cursor (centre and arms):
@@ -336,6 +426,12 @@ Video > Display:
   crosshair there, turned down the pointer ray (Classic on a GameCube disc; MP1 255afaf13).
 - `no_helmet`, `no_visor_fx`: HUD and view > Hide helmet, Hide visor effects; env
   `MP2_NO_HELMET`, `MP2_NO_VISOR_FX`.
+- `third_person` (default off): Video > Third-person camera (MP1's): the camera sits behind Samus's
+  shoulder in single player while she is unmorphed, first person and no cutscene plays, and pulls
+  in at walls; shots leave the body's cannon toward the screen centre (or the locked target), the
+  helmet and arm cannon are hidden. `third_person_distance` (m, default 3.5),
+  `third_person_shoulder` (m right, default 0.9, negative = left) and `third_person_height` (m,
+  default 0.25) are file/console only; console `thirdperson`.
 - `cinema_bars` (default on, env `MP2_CINEMA_BARS`): HUD and view > Cutscene black bars; off drops
   the cutscene letterbox and its viewport shrink. Original experience keeps them.
 - `crosshair_dark`, `crosshair_echo` (default off, env `MP2_CROSSHAIR_DARK`, `MP2_CROSSHAIR_ECHO`):
@@ -356,13 +452,23 @@ Video > Display:
 - `infinite_beam_ammo` (default off, env `MP2_INFINITE_BEAM_AMMO`): Enhancements > Infinite Light
   and Dark Ammo; the beams spend no ammo and the HUD shows infinity. Saved, unlike the Infinite
   cheat. Original experience turns it off.
+- `dark_world_light_music` (default off, env `MP2_DARK_WORLD_LIGHT_MUSIC`, issue #36):
+  Enhancements > Music > Light world music in Dark Aether; each region's Dark Aether theme plays
+  its light world theme (Temple Grounds, Agon, Torvus and its underground, Sanctuary, energy
+  controllers), so a portal hop keeps the track going. Boss, event and cutscene music is
+  unchanged. Takes effect at the next track start. Original experience turns it off.
 - `hud_opacity_echo`, `hud_opacity_dark`, `hud_opacity_scan` (`-1` = the game's Visor Opacity,
   default; else 0-100): HUD and view > Echo/Dark/Scan HUD opacity. Applies to that visor's HUD, its
   visor/beam menu, the radar and the map; the energy readout is part of the HUD frame and has no
   separate opacity. Console `hudopacity <echo|dark|scan> <visor|0..100>`. Original experience
   ignores them.
 - `fov`: HUD and view > Field of view (30..120; 0, the **Retail** button, keeps the game's own);
-  env `MP2_FOV`.
+  env `MP2_FOV`. Console `fov [30..120|retail]`.
+- `gun_fov`: HUD and view > Arm cannon FOV (45..120, default the retail 55; env `MP2_GUN_FOV`): the
+  FOV the arm cannon is drawn at whatever the view's, like a view-model FOV; higher draws it smaller
+  and further into the corner. `gun_follows_fov` (Arm cannon follows FOV, default off; env
+  `MP2_GUN_FOLLOWS_FOV`) draws it in the world's perspective instead. Console `fov cannon [45..120]`,
+  `fov gun [0|1]`. Original experience: retail 55, not following.
 - `gun_offset`: HUD and view > Arm cannon right/forward/up, written `right,forward,up`; env
   `MP2_GUN_OFFSET`.
 
@@ -393,6 +499,12 @@ Video > Quality and Frame rate:
   frames) or `MP2_PIPELINE_TRIM_SEVERE_MIB` (default 512: those unused for 16 frames), at most
   every 30 s while it stays low. `MP2_PIPELINE_EVICT=<frames>` evicts pipelines unused for that
   many frames regardless of memory. Console `pipetrim [frames]` forces one eviction.
+- Texture-pack memory (env only, MP1 issue #266; `platform/port_memory_log.cpp`): each second the memory log
+  (Linux, Windows, Android) takes the smallest headroom of available memory, the commit limit (Windows) and
+  the GPU budget (Windows/DXGI) and hands it to Aurora. Under `MP2_TEXTURE_PRESSURE_MIB` (default 1024)
+  replacement textures unused for a while are dropped and reloads come back smaller; under `MP2_TEXTURE_PRESSURE_SEVERE_MIB` (default 512) more are dropped.
+  0 turns a level off. An Android low-memory warning does a severe sweep at once. The memory log line also
+  shows `commit` and `gpu` where known.
 - `dynamic_res`, `dynamic_res_target`, `dynamic_res_min`: Quality > Dynamic resolution (Off, Auto,
   User; the mode is `dynamic_res` with `render_scale`: Auto goes up to the window's own scale
   (`render_scale` 0), User up to the "Maximum resolution scale" set), Frame rate target (0 =

@@ -67,38 +67,7 @@ void color_arg_reg_info(GXTevColorArg arg, const TevStage& stage, ShaderInfo& in
     }
     break;
   case GX_CC_KONST:
-    switch (stage.kcSel) {
-    case GX_TEV_KCSEL_K0:
-    case GX_TEV_KCSEL_K0_R:
-    case GX_TEV_KCSEL_K0_G:
-    case GX_TEV_KCSEL_K0_B:
-    case GX_TEV_KCSEL_K0_A:
-      info.sampledKColors.set(0);
-      break;
-    case GX_TEV_KCSEL_K1:
-    case GX_TEV_KCSEL_K1_R:
-    case GX_TEV_KCSEL_K1_G:
-    case GX_TEV_KCSEL_K1_B:
-    case GX_TEV_KCSEL_K1_A:
-      info.sampledKColors.set(1);
-      break;
-    case GX_TEV_KCSEL_K2:
-    case GX_TEV_KCSEL_K2_R:
-    case GX_TEV_KCSEL_K2_G:
-    case GX_TEV_KCSEL_K2_B:
-    case GX_TEV_KCSEL_K2_A:
-      info.sampledKColors.set(2);
-      break;
-    case GX_TEV_KCSEL_K3:
-    case GX_TEV_KCSEL_K3_R:
-    case GX_TEV_KCSEL_K3_G:
-    case GX_TEV_KCSEL_K3_B:
-    case GX_TEV_KCSEL_K3_A:
-      info.sampledKColors.set(3);
-      break;
-    default:
-      break;
-    }
+    info.usesTevKonst = true;
     break;
   default:
     break;
@@ -141,34 +110,7 @@ void alpha_arg_reg_info(GXTevAlphaArg arg, const TevStage& stage, ShaderInfo& in
     }
     break;
   case GX_CA_KONST:
-    switch (stage.kaSel) {
-    case GX_TEV_KASEL_K0_R:
-    case GX_TEV_KASEL_K0_G:
-    case GX_TEV_KASEL_K0_B:
-    case GX_TEV_KASEL_K0_A:
-      info.sampledKColors.set(0);
-      break;
-    case GX_TEV_KASEL_K1_R:
-    case GX_TEV_KASEL_K1_G:
-    case GX_TEV_KASEL_K1_B:
-    case GX_TEV_KASEL_K1_A:
-      info.sampledKColors.set(1);
-      break;
-    case GX_TEV_KASEL_K2_R:
-    case GX_TEV_KASEL_K2_G:
-    case GX_TEV_KASEL_K2_B:
-    case GX_TEV_KASEL_K2_A:
-      info.sampledKColors.set(2);
-      break;
-    case GX_TEV_KASEL_K3_R:
-    case GX_TEV_KASEL_K3_G:
-    case GX_TEV_KASEL_K3_B:
-    case GX_TEV_KASEL_K3_A:
-      info.sampledKColors.set(3);
-      break;
-    default:
-      break;
-    }
+    info.usesTevKonst = true;
     break;
   default:
     break;
@@ -355,7 +297,10 @@ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
       }
     }
   }
-  info.uniformSize += info.sampledKColors.count() * sizeof(Vec4<float>);
+  if (info.usesTevKonst) {
+    info.tevStageCount = config.tevStageCount;
+    info.uniformSize += config.tevStageCount * sizeof(Vec4<float>);
+  }
   for (int i = 0; i < info.sampledTexCoords.size(); ++i) {
     if (!info.sampledTexCoords.test(i)) {
       continue;
@@ -426,11 +371,68 @@ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
     // The caster and receiver matrices, the sun's direction and colour (GXState::shadowUniform)
     info.uniformSize += sizeof(g_gxState.shadowUniform);
   }
+  if (config.alphaCompare.ref0 == AlphaRefUniform || config.alphaCompare.ref1 == AlphaRefUniform) {
+    info.usesAlphaRef = true;
+    info.uniformSize += sizeof(Vec4<u32>);
+  }
   info.uniformSize = gfx::align_uniform(info.uniformSize);
   if (info.uniformSize > MaxUniformSize) {
     Log.fatal("Uniform size exceeds maximum: {} > {}", info.uniformSize, MaxUniformSize);
   }
   return info;
+}
+
+// The pipeline cache keys the whole config, so state the shader never reads split it: of 1741 seed
+// rows, 81 built a pipeline another row already had (tools/pipeline_key_audit.cpp). The game leaves
+// lighting set on a channel no stage reads, a texgen no stage samples, and a stage's channel when it
+// reads no rasterized colour. Those reset here, as does a texgen's matrix (the shader reads it from
+// texcoord_scale[i].z). Not channel 1 of a PBR draw, nor stage 0's channel:
+// pbr_func tells its projected-shadow stage by them whatever the stage reads.
+void pipeline_unused_inputs(ShaderConfig& config) noexcept {
+  const auto info = build_shader_info(config);
+  for (int i = 0; i < info.sampledColorChannels.size(); ++i) {
+    if (info.sampledColorChannels.test(i) || (i == 1 && config.pbr != 0)) {
+      continue;
+    }
+    config.colorChannels[i] = {};
+    config.colorChannels[i + GX_ALPHA0] = {};
+  }
+  for (int i = 0; i < info.sampledTexCoords.size(); ++i) {
+    if (!info.sampledTexCoords.test(i)) {
+      config.tcgs[i] = {};
+    }
+    // The texgen matrix comes from the uniform (texcoord_scale[i].z).
+    config.tcgs[i].mtx = GX_IDENTITY;
+  }
+  const auto rasC = [](GXTevColorArg arg) { return arg == GX_CC_RASC || arg == GX_CC_RASA; };
+  for (int i = 1; i < config.tevStageCount; ++i) {
+    auto& stage = config.tevStages[i];
+    const auto& c = stage.colorPass;
+    const auto& a = stage.alphaPass;
+    if (is_alpha_bump_channel(stage.channelId) || rasC(c.a) || rasC(c.b) || rasC(c.c) || rasC(c.d) ||
+        a.a == GX_CA_RASA || a.b == GX_CA_RASA || a.c == GX_CA_RASA || a.d == GX_CA_RASA) {
+      continue;
+    }
+    stage.channelId = GX_COLOR_NULL;
+  }
+}
+
+// A stage's konst input: rgb as its kcSel, alpha as its kaSel (a fraction, or a K register or one of
+// its components).
+static Vec4<float> tev_konst(const TevStage& stage) noexcept {
+  const auto konst = [](u32 sel, u32 comp) -> float {
+    if (sel < 8) {
+      return static_cast<float>(8 - sel) / 8.f; // GX_TEV_K?SEL_8_8 .. 1_8
+    }
+    if (sel >= GX_TEV_KCSEL_K0_R) { // K0_R .. K3_A: one component of a register
+      return g_gxState.kcolors[(sel - GX_TEV_KCSEL_K0_R) % 4][(sel - GX_TEV_KCSEL_K0_R) / 4];
+    }
+    if (sel >= GX_TEV_KCSEL_K0) { // K0 .. K3 (colour only)
+      return g_gxState.kcolors[sel - GX_TEV_KCSEL_K0][comp];
+    }
+    return 0.f;
+  };
+  return {konst(stage.kcSel, 0), konst(stage.kcSel, 1), konst(stage.kcSel, 2), konst(stage.kaSel, 3)};
 }
 
 static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info, uint32_t* clipPlaneOffset = nullptr) noexcept {
@@ -508,9 +510,9 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info, uint32_t* clip
       buf.append(ccsa.matColor);
     }
   }
-  for (int i = 0; i < info.sampledKColors.size(); ++i) {
-    if (info.sampledKColors.test(i)) {
-      buf.append(g_gxState.kcolors[i]);
+  if (info.usesTevKonst) {
+    for (u32 i = 0; i < info.tevStageCount; ++i) {
+      buf.append(tev_konst(g_gxState.tevStages[i]));
     }
   }
   if (info.usesPbr) {
@@ -621,22 +623,13 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info, uint32_t* clip
   }
   if (info.usesFog) {
     const auto& state = g_gxState.fog;
-    const float logicalWidth = std::max(g_gxState.logicalViewport.width, 1.f);
-    const float renderWidth = std::max(g_gxState.renderViewport.width, 1.f);
     Fog fog{
         .color = state.color,
         .a = state.a,
         .b = state.b,
         .c = state.c,
-        .rangeCenter = ((static_cast<float>(state.rangeCenter) - g_gxState.logicalViewport.left) / logicalWidth) * 2.f -
-                       1.f + (g_gxState.renderViewport.left / renderWidth) * 2.f,
+        .type = static_cast<u32>(state.type),
     };
-    for (u32 i = 0; i < state.rangeK.size(); ++i) {
-      const u32 source = (i & ~1u) | (1u - (i & 1u));
-      fog.rangeK[i / 4][i % 4] = static_cast<float>(state.rangeK[source]) / 64.f;
-    }
-    fog.rangeK[2][2] = fog.rangeK[2][1];
-    fog.rangeK[2][3] = fog.rangeK[2][1];
     buf.append(fog);
   }
   if (info.usesVolFog) {
@@ -645,8 +638,14 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info, uint32_t* clip
       buf.append(v);
     }
   }
-  for (const auto& scale : g_gxState.texCoordScales) {
-    buf.append(Vec4{static_cast<f32>(scale.scaleS) + 1.0f, static_cast<f32>(scale.scaleT) + 1.0f, 0.0f, 0.0f});
+  static_assert(std::tuple_size_v<decltype(g_gxState.texCoordScales)> == MaxTexCoord);
+  for (u32 i = 0; i < MaxTexCoord; ++i) {
+    const auto& scale = g_gxState.texCoordScales[i];
+    // z: the texgen's matrix as a float index into postex_mtx (the shader reads it, the key does not).
+    const u32 mtx = g_gxState.tcgs[i].mtx;
+    const u32 mtxIdx = mtx == GX_IDENTITY ? TexMtxIdentity : mtx / 3;
+    buf.append(Vec4{static_cast<f32>(scale.scaleS) + 1.0f, static_cast<f32>(scale.scaleT) + 1.0f,
+                    static_cast<f32>(mtxIdx), 0.0f});
   }
   if (info.usedIndTexMtxs.any()) {
     for (u32 i = 0; i < MaxIndTexMtxs; ++i) {
@@ -665,6 +664,9 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info, uint32_t* clip
     for (const auto& v : g_gxState.shadowUniform) {
       buf.append(v);
     }
+  }
+  if (info.usesAlphaRef) {
+    buf.append(Vec4<u32>{g_gxState.alphaCompare.ref0, g_gxState.alphaCompare.ref1, 0, 0});
   }
 }
 

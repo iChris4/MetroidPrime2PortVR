@@ -7,7 +7,9 @@
 // (PortWarp, PortOverlay) plus the world/player state a state manager gives for free. Adding one is a
 // row in `kCommands`.
 
+#include "MetroidPrime/CAutoMapper.hpp"
 #include "MetroidPrime/CMain.hpp"
+#include "MetroidPrime/CMapWorldInfo.hpp"
 #include <SDL3/SDL.h>
 #include <dolphin/pad.h>
 #include "port_harness.h"
@@ -18,6 +20,7 @@
 #include "port_mouse.h"
 #include "port_radial.h"
 #include "port_freecam.h"
+#include "port_third_person.h"
 #include "port_livesplit.h"
 #include "port_photo.h"
 
@@ -27,6 +30,8 @@
 #include "input/port_input_devices.h"
 #include "port_logfile.h"
 #include "port_overlay.h"
+#include "port_map_pickups.h"
+#include "port_rando_world.h"
 #include "port_touch.h"
 #include "port_pointer.h"
 #include "port_save.h"
@@ -812,6 +817,19 @@ void CmdAreas(CStateManager& mgr, const Args&, std::string& out) {
     }
     out += '\n';
   }
+  // MP1 f3cfa6ff1: the current area's transform, which maps area-local positions to the world's.
+  const TAreaId current = world->GetCurrentAreaId();
+  const IGameArea* currentArea =
+      current.Value() >= 0 && current.Value() < count ? world->IGetAreaAlways(current) : nullptr;
+  if (currentArea != nullptr) {
+    const CTransform4f& m = currentArea->IGetTM();
+    std::snprintf(line, sizeof(line),
+                  "current %d transform rows (%.4f %.4f %.4f %.3f) (%.4f %.4f %.4f %.3f) "
+                  "(%.4f %.4f %.4f %.3f)\n",
+                  current.Value(), m.Get00(), m.Get01(), m.Get02(), m.Get03(), m.Get10(), m.Get11(),
+                  m.Get12(), m.Get13(), m.Get20(), m.Get21(), m.Get22(), m.Get23());
+    out += line;
+  }
 }
 
 void CmdWarp(CStateManager&, const Args& args, std::string& out) {
@@ -1116,6 +1134,83 @@ void CmdNoDarkAether(CStateManager&, const Args& args, std::string& out) {
   out += enabled ? "no dark aether damage on\n" : "no dark aether damage off\n";
 }
 
+// The cheats below are kept but do nothing under Original experience (MP1's commands).
+const char* CheatRefused(bool set, bool applied) {
+  return set && !applied ? " (refused: Original experience)" : "";
+}
+
+bool ParseSwitch(const std::string& arg, bool& value) {
+  if (arg != "0" && arg != "1" && arg != "on" && arg != "off") {
+    return false;
+  }
+  value = arg == "1" || arg == "on";
+  return true;
+}
+
+void CmdMoonJump(CStateManager&, const Args& args, std::string& out) {
+  if (args.size() > 2) {
+    Fail("usage: moonjump [0|1]");
+    return;
+  }
+  if (args.size() == 2) {
+    bool on = false;
+    if (!ParseSwitch(std::string(args[1]), on)) {
+      Fail("usage: moonjump [0|1]");
+      return;
+    }
+    PortOverlay::SetMoonJump(on);
+  }
+  out += PortOverlay::MoonJumpSet() ? "moonjump 1" : "moonjump 0";
+  out += CheatRefused(PortOverlay::MoonJumpSet(), PortOverlay::MoonJump());
+  out += '\n';
+}
+
+// `boost <key> <value>...` (CmdBoost without arguments releases a boost).
+void CmdBoostCheats(const Args& args, std::string& out) {
+  static const char* const usage = "usage: boost [speed <1..10>] [time <1..10>] [air 0|1] [steer 0|1]";
+  float speed = PortOverlay::BoostSpeedScaleSet();
+  float duration = PortOverlay::BoostDurationScaleSet();
+  bool air = PortOverlay::BoostAnywhereSet();
+  bool steer = PortOverlay::BoostSteerSet();
+  if (args.size() % 2 == 0) {
+    Fail(usage);
+    return;
+  }
+  for (size_t i = 1; i + 1 < args.size(); i += 2) {
+    const std::string key(args[i]);
+    const std::string value(args[i + 1]);
+    if (key == "air" || key == "steer") {
+      if (!ParseSwitch(value, key == "air" ? air : steer)) {
+        Fail(usage);
+        return;
+      }
+    } else if (key == "speed" || key == "time") {
+      char* end = nullptr;
+      const float number = std::strtof(value.c_str(), &end);
+      if (end == value.c_str() || *end != '\0') {
+        Fail(usage);
+        return;
+      }
+      (key == "speed" ? speed : duration) = number;
+    } else {
+      Fail(usage);
+      return;
+    }
+  }
+  PortOverlay::SetBoostScales(speed, duration);
+  PortOverlay::SetBoostAnywhere(air);
+  PortOverlay::SetBoostSteer(steer);
+  const bool set = PortOverlay::BoostSpeedScaleSet() != 1.f || PortOverlay::BoostDurationScaleSet() != 1.f ||
+                   air || steer;
+  const bool applied = PortOverlay::BoostSpeedScale() != 1.f || PortOverlay::BoostDurationScale() != 1.f ||
+                       PortOverlay::BoostAnywhere() || PortOverlay::BoostSteer();
+  char line[128];
+  std::snprintf(line, sizeof(line), "boost speed %.2f time %.2f air %d steer %d%s\n",
+                PortOverlay::BoostSpeedScaleSet(), PortOverlay::BoostDurationScaleSet(), air ? 1 : 0,
+                steer ? 1 : 0, CheatRefused(set, applied));
+  out += line;
+}
+
 // infammo [all|missile|powerbomb|dark|light] [0|1]: the F1 Cheats "Infinite" boxes; no 0|1 flips.
 void CmdInfiniteAmmo(CStateManager&, const Args& args, std::string& out) {
   struct Kind {
@@ -1161,6 +1256,102 @@ void CmdInfiniteAmmo(CStateManager&, const Args& args, std::string& out) {
 void CmdMpForce(CStateManager&, const Args& args, std::string& out) {
   gPortForceMultiplayer = args.size() < 2 ? !gPortForceMultiplayer : ArgToInt(args[1], 1) != 0;
   out += gPortForceMultiplayer ? "forced multiplayer on\n" : "forced multiplayer off\n";
+}
+
+// `tracker`: the map pickups setting (F1 Tracker): off, rooms or all, the kinds shape option and
+// reveal map.
+void CmdTracker(CStateManager&, const Args& args, std::string& out) {
+  static const char* const kModes[] = {"off", "rooms", "all"};
+  for (size_t i = 1; i < args.size(); ++i) {
+    if (args[i] == "kinds" && i + 1 < args.size()) {
+      PortOverlay::SetMapPickupKinds(ArgToInt(args[++i], 1) != 0);
+      continue;
+    }
+    if (args[i] == "reveal" && i + 1 < args.size()) {
+      PortOverlay::SetRevealMap(ArgToInt(args[++i], 1) != 0);
+      continue;
+    }
+    bool found = false;
+    for (int m = 0; m < 3; ++m) {
+      if (args[i] == kModes[m]) {
+        PortOverlay::SetMapPickups(m);
+        found = true;
+      }
+    }
+    if (!found) {
+      out += "usage: tracker [off|rooms|all] [kinds 0|1] [reveal 0|1]\n";
+      return;
+    }
+  }
+  char line[96];
+  std::snprintf(line, sizeof(line), "map pickups %s, kinds %d, reveal %d\n",
+                kModes[PortMapPickups::Mode()], PortOverlay::MapPickupKinds() ? 1 : 0,
+                PortOverlay::RevealMap() ? 1 : 0);
+  out += line;
+}
+
+// `pickups [all]`: this world's pickups not collected (all: every world's, collected too), one per
+// line: location index, MREA, area name, position, and with `all` whether it is collected.
+void CmdPickups(CStateManager& mgr, const Args& args, std::string& out) {
+  const bool all = args.size() >= 2 && args[1] == "all";
+  const CWorld* world = mgr.GetWorld();
+  const uint32_t current = world != nullptr ? static_cast< uint32_t >(world->IGetWorldAssetId()) : 0u;
+  if (!all && current == 0) {
+    out += "no world loaded\n";
+    return;
+  }
+  const uint32_t scope = all ? 0u : current;
+  char line[192];
+  std::snprintf(line, sizeof(line), "%d/%d collected\n", PortMapPickups::CollectedCount(scope),
+                PortMapPickups::Count(scope));
+  out += line;
+  const int count = PortRandoWorld::LocationCount();
+  for (int i = 0; i < count; ++i) {
+    if (!all && PortMapPickups::World(i) != current) {
+      continue;
+    }
+    const bool collected = PortMapPickups::Collected(i);
+    if (collected && !all) {
+      continue;
+    }
+    const PortRandoWorld::Location* loc = PortRandoWorld::LocationAt(i);
+    const PortRandoWorld::Area* area = PortRandoWorld::AreaAt(loc->area);
+    float pos[3];
+    PortMapPickups::Position(i, pos);
+    std::snprintf(line, sizeof(line), "%3d %08x %-32s %8.1f %8.1f %8.1f%s\n", i, area->mrea,
+                  area->name, pos[0], pos[1], pos[2], all ? (collected ? " collected" : " -") : "");
+    out += line;
+  }
+}
+
+// `visited [all]`: rooms visited in this world (all: every world, one line each), then this
+// world's rooms not yet visited (map index, MLVL name). The ending's areas are not counted.
+void CmdVisited(CStateManager& mgr, const Args& args, std::string& out) {
+  const CWorld* world = mgr.GetWorld();
+  const uint32_t current = world != nullptr ? static_cast< uint32_t >(world->IGetWorldAssetId()) : 0u;
+  char line[160];
+  if (args.size() >= 2 && args[1] == "all") {
+    std::snprintf(line, sizeof(line), "all      %d/%d visited\n", PortMapPickups::VisitedCount(0),
+                  PortMapPickups::RoomCount(0));
+    out += line;
+    for (int i = 0; i < PortRandoWorld::WorldCount(); ++i) {
+      const uint32_t id = PortRandoWorld::WorldAt(i)->mlvl;
+      std::snprintf(line, sizeof(line), "%08x %d/%d visited\n", id, PortMapPickups::VisitedCount(id),
+                    PortMapPickups::RoomCount(id));
+      out += line;
+    }
+  }
+  if (current == 0) {
+    out += "no world loaded\n";
+    return;
+  }
+  std::snprintf(line, sizeof(line), "this world %d/%d visited\n", PortMapPickups::VisitedCount(current),
+                PortMapPickups::RoomCount(current));
+  out += line;
+  for (const PortMapPickups::Room& room : PortMapPickups::UnvisitedRooms(current)) {
+    std::snprintf(line, sizeof(line), "%3d %s\n", room.index, room.name);
+    out += line;
+  }
 }
 
 // `mpend`: ends the running multiplayer match now, as its time or kill limit would (the match then
@@ -1379,9 +1570,62 @@ void CmdFreeCam(CStateManager& mgr, const Args& args, std::string& out) {
     out += "pose set\n";
     return;
   }
+  if (args.size() >= 2 && args[1] == "here") {
+    out += PortFreeCam::MovePlayerHere(mgr) ? "player moved to the camera, camera off\n"
+                                             : "the free camera is off\n";
+    return;
+  }
   const bool enabled = args.size() < 2 ? !PortFreeCam::Active() : ArgToInt(args[1], 1) != 0;
   PortFreeCam::SetActive(enabled, &mgr);
   out += enabled ? "free camera on\n" : "free camera off\n";
+}
+
+// `thirdperson [on|off] [distance <m>] [shoulder <m>] [height <m>]` (MP1's, without its body
+// module's clip/feet/backwalk options): the third-person camera for this run (the F1 row and the
+// third_person* settings keep it); prints its state and where the camera is.
+void CmdThirdPerson(CStateManager&, const Args& args, std::string& out) {
+  for (size_t i = 1; i < args.size(); ++i) {
+    const std::string arg(args[i]);
+    if (arg == "on" || arg == "off") {
+      PortThirdPerson::SetEnabled(arg == "on");
+    } else if ((arg == "distance" || arg == "shoulder" || arg == "height") && i + 1 < args.size()) {
+      const std::string value(args[++i]);
+      char* end = nullptr;
+      const float number = std::strtof(value.c_str(), &end);
+      if (end == value.c_str()) {
+        Fail("usage: thirdperson [on|off] [distance <m>] [shoulder <m>] [height <m>]");
+        return;
+      }
+      if (arg == "distance") {
+        PortThirdPerson::SetDistance(number);
+      } else if (arg == "shoulder") {
+        PortThirdPerson::SetShoulder(number);
+      } else {
+        PortThirdPerson::SetHeight(number);
+      }
+    } else {
+      Fail("usage: thirdperson [on|off] [distance <m>] [shoulder <m>] [height <m>]");
+      return;
+    }
+  }
+  if (args.size() > 1) {
+    // Kept like the F1 checkbox and sliders (third_person* settings).
+    PortOverlaySettings::MarkDirty();
+    PortOverlaySettings::SaveSettings();
+  }
+  const PortThirdPerson::Params p = PortThirdPerson::GetParams();
+  float cam[3] = {0.f, 0.f, 0.f};
+  PortThirdPerson::GetCameraPosition(cam);
+  char line[192];
+  std::snprintf(line, sizeof(line),
+                "thirdperson %s (%s) distance %.2f shoulder %.2f height %.2f camera %.2f %.2f %.2f\n",
+                PortThirdPerson::Enabled() ? "on" : "off",
+                PortThirdPerson::Active()    ? "active"
+                : PortThirdPerson::Enabled() ? "waiting: next frame, first person, single player"
+                                             : "inactive",
+                p.distance, p.shoulder, p.height,
+                cam[0], cam[1], cam[2]);
+  out += line;
 }
 
 // `photo [on|off|1|2|4]`: photo mode (the free camera with the HUD hidden and the game frozen, the
@@ -1440,6 +1684,17 @@ void CmdSkipCine(CStateManager&, const Args& args, std::string& out) {
   const bool enabled = args.size() < 2 ? !PortOverlay::SkipCinematics() : ArgToInt(args[1], 1) != 0;
   PortOverlay::SetSkipCinematics(enabled);
   out += enabled ? "skip cutscenes on\n" : "skip cutscenes off\n";
+}
+
+void CmdSeamlessPickups(CStateManager&, const Args& args, std::string& out) {
+  if (args.size() >= 2) {
+    PortOverlay::SetSeamlessPickups(args[1] == "repeats" ? PortOverlay::kSeamlessPickups_Repeats
+                                                         : ArgToInt(args[1], 1));
+  }
+  static const char* const kModes[] = {"off", "all", "repeats only"};
+  out += "seamless pickups ";
+  out += kModes[PortOverlay::SeamlessPickups()];
+  out += "\n";
 }
 
 // skipprompt: show the "Press [A] to skip" prompt as a first press in a cinematic would, for screenshots.
@@ -1539,17 +1794,23 @@ void CmdMemo(CStateManager& mgr, const Args& args, std::string& out) {
   out += hint ? "hint memo shown\n" : "memo shown\n";
 }
 
-// walkspeed [50..200]: on-foot movement speed in percent (walk_speed); no argument prints it.
+// walkspeed [50..200|on|off]: on-foot movement speed in percent (walk_speed), or the
+// Custom walk speed switch (walk_speed_enabled; off is retail); no argument prints it.
 void CmdWalkSpeed(CStateManager&, const Args& args, std::string& out) {
   if (args.size() > 1) {
-    const int value = ArgToInt(args[1], -1);
-    if (value < PortOverlay::kWalkSpeedMin || value > PortOverlay::kWalkSpeedMax) {
-      Fail("usage: walkspeed [50..200]");
-      return;
+    if (args[1] == "on" || args[1] == "off") {
+      PortOverlay::SetWalkSpeedEnabled(args[1] == "on");
+    } else {
+      const int value = ArgToInt(args[1], -1);
+      if (value < PortOverlay::kWalkSpeedMin || value > PortOverlay::kWalkSpeedMax) {
+        Fail("usage: walkspeed [50..200|on|off]");
+        return;
+      }
+      PortOverlay::SetWalkSpeed(value);
     }
-    PortOverlay::SetWalkSpeed(value);
   }
-  out += "walkspeed " + std::to_string(PortOverlay::WalkSpeed()) + "\n";
+  out += "walkspeed " + std::to_string(PortOverlay::WalkSpeed()) +
+         (PortOverlay::WalkSpeedEnabled() ? "" : " (custom walk speed off)") + "\n";
 }
 
 // scanspeed [50..400]: scan speed in percent (scan_speed); no argument prints it.
@@ -1563,6 +1824,58 @@ void CmdScanSpeed(CStateManager&, const Args& args, std::string& out) {
     PortOverlay::SetScanSpeed(value);
   }
   out += "scanspeed " + std::to_string(PortOverlay::ScanSpeed()) + "\n";
+}
+
+// beamswitch [100..400]: beam switch speed in percent (beam_switch_speed); no argument prints it.
+void CmdBeamSwitch(CStateManager&, const Args& args, std::string& out) {
+  if (args.size() > 1) {
+    const int value = ArgToInt(args[1], -1);
+    if (value < PortOverlay::kBeamSwitchSpeedMin || value > PortOverlay::kBeamSwitchSpeedMax) {
+      Fail("usage: beamswitch [100..400]");
+      return;
+    }
+    PortOverlay::SetBeamSwitchSpeed(value);
+  }
+  out += "beamswitch " + std::to_string(PortOverlay::BeamSwitchSpeed()) + "\n";
+}
+
+// fov [30..120|retail] | gun [0|1] | cannon [45..120]: the first-person FOV (fov), whether the arm
+// cannon follows it (gun_follows_fov), the cannon's own FOV (gun_fov); no value prints it.
+void CmdFov(CStateManager&, const Args& args, std::string& out) {
+  char line[96];
+  if (args.size() > 1 && args[1] == "gun") {
+    if (args.size() > 2) {
+      PortOverlay::SetGunFollowsFov(args[2] != "0");
+    }
+    out += PortOverlay::GunFollowsFov() ? "gun follows fov\n" : "gun own fov\n";
+    return;
+  }
+  if (args.size() > 1 && args[1] == "cannon") {
+    if (args.size() > 2) {
+      float fov = 0.f;
+      if (!ParseFloat(args[2], fov) || !(fov >= PortOverlay::kGunFovMin && fov <= PortOverlay::kGunFovMax)) {
+        Fail("usage: fov cannon [45..120]");
+        return;
+      }
+      PortOverlay::SetGunFov(fov);
+    }
+    std::snprintf(line, sizeof(line), "cannon fov %.1f%s\n", PortOverlay::GunFov(),
+                  PortOverlay::GunFollowsFov() ? " (unused: gun follows fov)" : "");
+    out += line;
+    return;
+  }
+  if (args.size() > 1) {
+    float fov = 0.f;
+    if (args[1] != "retail" &&
+        (!ParseFloat(args[1], fov) || !(fov >= 30.f && fov <= 120.f))) {
+      Fail("usage: fov [30..120|retail] | fov gun [0|1] | fov cannon [45..120]");
+      return;
+    }
+    PortOverlay::SetFirstPersonFov(fov);
+  }
+  const float fov = PortOverlay::FirstPersonFov();
+  std::snprintf(line, sizeof(line), "fov %.1f%s\n", fov > 0.f ? fov : 55.f, fov > 0.f ? "" : " (retail)");
+  out += line;
 }
 
 // language [0..6]: the text language (language), applied while the game runs; no argument prints it.
@@ -1794,8 +2107,12 @@ void CmdPointer(CStateManager&, const Args& args, std::string& out) {
 }
 
 // boost: start a boost-ball charge release on the morphed player (what releasing a held A does), so
-// lanes reach boost-hit arms without timing pad input.
-void CmdBoost(CStateManager& mgr, const Args&, std::string& out) {
+// lanes reach boost-hit arms without timing pad input. With arguments: the Boost Ball cheats.
+void CmdBoost(CStateManager& mgr, const Args& args, std::string& out) {
+  if (args.size() > 1) {
+    CmdBoostCheats(args, out);
+    return;
+  }
   CPlayer* player = mgr.GetPlayer(0);
   if (player == nullptr || player->GetMorphBall() == nullptr ||
       player->GetMorphballTransitionState() != CPlayer::kMS_Morphed) {
@@ -1919,6 +2236,19 @@ void CmdDodge(CStateManager&, const Args&, std::string& out) {
                                           : "dodge requested";
 }
 
+// As a Next/Previous target press: while locked on, the lock moves to the next visible target
+// right or left on screen (taken within 120 ms).
+void CmdTarget(CStateManager&, const Args& args, std::string& out) {
+  const std::string_view dir = args.size() < 2 ? std::string_view() : args[1];
+  if (dir != "next" && dir != "prev") {
+    Fail("usage: target next|prev");
+    return;
+  }
+  PortTouch::RequestTargetCycle(dir == "next" ? 1 : -1);
+  out = PortOverlay::OriginalExperience() ? "target cycle requested (off under original experience)"
+                                          : "target cycle requested";
+}
+
 void CmdSpringBall(CStateManager&, const Args& args, std::string& out) {
   const bool enabled = args.size() < 2 ? !PortOverlay::SpringBall() : ArgToInt(args[1], 1) != 0;
   PortOverlay::SetSpringBall(enabled);
@@ -1943,6 +2273,12 @@ void CmdAimLockOn(CStateManager&, const Args& args, std::string& out) {
   out += enabled ? "aim lock-on on\n" : "aim lock-on off\n";
 }
 
+void CmdScanShoot(CStateManager&, const Args& args, std::string& out) {
+  const bool enabled = args.size() < 2 ? !PortOverlay::ScanShoot() : ArgToInt(args[1], 1) != 0;
+  PortOverlay::SetScanShoot(enabled);
+  out += enabled ? "scan shoot on\n" : "scan shoot off\n";
+}
+
 void CmdSticky(CStateManager&, const Args& args, std::string& out) {
   const bool enabled = args.size() < 2 ? !PortOverlay::StickyCharge() : ArgToInt(args[1], 1) != 0;
   PortOverlay::SetStickyCharge(enabled);
@@ -1960,6 +2296,24 @@ void CmdMinimap(CStateManager&, const Args&, std::string& out) {
     std::snprintf(line, sizeof(line), "minimap none enabled=%d\n", PortMinimap::Enabled() ? 1 : 0);
   }
   out += line;
+}
+
+// maprooms [reveal]: the map screen's selected room and each clickable room's centre in GUI
+// pixels, as the last map draw projected them (none off the map screen). reveal marks this world's
+// map station used, which shows its rooms on the map, so a test has rooms to click.
+void CmdMapRooms(CStateManager& mgr, const Args& args, std::string& out) {
+  if (args.size() > 1 && args[1] == "reveal") {
+    if (gpGameState == nullptr || mgr.GetWorld() == nullptr) {
+      out += "maprooms: no world\n";
+      return;
+    }
+    gpGameState->StateForWorld(mgr.GetWorld()->IGetWorldAssetId())
+        .GetMapWorldInfo()
+        ->SetMapStationUsed(true);
+    out += "map station used\n";
+    return;
+  }
+  CAutoMapper::PortDescribeMapRooms(out);
 }
 
 void CmdMapTap(CStateManager&, const Args&, std::string& out) {
@@ -2262,7 +2616,7 @@ void CmdHudOpacity(CStateManager&, const Args& args, std::string& out) {
   out += line;
 }
 
-// crosshair [<25..100> | style classic|remastered|gamecube | opacity <0..100> | color <r> <g> <b> | color
+// crosshair [<25..100> | style classic|remastered|gamecube | opacity <0..500> | color <r> <g> <b> | color
 // clear]: the Prime port's crosshair settings, same meanings.
 void CmdCrosshair(CStateManager&, const Args& args, std::string& out) {
   if (args.size() >= 2) {
@@ -2281,7 +2635,7 @@ void CmdCrosshair(CStateManager&, const Args& args, std::string& out) {
       const int percent = ArgToInt(args[2], -1);
       if (percent < PortOverlay::kCrosshairOpacityMin ||
           percent > PortOverlay::kCrosshairOpacityMax) {
-        Fail("crosshair opacity is 0..100 percent");
+        Fail("crosshair opacity is 0..500 percent");
         return;
       }
       PortOverlay::SetCrosshairOpacity(percent);
@@ -2299,7 +2653,7 @@ void CmdCrosshair(CStateManager&, const Args& args, std::string& out) {
     } else {
       const int percent = ArgToInt(args[1], -1);
       if (percent < PortOverlay::kCrosshairSizeMin || percent > PortOverlay::kCrosshairSizeMax) {
-        Fail("usage: crosshair [<25..100> | style classic|remastered|gamecube | opacity <0..100> | color "
+        Fail("usage: crosshair [<25..100> | style classic|remastered|gamecube | opacity <0..500> | color "
              "<r> <g> <b> | color clear | aim <0|1>]");
         return;
       }
@@ -5215,7 +5569,7 @@ const CommandSpec kCommands[] = {
     {"status", CmdStatus,
       "status [--json]            world, area, player position, health, visor, beam, morph state; --json: one line for scripts\n"},
     {"areas", CmdAreas,
-      "areas                       the current world's area slots (index, MREA id, name if loaded)\n"},
+      "areas                       the current world's area slots (index, MREA id, name if loaded), current area transform\n"},
     {"warp", CmdWarp,
       "warp <slot|id|name>         load an area of the current world (what MP2_TELEPORT takes)\n"},
     {"nextarea", CmdNextArea,
@@ -5256,6 +5610,12 @@ const CommandSpec kCommands[] = {
       "mpforce <0|1>               IsMultiplayer reports true (multiplayer-only arms)\n"},
     {"mpend", CmdMpEnd,
       "mpend                       end the running multiplayer match now (fade, results, front end)\n"},
+    {"tracker", CmdTracker,
+      "tracker [off|rooms|all] [kinds 0|1] [reveal 0|1]  map pickups (F1 Tracker): dots, tinted rooms; kinds = shapes; reveal = every room\n"},
+    {"visited", CmdVisited,
+      "visited [all]               rooms visited (all: per world) and this world's rooms not yet visited\n"},
+    {"pickups", CmdPickups,
+      "pickups [all]               this world's pickups not collected (all: every world, with state)\n"},
     {"pads", CmdPads,
       "pads                        the controller on each pad port 0-3 (players 1-4) and the controller count\n"},
     {"padport", CmdPadPort,
@@ -5295,6 +5655,8 @@ const CommandSpec kCommands[] = {
       "credits [1|2]               end the game into the credits (<75% / <100% route)\n"},
     {"skipcine", CmdSkipCine,
       "skipcine <0|1>              skip cutscenes the player has not seen (the F1 setting)\n"},
+    {"seamlesspickups", CmdSeamlessPickups,
+      "seamlesspickups [0|1|2]     pickups without control lock, message box or cutscene: off, all, repeats only (F1)\n"},
     {"sfx", CmdSfx,
       "sfx                         CSfxManager channel, mMuted, live sounds per channel, MusyX voices\n"},
     {"skipprompt", CmdSkipPrompt,
@@ -5331,7 +5693,9 @@ const CommandSpec kCommands[] = {
     {"aspect", CmdAspect,
       "aspect [4:3|16:9|window]    aspect ratio, as the F1 Video > Display row does\n"},
     {"boost", CmdBoost,
-      "boost                       boost-ball release on the morphed player\n"},
+      "boost                       boost-ball release on the morphed player\n"
+      "boost [speed <1..10>] [time <1..10>] [air 0|1] [steer 0|1]\n"
+      "                            cheats: Boost Ball speed/duration scales, boost anywhere, steer while boosting\n"},
     {"noise", CmdNoise,
       "noise <type> [x y z]        InformListeners at the player (6 = safe-zone noise)\n"},
     {"gameevent", CmdGameEvent,
@@ -5346,6 +5710,9 @@ const CommandSpec kCommands[] = {
     {"pointer", CmdPointer,
       "pointer <x> <y> move|click|dclick|tap|dtap|down|up|drag <x1> <y1>|wheel <n>|pinch <r> | back | where | hits\n"
       "                            scripted mouse/touch input for the pointer menus (GUI pixels)\n"},
+    {"maprooms", CmdMapRooms,
+      "maprooms [reveal]           the map screen's rooms and their centres (GUI pixels)\n"
+      "                            reveal: mark this world's map station used\n"},
     {"minimap", CmdMinimap, "minimap                     the HUD minimap's tap rect (GUI pixels)\n"},
     {"maptap", CmdMapTap, "maptap                      tap the minimap: opens the map screen\n"},
     {"hintshow", CmdHintShow,
@@ -5353,9 +5720,14 @@ const CommandSpec kCommands[] = {
     {"memo", CmdMemo, "memo <0|1> <text...>        show a HUD memo; 1 = hint memo (framed, button ring)\n"
       "memo pause <strg>           show a string table as the boxed memo a paused HUDMemo opens\n"},
     {"walkspeed", CmdWalkSpeed,
-      "walkspeed [50..200]         on-foot movement speed in percent (walk_speed); no argument prints it\n"},
+      "walkspeed [50..200|on|off]  on-foot movement speed in percent (walk_speed), or switch it on/off; no argument prints it\n"},
     {"scanspeed", CmdScanSpeed,
       "scanspeed [50..400]         scan speed in percent (scan_speed); no argument prints it\n"},
+    {"fov", CmdFov,
+      "fov [30..120|retail]|gun [0|1]|cannon [45..120]  first-person FOV (fov); gun 1: the arm cannon\n"
+      "                            follows it (gun_follows_fov); cannon: its own FOV (gun_fov)\n"},
+    {"beamswitch", CmdBeamSwitch,
+      "beamswitch [100..400]       beam switch speed in percent (beam_switch_speed); no argument prints it\n"},
     {"language", CmdLanguage,
       "language [0..6]             text language, applied live (language); no argument prints it\n"},
     {"combocost", CmdComboCost,
@@ -5380,10 +5752,14 @@ const CommandSpec kCommands[] = {
       "lockon <0|1>                toggle lock-on: an L press latches until the next press\n"},
     {"dodge", CmdDodge,
       "dodge                      a Dodge press (sideways dash, locked on or not; needs a strafe held)\n"},
+    {"target", CmdTarget,
+      "target next|prev           a Next/Previous target press (moves the lock while locked on)\n"},
     {"spidertoggle", CmdSpiderToggle,
       "spidertoggle [0|1]         an R press holds the spider ball on its track until the next (spider_toggle)\n"},
     {"aimlockon", CmdAimLockOn,
       "aimlockon [0|1]            lock-on picks the target nearest the crosshair (aim_lock_on)\n"},
+    {"scanshoot", CmdScanShoot,
+      "scanshoot [0|1]            the arm cannon stays out and fires in the Scan Visor (scan_shoot)\n"},
     {"sticky", CmdSticky,
       "sticky <0|1>                sticky charge: a long A hold keeps charging after the release\n"},
     {"pointeraim", CmdPointerAim,
@@ -5505,7 +5881,13 @@ const CommandSpec kCommands[] = {
     {"help", CmdHelp,
       "help                        this list\n"},
     {"freecam", CmdFreeCam,
-      "freecam [0|1]              free camera (photo mode); no argument toggles it\n"},
+      "freecam [0|1|here]          free camera (photo mode); no argument toggles it; here moves Samus\n"
+      "                            to it and turns it off\n"},
+    {"moonjump", CmdMoonJump,
+      "moonjump [0|1]              cheat: holding jump in the air keeps rising; no argument prints it\n"},
+    {"thirdperson", CmdThirdPerson,
+      "thirdperson [on|off] [distance <m>] [shoulder <m>] [height <m>]\n"
+      "                            third-person camera (single player; F1 Video, third_person* settings)\n"},
     {"photo", CmdPhoto,
       "photo [on|off|1|2|4]       photo mode (F8): on/off; a factor saves a PNG, supersampled by it\n"},
     {"livesplit", CmdLiveSplit,

@@ -15,7 +15,7 @@ hp, hp_max, visor, beam, freecam) for scripts.
 
 ## Commands
 - `status [--json]` — world, area, player position, health, visor, beam, morph state, frame/pipeline/texture totals and Dawn's GPU memory estimate (`dawn:` line); --json: one line for scripts
-- `areas` — the current world's area slots (index, MREA id, name if loaded)
+- `areas` — the current world's area slots (index, MREA id, name if loaded), then the current area's transform rows
 - `warp <slot|id|name>` — load an area of the current world (what MP2_TELEPORT takes)
 - `nextarea | prevarea` — the next or previous existing area of this world (also `prevarea`)
 - `door | dock | station` — stand in front of the nearest door / doorway / save station (also `dock`, `station`)
@@ -29,10 +29,15 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `god <0|1>` — god mode (the F1 cheat)
 - `rezbit [0|1]` — start (1) the Rezbit virus as a Rezbit's attack does (no particles or sounds; it holds until the L + R + B reboot) or clear it (0, as the scripts' RemoveRezbitVirus); no argument prints the state (none, infected, recovering, recovered)
 - `nodarkair <0|1>` — no Dark Aether air damage (the F1 cheat)
+- `moonjump [0|1]` — moon jump (the F1 cheat): holding jump in the air keeps Samus rising, on foot only; no argument prints it. Not saved; set but inactive under Original experience (`(refused: Original experience)`)
+- `boost [speed <1..10>] [time <1..10>] [air 0|1] [steer 0|1]` — the F1 Boost Ball cheats: push and boosted-time scales, boosting in the air (and through bomb/spring jumps), steering a boosted ball; prints all four. Not saved; refused as `moonjump`. Bare `boost` releases a boost (below)
 - `combocost [0..30]`, `combomissiles [0..5]`, `beamammo [50..100]` — combo beam ammo cost, combo missile cost, Dark/Light ammo per capacity pickup (F1 Cheats, each with a Reset); no argument prints it
 - `infammo [all|missile|powerbomb|dark|light] [0|1]` — infinite ammo per counter (fire at zero, HUD shows ∞, real counts and pickups kept; F1 Cheats); no 0|1 flips
 - `mpforce <0|1>` — IsMultiplayer reports true (multiplayer-only arms)
 - `mpend` — ends the running multiplayer match now, as its time or kill limit would (fade, results screen, back to the front end)
+- `tracker [off|rooms|all] [kinds 0|1] [reveal 0|1]` — reveal 1: every room of every world on the map as a map station shows it (`reveal_map`); map pickups (F1 Tracker, `map_pickups`/`map_pickup_kinds`): off; rooms tints rooms that still hold a pickup; all draws a white dot per pickup not collected; kinds 1: an expansion or energy tank is a ring, a major item a solid dot, a collected pickup a grey cross. Prints the current mode
+- `visited [all]` — rooms visited in this world and its rooms not yet visited (map index, MLVL name); all: also the counts per world (the ending's areas are not counted)
+- `pickups [all]` — this world's pickups not yet collected (location, kind, area, position); all: every world, each with its collected state and the totals
 - `pads` — the controller on each pad port 0-3 (players 1-4: `port N: <index> <name>` or `port N: none`) and the controller count; the F1 page's Player rows set it
 - `padport <index> <port>` / `padport clear <port>` — give controller `<index>` (see `pads`) pad port 0-3, or free a port (what the F1 Player combos call)
 - `padpreset <name> [port]` — apply a pad preset (`gamecube`, `remastered`, `modern`, `southpaw`) to the controller on pad port 0-3 (default 0; what the F1 remap page's Presets button does for its Player selector). Reports `no controller` for an empty port and a no-op for a virtual pad (Aurora ignores their mappings); only port 0 gets the keyboard/mouse overlay
@@ -50,6 +55,7 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `reloadroom` — rebuild the room from the disc, as leaving and coming back does, with Samus kept where she stands (the F1 Cheats page's Reload button)
 - `resume [status|save|load|clear]` — quick resume (savestates/resume.mp2ss): show, snapshot now, load, delete
 - `skipcine <0|1>` — skip cutscenes the player has not seen (the F1 setting)
+- `seamlesspickups [0|1|2|repeats]` — item pickups without control lock, message box or cutscene: off, all, or only items already had (the F1 setting)
 - `sfx` — CSfxManager state (channel, mMuted, mDoUpdate, live sounds per channel, free wrapper-pool slots) and the active MusyX voice count, for lost-sound bugs
 - `skipprompt` — show the cutscene skip prompt for a few seconds
 - `hudopacity <echo|dark|scan> <visor|0..100>` — HUD opacity for that visor; `visor` follows the HUD opacity setting
@@ -74,18 +80,23 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `scanspeed [50..400]`, `elevator [original|fast|skip]`, `portal [original|fast|skip]`, `rooms [original|fast]`, `original [0|1]`, `igt [0|1]`, `language [0..6]` — the Game page's
   scan speed, elevator ride, Original experience and on-screen time (`scan_speed`, `elevator_ride`,
   `original_experience`, `igt_timer` in SETTINGS.md); no argument prints the value
-- `walkspeed [50..200]` — walk speed in percent (shows the value with no argument); `walk_speed` in SETTINGS.md
+- `fov [30..120|retail] | gun [0|1] | cannon [45..120]` — first-person FOV (`fov`), whether the arm cannon follows it (`gun_follows_fov`), the cannon's own FOV (`gun_fov`); no value prints it
+- `beamswitch [100..400]` — beam switch speed in percent (`beam_switch_speed`); no argument prints it
+- `walkspeed [50..200|on|off]` — walk speed in percent, or `on`/`off` for the Custom walk speed switch (off is retail speed; shows the speed in effect with no argument); `walk_speed` and `walk_speed_enabled` in SETTINGS.md
 - `pointer <x> <y> move|click|dclick|tap|dtap|down|up [l|r|touch]|drag <x1> <y1> [l|r|touch]|wheel <n>|pinch <ratio>`, `pointer back|where|hits` — scripted mouse/touch input for the pointer menus, in GUI (EFB) pixels as screenshots show them; `where` prints the position and the widget rects under it, `hits` lists the recorded rects
 - `hintshow` — show the hint the game would show next (F1 > Game > Show current hint)
 - `memo <0|1> <text...>` — show a HUD memo; `1` makes it a hint memo (framed box with the button ring); `memo pause <strg>` (asset id or `STRG_...` name) shows that string table as the boxed memo a paused HUDMemo opens (map stations, "Active transport located.")
 - `springball <0|1>` — spring ball: C-stick up in Morph Ball bomb-jumps (needs Bombs)
 - `lockon <0|1>` — toggle lock-on: an L press latches until the next press
 - `dodge` — a press of the Dodge action: the player takes it within 0.12 s if on the ground and strafing, so hold the strafe first (e.g. `press sx:127 0`, locked on `press l+sx:127 0`); locked on it dashes as a jump tap does, otherwise straight sideways; off under Original Experience
+- `target next|prev` — a press of Next/Previous target: while locked on, the lock moves to the next visible target right or left on screen, within 0.12 s; off under Original experience
 - `spidertoggle [0|1]` — an R press holds the spider ball on its track until the next (`spider_toggle`)
 - `aimlockon [0|1]` — lock-on picks the target nearest the crosshair (`aim_lock_on`)
+- `scanshoot [0|1]` — the arm cannon stays out and fires in the Scan Visor (`scan_shoot`)
 - `sticky <0|1>` — sticky charge: a long A hold keeps charging after the release
 - `pointeraim [on|off|<x> <y>] pointer aim (the F1 row), or place its pointer (-1..1)`
 - `minimap` prints the HUD minimap tap rect (GUI pixels) and whether tap-to-open is on; `maptap` opens the map screen as a tap on the minimap does
+- `maprooms` prints the map screen's selected room and each clickable room's centre in GUI pixels, as the last map draw projected them (a `pointer <x> <y> click` there selects the room); `maprooms reveal` marks the current world's map station used, so its rooms show
 - `save [info] [<file>]` — the card's save slots, or one .gci on disk: world, items, time
 - `cardbackup <0|1>` — back the card up before each write (the F1 Saves row)
 - `settings [<key> <value>|self-test]` — settings.cfg's entries; set one (and save), or check every key round-trips
@@ -143,7 +154,8 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `at <update> <command>` — run one command on that game update (`frame`), not on arrival, so runs at different speeds act on the same tick
 - `gallery [mask]` — the slideshow gallery unlock mask (0..63): print, or set via PercentScans/mode flags
 - `help` — this list
-- `freecam [0|1]` — the plain free camera (no photo panel, HUD stays); no argument toggles it
+- `freecam [0|1|here]` — the plain free camera (no photo panel, HUD stays); no argument toggles it; `here` puts Samus at the camera (eyes, or the ball's middle, where it is, facing its way, standing still) and turns it off (F1 > Debug > Camera > Move Samus here)
+- `thirdperson [on|off|distance <m>|shoulder <m>|height <m>]` — the third-person camera (F1 Video; `third_person*` settings, saved on change); prints on/off, whether it is active (`waiting` until the next frame or while morphed, in a cutscene or split screen) and the camera position
 - `photo [on|off|1|2|4]` — photo mode (F8, F1 > Game): the free camera with the game frozen, HUD/cannon/visor hidden and the Photo mode panel. `on`/`off` enter and leave (refused with a toast when Samus is dead, a cutscene plays or no game runs); a factor saves a PNG supersampled by it; no argument enters when off and captures when on
 - `livesplit [0|1|addr <host:port>|send <line>]` — the LiveSplit link (the F1 setting); no argument: status
 - `touchact <actor id> <other id>` — run an actor's touch handler for the other actor (coverage)

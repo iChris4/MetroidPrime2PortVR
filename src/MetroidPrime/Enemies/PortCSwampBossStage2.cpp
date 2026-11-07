@@ -189,6 +189,9 @@ CSwampBossStage2::CSwampBossStage2(TUniqueId uid, const rstl::string& name,
 , mDropFlyerCooldown(0.f)
 , mPendingFlinch(0.f)
 , mLastTouched(kInvalidUniqueId) {
+  // 0xC5B8: LaunchProjectile's TryCache needs a held lock; without it a spit before the first
+  // PredictInterceptPos (which locks through GetObj) never spawns (#59).
+  mSpitProjectile.Token().Lock();
   if (data.scanInfoLight != kInvalidAssetId) {
     mScanLight = TLockedToken< CScannableObjectInfo >(
         gpSimplePool->GetObj(SObjectTag('SCAN', data.scanInfoLight)));
@@ -677,8 +680,9 @@ void CSwampBossStage2::UpdateWater(CStateManager& mgr, const CVector3f& pos,
             CEntityInfo(GetCurrentAreaId(), CEntity::NullConnectionList, true),
             rstl::string_l("Chykka head/tail splash"), xf, 0,
             CVector3f(scale, scale, scale), CColor::White(), -1);
-        // TODO(uncertain): retail links the splash to the water actor (CExplosion +0x12a =
-        // mWater); the host CExplosion exposes no such field.
+        // asm 0x3D58-0x3D68: the splash draws after the water (mWater 0xd3c into the CActor's
+        // next draw node at +0x12a), then 0x3D6C adds it.
+        splash->SetNextDrawNode(mWater);
         mgr.AddObject(splash);
       }
       lastSplash = CVector3f(pos.GetX(), pos.GetY(), splashZ);
@@ -989,9 +993,10 @@ void CSwampBossStage2::FireSpit(CStateManager& mgr, const rstl::string& locator)
                     : CImpactVisorEffect::None();
   CEnergyProjectile* projectile =
       LaunchProjectile(xf, mgr, 0x40, 0x400, true, visorEffect, CVector3f(1.f, 1.f, 1.f));
-  // TODO(uncertain): retail writes the phase's spitProjectileRadius (mData.spitProjectileRadius)
-  // into the projectile at +0x3d4; the host CEnergyProjectile exposes no such field.
-  (void)projectile;
+  // 0x4640: spitProjectileRadius (+0x8ec) into the projectile's extent (+0x3d4).
+  if (projectile) {
+    projectile->SetProjExtent(mData.spitProjectileRadius);
+  }
 }
 
 // fn_79_5030: put every chain node on its recorded position. The retail walks the *nodes* vector
@@ -2407,9 +2412,8 @@ void CSwampBossStage2::AddToRenderer(const CStateManager& mgr) const {
     }
   }
   if (!mBubbleGen.null()) {
-    // TODO(uncertain): retail calls IRenderer::AddParticleGen slot +0x44, the three-argument
-    // overload (generator, position, bounds), whose arguments the decompiler dropped; the host
-    // draws it through the one-argument overload (slot +0x40).
+    // asm 0xA720-0xA73C: IRenderer slot +0x44 with only r4 (the generator) set - the
+    // one-argument AddParticleGen.
     gpRender->AddParticleGen(*mBubbleGen);
   }
 }
@@ -2418,8 +2422,11 @@ void CSwampBossStage2::AddToRenderer(const CStateManager& mgr) const {
 void CSwampBossStage2::Render(const CStateManager& mgr) const {
   uint mask = 0;
   uint target = 0;
-  // TODO(uncertain): retail only queries the mask when mDrawParticles is set.
-  mgr.GetCharacterRenderMaskAndTarget(mask, target);
+  // asm 0xA7B4-0xA7CC: the mask is only queried when mDrawParticles (0x421 bit 0x01) is set;
+  // otherwise both stay 0.
+  if (mDrawParticles) {
+    mgr.GetCharacterRenderMaskAndTarget(mask, target);
+  }
   RenderSystemsToBeDrawnFirst(mgr, mask, target);
   RenderSystemsToBeDrawnLast(mgr, mask, target);
   mRepeller.Render(mgr, *this);

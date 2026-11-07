@@ -61,7 +61,7 @@ struct Settings {
 #else
   bool aim = false;
 #endif
-  bool wheels = true;
+  bool wheels = false; // retired, until an overlay migrates it (port_touch.h kTouchWheelActions)
   bool turbo = false;
   bool colors = false;
   bool labels = true;
@@ -99,6 +99,8 @@ std::atomic< int > sWheelState{0};
 // through these too ([0] is Player 1's, the overlay's).
 constexpr int kPlayers = 4;
 std::atomic< bool > sMorphed[kPlayers]{};
+std::atomic< bool > sOrbitLocked[kPlayers]{};
+std::atomic< bool > sLockedOnObject[kPlayers]{};
 std::atomic< bool > sScanTextUp{false};
 std::atomic<bool> sRadialTouchForeground{true};
 std::atomic< int > sPendingVisor[kPlayers]{-1, -1, -1, -1};
@@ -313,7 +315,9 @@ void SaveConfigLocked() {
     file << "classic=" << (s.classic ? 1 : 0) << '\n';
     file << "twin=" << (s.twin ? 1 : 0) << '\n';
     file << "aim=" << (s.aim ? 1 : 0) << '\n';
-    file << "wheels=" << (s.wheels ? 1 : 0) << '\n';
+    if (s.wheels) {
+      file << "wheels=1\n"; // not migrated yet
+    }
     file << "turbo=" << (s.turbo ? 1 : 0) << '\n';
     file << "colors=" << (s.colors ? 1 : 0) << '\n';
     file << "labels=" << (s.labels ? 1 : 0) << '\n';
@@ -543,9 +547,13 @@ void BeginFrame() {
     sRealPad.store(real, std::memory_order_release);
   }
 
-  // The aim source: the setting asks for it, and the F1 overlay takes it away while it is up.
-  const bool aim = AimEnabled() && !OverlayVisible();
+  // The aim source: the setting asks for it while touch is the last-used input (MP1's
+  // TouchDirectAim), and the F1 overlay takes it away while it is up. A pad or keyboard press
+  // hands aim back to its own settings, so with Twin Stick Aim off the left stick turns (#58).
+  const bool aim = AimEnabled() && Active() && !OverlayVisible();
   PortMouse::SetTouchEnabled(aim);
+  // Touch keeps its own flick stick switch while its twin stick is the last-used input.
+  PortMouse::SetTouchTwinStickActive(Active() && TwinStick() && !OverlayVisible());
   if (!aim) {
     // The finger's release may never arrive (the overlay opened under it).
     PortMouse::SetTouchAimDown(false);
@@ -652,6 +660,22 @@ bool TakeDodgeRequest(int player) {
   return SDL_GetTicksNS() < until && !PortOverlay::OriginalExperience();
 }
 
+std::atomic< uint64_t > sTargetCycleUntilNs[kPlayers]{};
+std::atomic< int > sTargetCycleDir[kPlayers]{};
+
+void RequestTargetCycle(int dir, int player) {
+  if (!ValidPlayer(player)) return;
+  sTargetCycleDir[player].store(dir > 0 ? 1 : -1);
+  sTargetCycleUntilNs[player].store(SDL_GetTicksNS() + 120'000'000);
+}
+
+int TakeTargetCycle(int player) {
+  if (!ValidPlayer(player)) return 0;
+  const uint64_t until = sTargetCycleUntilNs[player].exchange(0);
+  if (SDL_GetTicksNS() >= until || PortOverlay::OriginalExperience()) return 0;
+  return sTargetCycleDir[player].load();
+}
+
 bool AimEnabled() { return Read(&Settings::aim); }
 
 float AimSpeed() { return Read(&Settings::aimSpeed); }
@@ -740,6 +764,17 @@ void SetMorphed(bool morphed, int player) {
   if (ValidPlayer(player)) sMorphed[player].store(morphed, std::memory_order_release);
 }
 bool Morphed(int player) { return ValidPlayer(player) && sMorphed[player].load(std::memory_order_acquire); }
+void SetOrbitLocked(bool locked, bool onObject, int player) {
+  if (!ValidPlayer(player)) return;
+  sOrbitLocked[player].store(locked, std::memory_order_release);
+  sLockedOnObject[player].store(onObject, std::memory_order_release);
+}
+bool OrbitLocked(int player) {
+  return ValidPlayer(player) && sOrbitLocked[player].load(std::memory_order_acquire);
+}
+bool LockedOnObject(int player) {
+  return ValidPlayer(player) && sLockedOnObject[player].load(std::memory_order_acquire);
+}
 void SetScanTextUp(bool up) { sScanTextUp.store(up, std::memory_order_release); }
 bool ScanTextUp() { return sScanTextUp.load(std::memory_order_acquire); }
 

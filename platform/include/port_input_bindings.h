@@ -16,7 +16,7 @@
 //   renamed = true                   # the player set the name: keep it
 //   preset = "setting"               # what it does (a catalogue key)
 //   arg = "invert_y"                 # the preset's option
-//   mode = "toggle"                  # toggle, on, off, or "" for no mode
+//   mode = "toggle"                  # toggle, on, off, hold, or "" for no mode
 //   command = ""                     # "command" preset: the console line
 //
 //   [[profile]]
@@ -102,7 +102,7 @@ struct CustomActionDef {
   bool renamed = false;     // the player set the name; keep it when the options change
   std::string preset;       // catalogue key, e.g. "setting", "phazon_beam", "warp", "command"
   std::string arg;          // the preset's option (setting key, item, "MLVL:MREA", slot, ...)
-  std::string mode;         // "toggle", "on", "off" or "" (presets that have no mode)
+  std::string mode;         // "toggle", "on", "off", "hold" or "" (presets that have no mode)
   std::string command;      // "command" preset: the console line
   bool operator==(const CustomActionDef&) const = default;
 };
@@ -230,6 +230,30 @@ const BallRow* BallRowForGame(Action game);
 // bindings in each keyboard or controller family that binds the row (not with
 // layers). A row that isn't bound changes nothing.
 void ApplyBallButtons(Profile& profile);
+
+// The map rows (issue #31): each tilts a stick direction, only on the map screen,
+// where its inputs do nothing else. Unbound, the stick's own inputs rotate and pan
+// as before. The game rotates the map with the control stick, pans with the C-stick.
+struct MapRow {
+  Action row;
+  Action game;
+};
+inline constexpr MapRow kMapRows[] = {
+    {Action::MapRotateUp, Action::MainUp},     {Action::MapRotateDown, Action::MainDown},
+    {Action::MapRotateLeft, Action::MainLeft}, {Action::MapRotateRight, Action::MainRight},
+    {Action::MapPanUp, Action::CUp},           {Action::MapPanDown, Action::CDown},
+    {Action::MapPanLeft, Action::CLeft},       {Action::MapPanRight, Action::CRight},
+};
+// The row of `a`, or nullptr.
+const MapRow* FindMapRow(Action a);
+// Before a poll: scopes the map rows to the map (layers are dropped) and blocks the
+// map for the other bindings on their inputs.
+void ApplyMapRows(Profile& profile);
+// The target rows (Next/Previous target, MP1 issue #243): only while locked on, where their
+// inputs do nothing else (e.g. the wheel's beam cycling). Before a poll: scopes them to lock-on
+// (layers are dropped) and blocks lock-on for the other bindings on their inputs.
+bool IsTargetRow(Action a);
+void ApplyTargetRows(Profile& profile);
 
 // The touch overlay's stock buttons (TouchControlsView's C_* ids) and Turbo's
 // pulse (kTouchTurboCode): fixed GameCube actions in all three layouts (default,

@@ -4277,8 +4277,10 @@ template <> const PortSchemaClass& PortEntitySchema::Describe< CPlayerBodyContro
       {"mMorphTransitionActive", "bool", PortSchemaKind::bitfield, 1, kPortSchemaPrivate, 0, nullptr, PES_GETI(CPlayerBodyController, mMorphTransitionActive), PES_SETI(CPlayerBodyController, mMorphTransitionActive)},
       {"mDeathReactionOver", "bool", PortSchemaKind::bitfield, 1, kPortSchemaPrivate, 0, nullptr, PES_GETI(CPlayerBodyController, mDeathReactionOver), PES_SETI(CPlayerBodyController, mDeathReactionOver)},
       {"mDeathReactionActive", "bool", PortSchemaKind::bitfield, 1, kPortSchemaPrivate, 0, nullptr, PES_GETI(CPlayerBodyController, mDeathReactionActive), PES_SETI(CPlayerBodyController, mDeathReactionActive)},
+      {"mPortThirdPersonFsm", "rstl::optional_object<TCachedToken<CStateMachine>>", PortSchemaKind::smart_ptr, 0, kPortSchemaPrivate, sizeof(CPlayerBodyController::mPortThirdPersonFsm), PES_ADDR(CPlayerBodyController, mPortThirdPersonFsm), nullptr, nullptr},
+      {"mPortThirdPersonFsmActive", "bool", PortSchemaKind::bool_, 0, kPortSchemaPrivate, sizeof(CPlayerBodyController::mPortThirdPersonFsmActive), PES_ADDR(CPlayerBodyController, mPortThirdPersonFsmActive), PES_GETI(CPlayerBodyController, mPortThirdPersonFsmActive), PES_SETI(CPlayerBodyController, mPortThirdPersonFsmActive)},
   };
-  static const PortSchemaClass desc = {"CPlayerBodyController", "CEntity", fields, 28, 0x14B47985AEABD7C3ull};
+  static const PortSchemaClass desc = {"CPlayerBodyController", "CEntity", fields, 30, 0xF185F11157323BF4ull};
   return desc;
 }
 template <> const PortSchemaClass& PortEntitySchema::Describe< CPlayerGun >() {
@@ -6486,8 +6488,15 @@ template <> const PortSchemaClass& PortEntitySchema::Describe< CScriptStreamedMo
       {"mSkipping", "bool", PortSchemaKind::bitfield, 1, kPortSchemaPrivate, 0, nullptr, PES_GETI(CScriptStreamedMovie, mSkipping), PES_SETI(CScriptStreamedMovie, mSkipping)},
       {"mSkipTime", "float", PortSchemaKind::float_, 0, kPortSchemaPrivate, sizeof(CScriptStreamedMovie::mSkipTime), PES_ADDR(CScriptStreamedMovie, mSkipTime), nullptr, nullptr},
       {"mMoviePlayer", "rstl::single_ptr<CMoviePlayer>", PortSchemaKind::smart_ptr, 0, kPortSchemaPrivate, sizeof(CScriptStreamedMovie::mMoviePlayer), PES_ADDR(CScriptStreamedMovie, mMoviePlayer), nullptr, nullptr},
+      {"mPortTitlePhase", "CScriptStreamedMovie::EPortTitlePhase", PortSchemaKind::int_, 0, kPortSchemaPrivate, sizeof(CScriptStreamedMovie::mPortTitlePhase), PES_ADDR(CScriptStreamedMovie, mPortTitlePhase), PES_GETI(CScriptStreamedMovie, mPortTitlePhase), PES_SETI(CScriptStreamedMovie, mPortTitlePhase)},
+      {"mPortTitleMusicDelay", "float", PortSchemaKind::float_, 0, kPortSchemaPrivate, sizeof(CScriptStreamedMovie::mPortTitleMusicDelay), PES_ADDR(CScriptStreamedMovie, mPortTitleMusicDelay), nullptr, nullptr},
+      {"mPortTitleIntro", "rstl::single_ptr<CMoviePlayer>", PortSchemaKind::smart_ptr, 0, kPortSchemaPrivate, sizeof(CScriptStreamedMovie::mPortTitleIntro), PES_ADDR(CScriptStreamedMovie, mPortTitleIntro), nullptr, nullptr},
+      {"mPortTitleLoop", "rstl::single_ptr<CMoviePlayer>", PortSchemaKind::smart_ptr, 0, kPortSchemaPrivate, sizeof(CScriptStreamedMovie::mPortTitleLoop), PES_ADDR(CScriptStreamedMovie, mPortTitleLoop), nullptr, nullptr},
+      {"mPortTitleMusic", "CSfxHandle[2]", PortSchemaKind::other, 0, kPortSchemaPrivate, sizeof(CScriptStreamedMovie::mPortTitleMusic), PES_ADDR(CScriptStreamedMovie, mPortTitleMusic), nullptr, nullptr},
+      {"mPortHeldMusic", "TUniqueId", PortSchemaKind::uid, 0, kPortSchemaPrivate, sizeof(CScriptStreamedMovie::mPortHeldMusic), PES_ADDR(CScriptStreamedMovie, mPortHeldMusic), nullptr, nullptr},
+      {"mPortTitleArrived", "bool", PortSchemaKind::bool_, 0, kPortSchemaPrivate, sizeof(CScriptStreamedMovie::mPortTitleArrived), PES_ADDR(CScriptStreamedMovie, mPortTitleArrived), PES_GETI(CScriptStreamedMovie, mPortTitleArrived), PES_SETI(CScriptStreamedMovie, mPortTitleArrived)},
   };
-  static const PortSchemaClass desc = {"CScriptStreamedMovie", "CActor", fields, 11, 0x2C9F25315A46C7AEull};
+  static const PortSchemaClass desc = {"CScriptStreamedMovie", "CActor", fields, 18, 0xA3D0B2DBDD390FAAull};
   return desc;
 }
 template <> const PortSchemaClass& PortEntitySchema::Describe< CScriptStreamedMusic >() {
@@ -7207,7 +7216,6 @@ template <> const PortSchemaClass& PortEntitySchema::Describe< CSplitterCommandM
       {"mDodgeCount", "int", PortSchemaKind::int_, 0, kPortSchemaPrivate, sizeof(CSplitterCommandModule::mDodgeCount), PES_ADDR(CSplitterCommandModule, mDodgeCount), PES_GETI(CSplitterCommandModule, mDodgeCount), PES_SETI(CSplitterCommandModule, mDodgeCount)},
       {"mDodgeDirection", "int", PortSchemaKind::int_, 0, kPortSchemaPrivate, sizeof(CSplitterCommandModule::mDodgeDirection), PES_ADDR(CSplitterCommandModule, mDodgeDirection), PES_GETI(CSplitterCommandModule, mDodgeDirection), PES_SETI(CSplitterCommandModule, mDodgeDirection)},
       {"mCheckedChassisId", "TUniqueId", PortSchemaKind::uid, 0, kPortSchemaPrivate, sizeof(CSplitterCommandModule::mCheckedChassisId), PES_ADDR(CSplitterCommandModule, mCheckedChassisId), nullptr, nullptr},
-      {"mClearedId", "TUniqueId", PortSchemaKind::uid, 0, kPortSchemaPrivate, sizeof(CSplitterCommandModule::mClearedId), PES_ADDR(CSplitterCommandModule, mClearedId), nullptr, nullptr},
       {"mLaserSweepStage", "int", PortSchemaKind::int_, 0, kPortSchemaPrivate, sizeof(CSplitterCommandModule::mLaserSweepStage), PES_ADDR(CSplitterCommandModule, mLaserSweepStage), PES_GETI(CSplitterCommandModule, mLaserSweepStage), PES_SETI(CSplitterCommandModule, mLaserSweepStage)},
       {"mLaserSweepStart", "CVector3f", PortSchemaKind::math, 0, kPortSchemaPrivate, sizeof(CSplitterCommandModule::mLaserSweepStart), PES_ADDR(CSplitterCommandModule, mLaserSweepStart), nullptr, nullptr},
       {"mLaserSweepEnd", "CVector3f", PortSchemaKind::math, 0, kPortSchemaPrivate, sizeof(CSplitterCommandModule::mLaserSweepEnd), PES_ADDR(CSplitterCommandModule, mLaserSweepEnd), nullptr, nullptr},
@@ -7226,7 +7234,7 @@ template <> const PortSchemaClass& PortEntitySchema::Describe< CSplitterCommandM
       {"mBeamEffectId", "TUniqueId", PortSchemaKind::uid, 0, kPortSchemaPrivate, sizeof(CSplitterCommandModule::mBeamEffectId), PES_ADDR(CSplitterCommandModule, mBeamEffectId), nullptr, nullptr},
       {"mBeamSfxHandle", "CSfxHandle", PortSchemaKind::other, 0, kPortSchemaPrivate, sizeof(CSplitterCommandModule::mBeamSfxHandle), PES_ADDR(CSplitterCommandModule, mBeamSfxHandle), nullptr, nullptr},
   };
-  static const PortSchemaClass desc = {"CSplitterCommandModule", "CPatterned", fields, 39, 0x87DAA46DE418141Bull};
+  static const PortSchemaClass desc = {"CSplitterCommandModule", "CPatterned", fields, 38, 0x0B0851C20B79FA3Full};
   return desc;
 }
 template <> const PortSchemaClass& PortEntitySchema::Describe< CSplitterMainChassis >() {
@@ -8223,4 +8231,4 @@ const PortSchemaClass* const* PortEntitySchema::Classes(int& count) {
 }
 
 const int PortEntitySchema::kClassCount = 243;
-const int PortEntitySchema::kFieldCount = 6284;
+const int PortEntitySchema::kFieldCount = 6292;

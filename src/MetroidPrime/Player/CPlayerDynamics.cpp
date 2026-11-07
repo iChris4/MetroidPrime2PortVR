@@ -47,6 +47,7 @@
 
 #ifdef TARGET_PC
 #include "port_motion_watch.h"
+#include "port_third_person.h"
 #endif
 
 static const CMaterialList BallTransitionInclude = CMaterialList(kMT_Solid);
@@ -1230,7 +1231,14 @@ void CPlayer::BombJump(const CVector3f& position, CStateManager& mgr) {
       const CVector3f newVelocity(0.f, 0.f, velocity);
       SetVelocityWR(newVelocity);
       mMorphBall->SetDamageTimer(0.1f);
+#ifdef TARGET_PC
+      // The boost-anywhere cheat keeps a Boost Ball charge through the jump.
+      if (!PortOverlay::BoostAnywhere()) {
+        mMorphBall->CancelBoosting();
+      }
+#else
       mMorphBall->CancelBoosting();
+#endif
       mMorphBall->SetDisableSpiderBallTime(.4f);
       if (mMorphBall->GetCloseToCollisionTime() > .1f) {
         mGun->AddBombReloadTime(.4f);
@@ -1455,7 +1463,12 @@ void CPlayer::SetIntoBallReadyAnimation(float dt, EPlayerMorphBallState state) {
       const float angle =
           CMath::Rad2Deg(CMath::WrapTwoPi(atan2f(-flatVelocity.GetX(), flatVelocity.GetY())));
       const float maxSpeed = GetActualFirstPersonMaxVelocity(dt);
+#ifdef TARGET_PC
+      // Retail 0x80185CA8 lfs f0,lbl_8041C9C4 = 45.0; fcmpo f30,f0; blt skips (then <= 315.0).
+      if (angle >= 45.f && angle <= 315.f) {
+#else
       if (angle >= 225.f && angle <= 315.f) {
+#endif
         commandMgr.DeliverCmd(CPBCMorphToBallCmd(0, 4));
       } else if (speed >= 0.5f * maxSpeed) {
         commandMgr.DeliverCmd(CPBCMorphToBallCmd(0, 3));
@@ -1921,8 +1934,15 @@ void CPlayer::UpdateTransitionFilter(float dt, CStateManager& mgr) {
 
 void CPlayer::UpdateMorphBallTransition(float dt, CStateManager& mgr) {
   const EPlayerMorphBallState morphState = mMorphBallState;
+#ifdef TARGET_PC
+  // Port: the third-person body is seen from the first-person camera, so its locomotion
+  // animation runs as it does in multiplayer (root motion still only during morph transitions).
+  if (mgr.IsMultiplayer() || !mBodyController->IsLocomotionActive() ||
+      !mgr.GetCameraManager(mPlayerIndex)->IsInFPCamera() || PortThirdPerson::ShowBody(mgr)) {
+#else
   if (mgr.IsMultiplayer() || !mBodyController->IsLocomotionActive() ||
       !mgr.GetCameraManager(mPlayerIndex)->IsInFPCamera()) {
+#endif
     const CAdvancementDeltas deltas = UpdateAnimation(dt, mgr, true);
     if (mBodyController->IsMorphTransitionActive()) {
       MoveInOneFrameOR(deltas.GetOffsetDelta(), dt);

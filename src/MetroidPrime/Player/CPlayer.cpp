@@ -101,6 +101,7 @@
 #include <string.h>
 
 #ifdef TARGET_PC
+#include "MetroidPrime/CMFGame.hpp"
 #include "port_entry.h"
 #include "port_mouse.h"
 #include "vr/vr_pad.h"
@@ -108,6 +109,7 @@
 #include "port_radial.h"
 #include "MetroidPrime/PortScanTarget.hpp"
 #include "port_freecam.h"
+#include "port_third_person.h"
 #include "port_overlay.h"
 #include "port_photo.h"
 #include "port_touch.h"
@@ -837,12 +839,24 @@ void CPlayer::ResetPlayerState(CStateManager& mgr, int state) {
       cameraId = mCameraManager->GetBallCamera()->GetUniqueId();
     }
     mCameraManager->Reset(cameraId, mgr);
+#ifdef TARGET_PC
+    // Retail 0x8001A038 / 0x8001A054 lwz r12,0x10(r12): vtable slot 0x10 of __vt__12CHintManager
+    // is Reset (0xC is RefreshHint).
+    GetPlayerHintManager()->Reset(mgr);
+    GetControlHintManager()->Reset(mgr);
+#else
     GetPlayerHintManager()->RefreshHint(mgr);
     GetControlHintManager()->RefreshHint(mgr);
+#endif
     ResetPlayerHintState(mgr);
     mMorphBall->SetBallState(CMorphBall::kBS_Normal);
     if (mgr.IsMultiplayer()) {
+#ifdef TARGET_PC
+      // Retail 0x8001A088 lfs f0,lbl_8041A4B4 = 3.0, stored by stfs f0,0x12f4(r30).
+      mInvulnerabilityTimer = 3.f;
+#else
       mInvulnerabilityTimer = 2.f;
+#endif
     }
     mControlMapper.ResetCommandOverrides();
     ClearFluidList(mgr);
@@ -977,9 +991,10 @@ CVector3f CPlayer::PortAnchorGunDown(const CVector3f& pos) const {
   if (gunViewport.mHeight <= 0) {
     return pos;
   }
+  // The FOV the gun is drawn at (CStateManager's RenderGun pass).
   const float drop = PortOverlay::VertPlusGunDrop(
-      CCameraManager::sFirstPersonFOV, static_cast< float >(gunViewport.mWidth) /
-                                           static_cast< float >(gunViewport.mHeight));
+      PortOverlay::GunDrawFov(mCameraManager->GetFirstPersonCamera()->GetFov()),
+      static_cast< float >(gunViewport.mWidth) / static_cast< float >(gunViewport.mHeight));
   if (drop <= 0.f) {
     return pos;
   }
@@ -1044,8 +1059,8 @@ void CPlayer::UpdateGunTransform(const CVector3f& position, CStateManager& mgr) 
       PortMouse::PointerAimPosition(pointerX, pointerY, mPlayerIndex) && (pointerX != 0.f || pointerY != 0.f) &&
       (MouseAimAllowed(mgr) || PortLockFreeAim(mgr))) {
     const CFirstPersonCamera* cam = mCameraManager->GetFirstPersonCamera();
-    // The view's own transform: the crosshair is drawn from it.
-    const CTransform4f& viewXf = cam->GetTransform();
+    // The view's own transform: the crosshair is drawn from it (third person's, while it draws).
+    const CTransform4f viewXf = PortThirdPerson::TickView(cam->GetTransform());
     float yaw = 0.f;
     float pitch = 0.f;
     PortMouse::PointerAim::RayAngles(pointerX, pointerY, cam->GetFov(), cam->GetAspectRatio(),
@@ -1155,6 +1170,9 @@ void CPlayer::Update(float dt, CStateManager& mgr) {
         mSpawnedMorphBallState == kMS_Morphed || mMorphBall->InScrewAttackMode();
     PortTouch::SetMorphed(GetMorphballTransitionState() != kMS_Unmorphed && !screwAttack,
                           GetPlayerIndex());
+    PortTouch::SetOrbitLocked(mOrbitState == kOS_OrbitObject || mOrbitState == kOS_ForcedOrbitObject ||
+                                  mOrbitState == kOS_Grapple,
+                              mOrbitState == kOS_OrbitObject, GetPlayerIndex());
   }
 #endif
   if (!mBeamParticleDescriptionsInitialized && NWeaponTypes::are_tokens_ready(mBeamEffectTokens)) {
@@ -1353,7 +1371,12 @@ void CPlayer::UpdatePlayerDrawFlags(CStateManager& mgr) {
       mPlayerDrawFlags = CModelFlags::AlphaBlended(alpha);
     }
   } else if (playerState.GetItemAmount(CPlayerState::kIT_DoubleDamage, true) != 0) {
+#ifdef TARGET_PC
+    // Retail 0x80017F50 lfs f3,lbl_8041A4B4 = 3.0; 0x80017F60 fdivs f29,f1,f3.
+    const float pulse = (1.f + CMath::FastSinR(M_PIF * CGraphics::GetSecondsMod900())) / 3.f;
+#else
     const float pulse = (1.f + CMath::FastSinR(M_PIF * CGraphics::GetSecondsMod900())) / 2.f;
+#endif
     const float timeLeft = playerState.GetTimeLeft(CPlayerState::kIT_DoubleDamage);
     if (!(timeLeft < 2.f) || (static_cast< int >(20.f * timeLeft) & 1) == 0) {
       mPlayerDrawFlags = CModelFlags(CModelFlags::kT_Two,
@@ -1436,8 +1459,14 @@ void CPlayer::UpdateVisorState(const CFinalInput& input, float dt, CStateManager
     if (mPlayerState->GetItemAmount(CPlayerState::kIT_ScanVirus)) {
       selectedVisor = CPlayerState::kPV_Scan;
     } else {
+#ifdef TARGET_PC
+      // Shoot in Scan Visor: firing stays in the Scan Visor.
+      if (currentVisor == CPlayerState::kPV_Scan && !PortOverlay::ScanShoot() &&
+          (FireBeamPressed(input) ||
+#else
       if (currentVisor == CPlayerState::kPV_Scan &&
           (FireBeamPressed(input) ||
+#endif
            mControlMapper.GetPressInput(CControlMapper::kC_MissileOrPowerBomb, input)) &&
           playerState->HasPowerUp(CPlayerState::kIT_CombatVisor)) {
         playerState->StartTransitionToVisor(CPlayerState::kPV_Combat);
@@ -1500,7 +1529,11 @@ void CPlayer::UpdateVisorState(const CFinalInput& input, float dt, CStateManager
       const CPlayerState::EPlayerVisor visor =
           static_cast< CPlayerState::EPlayerVisor >(selectedVisor);
       playerState->StartTransitionToVisor(visor);
+#ifdef TARGET_PC
+      if (visor == CPlayerState::kPV_Scan && !PortOverlay::ScanShoot()) {
+#else
       if (visor == CPlayerState::kPV_Scan) {
+#endif
         mGun->HolsterGun(mgr);
       } else {
         mGun->DrawGun(mgr);
@@ -1529,7 +1562,8 @@ void CPlayer::UpdateCrosshairsState(const CFinalInput& input) {
   // pressed with the look control, and the port never presses it - the mouse, the twin stick and
   // the touch drag own the view instead - so the reticle would stay faded out for the whole game
   // (on the phone it is the only way to play). PortMouse::Aiming is true on exactly the ticks the
-  // port turned the body to the aim, so a lock-on, the morph ball or a cinematic still hide it.
+  // port turned the body to the aim, so a lock-on, the morph ball or a cinematic still hide it
+  // (except a lock under lock-on free aim, whose pointer it is).
   if (PortAimCrosshairsOpen()) {
     mDrawCrosshairs = true;
   }
@@ -1809,7 +1843,12 @@ void CPlayer::UpdateCinematicState(CStateManager& mgr) {
         break;
       case kMS_Unmorphed:
         SetCameraState(kCS_FirstPerson, mgr);
+#ifdef TARGET_PC
+        if (mPlayerState->GetCurrentVisor() != CPlayerState::kPV_Scan ||
+            PortOverlay::ScanShoot()) {
+#else
         if (mPlayerState->GetCurrentVisor() != CPlayerState::kPV_Scan) {
+#endif
           ForceGunOrientation(GetTransform(), mgr);
           mGun->DrawGun(mgr);
         }
@@ -2685,6 +2724,20 @@ void CPlayer::ProcessInput(const CFinalInput& input, CStateManager& mgr) {
           playerState, GetTranslation(), GetVelocityWR(),
           CVector2f(activeInput.GetAnalogLeftX(), activeInput.GetAnalogLeftY()));
     }
+
+#ifdef TARGET_PC
+    // The moon jump cheat: Jump held in the air rises at a steady speed. In the ball Jump is the
+    // boost, so only on foot.
+    static const float kMoonJumpSpeed = 12.f;
+    if (PortOverlay::MoonJump() && mOrbitState != kOS_Grapple &&
+        mMovementState != NPlayer::kMS_OnGround && JumpHeld(activeInput)) {
+      CVector3f vel = GetVelocityWR();
+      if (vel.GetZ() < kMoonJumpSpeed) {
+        vel.SetZ(kMoonJumpSpeed);
+        SetVelocityWR(vel);
+      }
+    }
+#endif
   }
 
   ComputeFreeLook(activeInput, mgr);
@@ -2982,7 +3035,10 @@ bool CPlayer::PortAimCrosshairsOpen() const {
       PortOverlay::CrosshairStyle() == PortOverlay::kCrosshairStyle_Classic) {
     return false;
   }
-  return PortMouse::Aiming(mPlayerIndex) && PortOverlay::AimCrosshair();
+  // Lock-on free aim: the lock owns the view, so Aiming is false, but the crosshair is what the
+  // pointer moves over it (#66).
+  return (PortMouse::Aiming(mPlayerIndex) || PortMouse::LockFreeAimActive(mPlayerIndex)) &&
+         PortOverlay::AimCrosshair();
 }
 
 bool CPlayer::PortLockFreeAim(const CStateManager& mgr) const {
@@ -3021,15 +3077,31 @@ void CPlayer::UpdateMouseAim(CStateManager& mgr, float dt) {
   if (!direct || PortPhoto::Active()) {
     return;
   }
-  const bool allowed = MouseAimAllowed(mgr);
-  if (PortMouse::StickEnabled(mPlayerIndex) && !PortRadial::Capturing()) {
-    PortMouse::AddStickAim(mPortLookX, mPortLookY, dt, mPlayerIndex);
+  // A cinematic skip holds the aim off until it hands back control, its settle included: the
+  // skip's fast-forward runs at max speed, where the first-person camera does not update
+  // (CFirstPersonCamera::UpdateTransform), and the scene's last placement of Samus lands in a
+  // few rushed ticks. An aim that took the view back the moment the cinematic camera stopped
+  // kept a direction from before that placement and turned the body back to it (an odd heading,
+  // once straight up). Held, it tracks the body below, and in the settle's normal-speed frames
+  // the camera's own direction (CFirstPersonCamera), which is where control picks up from.
+  const bool skipHolds = CMFGame::PortCinematicSkipActive();
+  const bool allowed = MouseAimAllowed(mgr) && !skipHolds;
+  // The radial menu's capture is checked inside, so flick stick sees it end.
+  if (PortMouse::StickEnabled(mPlayerIndex)) {
+    // Twin-stick replaces free look (ComputeFreeLook zeroes it), so it honours the game's
+    // Reverse Y Axis as free look does (issue #72). Flick stick reads the raw stick, so this
+    // only flips the stick's pitch.
+    CGameOptions& options = gpGameState->GameOptions();
+    const bool invertY = mgr.IsMultiplayer() ? options.PlayerOptions(mPlayerIndex).GetInvertYAxis()
+                                             : options.GetInvertYAxis();
+    PortMouse::AddStickAim(mPortLookX, invertY ? -mPortLookY : mPortLookY, dt, mPlayerIndex);
   }
   // While something else owns the view - a lock-on, the morph ball, a cinematic - track the
   // camera direction instead, so engaging the mouse again does not snap the aim.
   const CFirstPersonCamera* fpCamera =
       mCameraManager != nullptr ? mCameraManager->GetFirstPersonCamera() : nullptr;
-  const CVector3f forward = fpCamera != nullptr && mCameraManager->IsInFPCamera()
+  // (During a skip the body, not the camera: the camera may be frozen from before the skip.)
+  const CVector3f forward = fpCamera != nullptr && mCameraManager->IsInFPCamera() && !skipHolds
                                 ? fpCamera->GetTransform().GetForward()
                                 : GetTransform().GetForward();
   // An analog L's travel starts a point orbit a tick or more before its click locks on
@@ -3361,10 +3433,11 @@ void CPlayer::Render(const CStateManager& mgr) const {
       doRender = mMorphBallState == kMS_Morphed && (camera->GetFlags() & 0x40);
     }
   }
-  // Port: the free and photo cameras show the body the first-person view leaves out (MP1 773191a7a).
+  // Port: the free, photo and third-person cameras show the body the first-person view leaves out
+  // (MP1 773191a7a).
   if ((mCameraState == kCS_FirstPerson
 #ifdef TARGET_PC
-           && !PortFreeCam::ShowPlayer()
+           && !PortFreeCam::ShowPlayer() && !PortThirdPerson::ShowBody(mgr)
 #endif
        || !doRender) &&
       !mCameraManager->ShouldBypassInterpolationCamera()) {
@@ -3391,9 +3464,9 @@ void CPlayer::Render(const CStateManager& mgr) const {
         mBallTransitionBeamModel->Touch(mgr, 0);
       }
 #ifdef TARGET_PC
-      // Port: the free and photo cameras' body holds its cannon; single player only places it
-      // during morph transitions, so put it on the gun locator here.
-      if (PortFreeCam::ShowPlayer() && !mgr.IsMultiplayer()) {
+      // Port: the free, photo and third-person cameras' body holds its cannon; single player only
+      // places it during morph transitions, so put it on the gun locator here.
+      if ((PortFreeCam::ShowPlayer() || PortThirdPerson::ShowBody(mgr)) && !mgr.IsMultiplayer()) {
         mBallTransitionBeamModel->Render(
             mgr, GetTransform() * GetModelData()->GetScaledLocatorTransform(rstl::string_l(kGunLocator)),
             GetActorLights(), mPlayerDrawFlags.UseShaderSet(mTransitionBeamShader));
@@ -3559,12 +3632,30 @@ void CPlayer::RenderGun(const CStateManager& mgr, const CVector3f& position) con
   }
 
   CGrappleArm* grappleArm = mGun->GrappleArm();
+#ifdef TARGET_PC
+  // Port: in third person the beam leaves the body's grapple hand, as another player's does.
+  if (PortThirdPerson::Active()) {
+    if (grappleArm && grappleArm->GetActive() &&
+        grappleArm->GetAnimState() != CGrappleArm::kAS_Done) {
+      const CTransform4f grappleXf = GetTransform() * GetScaledLocatorTransform(mGrappleLocator);
+      grappleArm->RenderGrappleBeam(mgr, grappleXf.GetTranslation(), false);
+    }
+    // Charge and muzzle effects at the body's cannon.
+    mGun->PortRenderThirdPersonFx(
+        mgr, GetTransform() * GetModelData()->GetScaledLocatorTransform(rstl::string_l(kGunLocator)));
+  } else
+#endif
   if (grappleArm && grappleArm->GetActive() &&
       grappleArm->GetAnimState() != CGrappleArm::kAS_Done) {
     grappleArm->RenderGrappleBeam(mgr, position, true);
   }
 
+#ifdef TARGET_PC
+  bool isInScanVisor = mPlayerState->GetActiveVisor(mgr) == CPlayerState::kPV_Scan &&
+                       !PortOverlay::ScanShoot();
+#else
   bool isInScanVisor = mPlayerState->GetActiveVisor(mgr) == CPlayerState::kPV_Scan;
+#endif
   float visorTransitionFactor = mPlayerState->GetVisorTransitionFactor();
   bool scanComplete = isInScanVisor && visorTransitionFactor >= 1.f;
   if (scanComplete != true &&
@@ -3575,7 +3666,7 @@ void CPlayer::RenderGun(const CStateManager& mgr, const CVector3f& position) con
                             ? CModelFlags(GetModelFlags(), false, 0)
                             : CModelFlags::AlphaBlended(mGunAlpha);
 #ifdef TARGET_PC
-    if (!PortFreeCam::Active())
+    if (!PortFreeCam::Active() && !PortThirdPerson::Active())
 #endif
     mGun->Render(mgr, position, flags);
   }
@@ -3612,6 +3703,13 @@ void CPlayer::UpdateTransitionAlpha(CStateManager& mgr) {
         mAlpha = gpTweakPlayerRes->GetMorphAlphaSpline().EvaluateAt(
             (1.f - distance) * mMorphDuration * 0.5f + halfDuration);
       }
+#ifdef TARGET_PC
+      // Port: from third person the camera starts behind her, not at her eye, so the body she
+      // morphs from stays drawn as it is with the camera pulled back (no fade-in from nothing).
+      else if (PortThirdPerson::ViewAllowed(mgr)) {
+        mAlpha = gpTweakPlayerRes->GetMorphAlphaSpline().EvaluateAt(halfDuration);
+      }
+#endif
       break;
     }
     case kMS_Unmorphing: {
@@ -3971,7 +4069,12 @@ void CPlayer::TakeDamage(bool significant, const CVector3f& location, float dama
       if (type != kWT_AreaDark || mDamageWeaponType == uint(kWT_None)) {
         mDamageWeaponType = type;
       }
+#ifdef TARGET_PC
+      // Retail 0x8000F85C lfs f0,lbl_8041A50C = 0.333f (0x3EAA7EFA), stored to 0x12e4.
+      mDamageColorTimer = 0.333f;
+#else
       mDamageColorTimer = 0.33333334f;
+#endif
 
       ushort suitDamageSfx = damageInfo.GetDamageSfxId();
       ushort damageLoopSfx = damageInfo.GetDamageLoopSfxId();
@@ -4591,7 +4694,12 @@ void CPlayer::StartTurret(TUniqueId turret, CStateManager& mgr) {
       CPlayer* player = mgr.GetPlayer(i);
       CVector3f displacement = player->GetTranslation() - GetTranslation();
       displacement.SetZ(0.f);
+#ifdef TARGET_PC
+      // Retail 0x8000D838 lfs f0,lbl_8041A4BC = 5.0; fcmpo; bge skips the kill.
+      if (displacement.Magnitude() < 5.f) {
+#else
       if (displacement.Magnitude() < 2.f) {
+#endif
         mgr.KillPlayer(player->mPlayerState->GetHealthInfo().GetHP(), player->GetUniqueId(),
                        GetUniqueId());
       }

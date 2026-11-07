@@ -6,6 +6,8 @@
 #include "port_mouse.h"
 #include "MetroidPrime/PortScanTarget.hpp"
 #include "port_overlay.h"
+#include "port_third_person.h"
+#include "port_touch.h"
 #endif
 
 #include "Collision/CCollidableAABox.hpp"
@@ -378,6 +380,23 @@ void CPlayer::UpdateOrbitSelection(const CFinalInput& input, CStateManager& mgr)
     mOrbitNextTargetId = kInvalidUniqueId;
     return;
   }
+#ifdef TARGET_PC
+  // Next/Previous target (MP1 8c7d45fab) while locked on switches the way a fresh lock does.
+  if (mOrbitState == kOS_OrbitObject) {
+    if (const int dir = PortTouch::TakeTargetCycle(mPlayerIndex)) {
+      const TUniqueId id = PortCycleOrbitTarget(dir, mgr);
+      if (id != kInvalidUniqueId) {
+        SetOrbitTargetId(id, mgr);
+        if (ValidateAimTargetId(GetOrbitTargetId(), mgr)) {
+          SetAimTarget(GetOrbitTargetId());
+        }
+        SetOrbitState(kOS_OrbitObject, mgr);
+        UpdateOrbitPosition(GetTweakPlayer()->GetOrbitNormalDistance(mOrbitType), mgr);
+        return;
+      }
+    }
+  }
+#endif
   if (mControlMapper.GetPressInput(CControlMapper::kC_OrbitObject, input) &&
       mOrbitNextTargetId != kInvalidUniqueId) {
     SetOrbitTargetId(mOrbitNextTargetId, mgr);
@@ -1000,7 +1019,12 @@ void CPlayer::UpdateOrbitableObjects(CStateManager& mgr) {
     mNearbyOrbitObjects.clear();
     mOffScreenOrbitObjects.clear();
     if (!CheckOrbitDisableSourceList(mgr)) {
+#ifdef TARGET_PC
+      // Third person: the search volume is the view the reticle is aimed in.
+      const CTransform4f cameraXf = PortThirdPerson::TickView(GetFirstPersonCameraTransform());
+#else
       const CTransform4f& cameraXf = GetFirstPersonCameraTransform();
+#endif
       float distance = GetOrbitMaxTargetDistance();
       if (mExtendTargetDistance) {
         distance *= 5.f;
@@ -1023,6 +1047,61 @@ void CPlayer::UpdateOrbitableObjects(CStateManager& mgr) {
   }
   mOrbitNextTargetId = FindOrbitTargetId(mgr);
 }
+
+#ifdef TARGET_PC
+// The visible lock-on target next to the current one in screen x, right for dir > 0 and left
+// otherwise, wrapping to the far side. Grapple points stay out (they turn the orbit into a
+// grapple); kInvalidUniqueId when there is no other target.
+TUniqueId CPlayer::PortCycleOrbitTarget(int dir, CStateManager& mgr) const {
+  const CActor* const cur = TCastToConstPtr< CActor >(mgr.GetObjectById(mOrbitTargetId));
+  if (!cur) {
+    return kInvalidUniqueId;
+  }
+  const CFirstPersonCamera* const fpCamera = mCameraManager->GetFirstPersonCamera();
+  const float side = dir > 0 ? 1.f : -1.f;
+  const float curX = fpCamera->ConvertToScreenSpace(cur->GetOrbitPosition(mgr)).GetX() * side;
+  const CVector3f eyePosition = GetEyePosition();
+  TUniqueId nextId = kInvalidUniqueId;
+  TUniqueId wrapId = kInvalidUniqueId;
+  float nextX = 0.f;
+  float wrapX = 0.f;
+  for (int i = 0; i < mNearbyOrbitObjects.size(); ++i) {
+    const TUniqueId candidate = mNearbyOrbitObjects[i];
+    if (candidate == mOrbitTargetId) {
+      continue;
+    }
+    const CActor* const act = TCastToConstPtr< CActor >(mgr.GetObjectById(candidate));
+    if (!act || TCastToConstPtr< CScriptGrapplePoint >(act)) {
+      continue;
+    }
+    const CVector3f orbitPosition = act->GetOrbitPosition(mgr);
+    const CVector3f screen = fpCamera->ConvertToScreenSpace(orbitPosition);
+    if (screen.GetZ() < 0.f || CMath::AbsF(screen.GetX()) > 1.f ||
+        CMath::AbsF(screen.GetY()) > 1.f) {
+      continue;
+    }
+    const float x = screen.GetX() * side;
+    const bool ahead = x > curX;
+    if (ahead ? (nextId != kInvalidUniqueId && x >= nextX)
+              : (wrapId != kInvalidUniqueId && x >= wrapX)) {
+      continue;
+    }
+    const CVector3f eyeToOrbit = orbitPosition - eyePosition;
+    if (!mgr.RayCollideWorld(eyePosition, eyePosition + eyeToOrbit, kPlayerLineOfSightFilter,
+                             act)) {
+      continue;
+    }
+    if (ahead) {
+      nextId = candidate;
+      nextX = x;
+    } else {
+      wrapId = candidate;
+      wrapX = x;
+    }
+  }
+  return nextId != kInvalidUniqueId ? nextId : wrapId;
+}
+#endif
 
 TUniqueId CPlayer::FindOrbitTargetId(CStateManager& mgr) {
   const CActor* act = TCastToConstPtr< CActor >(mgr.GetObjectById(GetOrbitNextTargetId()));
@@ -1229,7 +1308,12 @@ void CPlayer::UpdateAimCandidates(CStateManager& mgr) {
   }
   --mAimCandidateRefreshFrames;
   if (mAimCandidateRefreshFrames == 0) {
+#ifdef TARGET_PC
+    // Third person: the search volume is the view the reticle is aimed in.
+    const CTransform4f cameraXf = PortThirdPerson::TickView(GetFirstPersonCameraTransform());
+#else
     const CTransform4f& cameraXf = GetFirstPersonCameraTransform();
+#endif
     float distance = GetTweakPlayer()->GetAimMaxDistance();
     if (mExtendTargetDistance) {
       distance *= 5.f;

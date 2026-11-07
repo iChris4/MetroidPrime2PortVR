@@ -67,6 +67,7 @@ extern "C" void AIPortSetOutputGain(float gain);
 namespace PortOverlayState {
 
 bool sSkipCinematics = false;
+int sSeamlessPickups = PortOverlay::kSeamlessPickups_Off;
 // `MP2_LOG_FILE`: whether stdout and stderr also go to a file (F1 > Testing, console `logfile`).
 // PortLogFile::Start reads it before Aurora comes up, so the row only reports the state the next
 // launch will take.
@@ -75,12 +76,17 @@ bool sLogFile = true;
 // `MP2_STICKY_CHARGE`), saved in settings.cfg.
 bool sFastMorph = false;
 bool sPointerMenus = true;
+bool sMenuExit = true;
 bool sMapSwapFingers = false;
 // Controls > Options > Map: flip either map rotate axis, as Prime 1's #225.
 bool sMapInvertX = false;
 bool sMapInvertY = false;
+bool sBallCam = false;
+int sBallCamSpeed = PortOverlay::kBallCamSpeedDefault;
+bool sWalkSpeedEnabled = true;
 int sWalkSpeed = PortOverlay::kWalkSpeedDefault;
 int sScanSpeed = PortOverlay::kScanSpeedDefault;
+int sBeamSwitchSpeed = PortOverlay::kBeamSwitchSpeedDefault;
 int sMusicBoost = PortOverlay::kVolumeBoostDefault;
 int sSfxBoost = PortOverlay::kVolumeBoostDefault;
 int sLanguage = 0;
@@ -91,11 +97,16 @@ int sComboBeamCost = PortOverlay::kComboBeamCostMax;
 int sComboMissileCost = PortOverlay::kComboMissileCostMax;
 int sBeamAmmoPerExpansion = PortOverlay::kBeamAmmoPerExpansionDefault;
 bool sMinimapTap = true;
+int sMapPickups = PortOverlay::kMapPickups_Off;
+bool sMapPickupKinds = false;
+bool sRevealMap = false;
 int sPromptGlyphs = 0;
 bool sIgtTimer = false;
 bool sOriginalExperience = false;
 bool sUnlockHardMode = false;
 bool sUnlockGalleries = false;
+float sDamageTakenMult = 1.f;
+float sDamageDealtMult = 1.f;
 bool sUnlockBeamDoors = false;
 bool sStackBeams = false;
 bool sStackBeamsSkipDark = false;
@@ -106,6 +117,7 @@ float sSpringFlickRate = PortOverlay::kSpringFlickRateDefault;
 bool sQuickResume = true;
 bool sLockOnToggle = false;
 bool sAimLockOn = false;
+bool sScanShoot = false;
 bool sSpiderToggle = false;
 bool sStickyCharge = false;
 bool sAutoAim = true;
@@ -136,6 +148,9 @@ bool sRapidCharge = false;
 bool sCardBackup = false;
 // First-person field of view in degrees, or 0 for the game's own 55 (CCameraManager::sFirstPersonFOV).
 float sFirstPersonFov = 0.f;
+// The arm cannon is drawn at the world's FOV (gun_follows_fov), else at its own (gun_fov).
+bool sGunFollowsFov = false;
+float sGunFov = PortOverlay::kGunFovRetail;
 // Draw the world without the HUD's view overlays (`MP2_NO_HELMET`, `MP2_NO_VISOR_FX`): for
 // screenshots of an area, and for looking at what a visor effect covers.
 bool sHideHelmet = false;
@@ -150,6 +165,7 @@ bool sBallBars = false; // `ball_bars`: the morph ball view's narrowed viewport
 bool sDarkVisorFull = false;
 int sDarkVisorStatic = PortOverlay::kDarkVisorStaticMax;
 bool sInfiniteBeamAmmo = false; // Enhancements; saved, unlike the sInfiniteAmmo cheat
+bool sDarkWorldLightMusic = false; // `dark_world_light_music` (#36)
 int sHudOpacityEcho = PortOverlay::kHudOpacityVisor;
 int sHudOpacityDark = PortOverlay::kHudOpacityVisor;
 int sHudOpacityScan = PortOverlay::kHudOpacityVisor;
@@ -162,7 +178,7 @@ bool sAimCrosshair = true;
 // MP2's classic model does not resolve in this port, so `remastered` is the default here.
 int sCrosshairStyle = PortOverlay::kCrosshairStyle_Remastered;
 int sCrosshairSize = PortOverlay::kCrosshairSizeDefault;
-int sCrosshairOpacity = PortOverlay::kCrosshairOpacityMax;
+int sCrosshairOpacity = PortOverlay::kCrosshairOpacityDefault;
 bool sCrosshairCustomColor = false;
 float sCrosshairColor[3] = {1.f, 1.f, 1.f};
 // Arm cannon offset in metres along the camera's right, forward and up axes (`MP2_GUN_OFFSET`).
@@ -248,9 +264,16 @@ bool sVisible = false;
 bool sGodMode = false; // never saved: a cheat must not persist, so it is not a setting
 unsigned sInfiniteAmmo = 0; // InfiniteAmmoKind bits; never saved, as sGodMode
 bool sNoDarkAetherDamage = false; // never saved, as sGodMode
+// The movement cheats (PortOverlay::MoonJump and the Boost Ball ones); never saved, as sGodMode.
+static bool sMoonJump = false;
+static float sBoostSpeedScale = 1.f;
+static float sBoostDurationScale = 1.f;
+static bool sBoostAnywhere = false;
+static bool sBoostSteer = false;
 uint32_t sWorldId = 0;
 int sAreaId = -1;
 std::vector< SRoomEntry > sRooms;
+uint32_t sRoomsWorld = 0; // the asset id the entries were taken from, 0 before any world
 std::vector< SLayerEntry > sLayers;
 int sLayersArea = -1;
 std::atomic< int > sShowPage{-1};
@@ -267,7 +290,6 @@ namespace {
 
 bool sHudScaling = false;
 bool sReadEnv = false;
-uint32_t sRoomsWorld = 0; // the asset id the entries were taken from, 0 before any world
 bool sRoomsSplitLogged = false; // the Light/Dark count is logged once per world
 
 void ClearRooms() {
@@ -737,6 +759,31 @@ void SetSkipCinematics(bool skip) {
   Persist();
 }
 
+int SeamlessPickups() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return kSeamlessPickups_Off;
+  }
+  // `repeats` or 2; anything else reads as a flag (1/on: all), as the setting was a checkbox.
+  const char* env = port::EnvString("MP2_SEAMLESS_PICKUPS");
+  if (env != nullptr && (std::strcmp(env, "repeats") == 0 || std::strcmp(env, "2") == 0)) {
+    return kSeamlessPickups_Repeats;
+  }
+  const int saved = std::clamp(sSeamlessPickups, static_cast< int >(kSeamlessPickups_Off),
+                               static_cast< int >(kSeamlessPickups_Repeats));
+  if (env == nullptr) {
+    return saved;
+  }
+  return EnvBool("MP2_SEAMLESS_PICKUPS", false) ? kSeamlessPickups_All : kSeamlessPickups_Off;
+}
+
+void SetSeamlessPickups(int mode) {
+  ReadEnv();
+  sSeamlessPickups = std::clamp(mode, static_cast< int >(kSeamlessPickups_Off),
+                                static_cast< int >(kSeamlessPickups_Repeats));
+  Persist();
+}
+
 // A kScreen_* setting: `show|skip|off` (or 0..2) in the variable wins over the saved value.
 static int EnvScreenMode(const char* name, int value) {
   const char* env = port::EnvString(name);
@@ -935,6 +982,37 @@ float FirstPersonFov() {
   return env == 0.f || (env >= 30.f && env <= 120.f) ? env : sFirstPersonFov;
 }
 
+void SetFirstPersonFov(float degrees) {
+  ReadEnv();
+  sFirstPersonFov = degrees == 0.f || (degrees >= 30.f && degrees <= 120.f) ? degrees : 0.f;
+  Persist();
+}
+
+bool GunFollowsFov() {
+  ReadEnv();
+  return !OriginalExperience() && EnvBool("MP2_GUN_FOLLOWS_FOV", sGunFollowsFov);
+}
+
+void SetGunFollowsFov(bool enabled) {
+  ReadEnv();
+  sGunFollowsFov = enabled;
+  Persist();
+}
+
+float GunFov() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return kGunFovRetail;
+  }
+  return EnvFloatIn("MP2_GUN_FOV", sGunFov, kGunFovMin, kGunFovMax);
+}
+
+void SetGunFov(float degrees) {
+  ReadEnv();
+  sGunFov = std::isfinite(degrees) ? std::clamp(degrees, kGunFovMin, kGunFovMax) : kGunFovRetail;
+  Persist();
+}
+
 void GunOffset(float out[3]) {
   ReadEnv();
   if (EnvFloat3("MP2_GUN_OFFSET", out, -kGunOffsetMax, kGunOffsetMax)) {
@@ -1011,6 +1089,29 @@ void SetNoDarkAetherDamage(bool enabled) {
   sNoDarkAetherDamage = enabled;
 }
 
+bool MoonJumpSet() { return sMoonJump; }
+bool MoonJump() { return sMoonJump && !OriginalExperience(); }
+void SetMoonJump(bool enabled) { sMoonJump = enabled; }
+
+static float BoostScale(float value) {
+  return std::isfinite(value) ? std::clamp(value, 1.f, kBoostScaleMax) : 1.f;
+}
+float BoostSpeedScaleSet() { return sBoostSpeedScale; }
+float BoostDurationScaleSet() { return sBoostDurationScale; }
+float BoostSpeedScale() { return OriginalExperience() ? 1.f : sBoostSpeedScale; }
+float BoostDurationScale() { return OriginalExperience() ? 1.f : sBoostDurationScale; }
+void SetBoostScales(float speed, float duration) {
+  sBoostSpeedScale = BoostScale(speed);
+  sBoostDurationScale = BoostScale(duration);
+}
+
+bool BoostAnywhereSet() { return sBoostAnywhere; }
+bool BoostAnywhere() { return sBoostAnywhere && !OriginalExperience(); }
+void SetBoostAnywhere(bool enabled) { sBoostAnywhere = enabled; }
+bool BoostSteerSet() { return sBoostSteer; }
+bool BoostSteer() { return sBoostSteer && !OriginalExperience(); }
+void SetBoostSteer(bool enabled) { sBoostSteer = enabled; }
+
 unsigned InfiniteAmmoKind(int itemType) {
   switch (itemType) {
   case CPlayerState::kIT_Missile:
@@ -1032,6 +1133,14 @@ bool InfiniteBeamAmmo() {
     return false;
   }
   return EnvBool("MP2_INFINITE_BEAM_AMMO", sInfiniteBeamAmmo);
+}
+
+bool DarkWorldLightMusic() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return false;
+  }
+  return EnvBool("MP2_DARK_WORLD_LIGHT_MUSIC", sDarkWorldLightMusic);
 }
 
 bool InfiniteAmmo(unsigned kinds) {
@@ -1070,6 +1179,53 @@ void SetMinimapTap(bool enabled) {
   Persist();
 }
 
+int MapPickups() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return kMapPickups_Off;
+  }
+  const char* env = port::EnvString("MP2_MAP_PICKUPS");
+  if (env != nullptr && std::strcmp(env, "off") == 0) {
+    return kMapPickups_Off;
+  }
+  if (env != nullptr && std::strcmp(env, "rooms") == 0) {
+    return kMapPickups_Rooms;
+  }
+  if (env != nullptr && std::strcmp(env, "all") == 0) {
+    return kMapPickups_All;
+  }
+  return EnvIntIn("MP2_MAP_PICKUPS", sMapPickups, kMapPickups_Off, kMapPickups_All);
+}
+
+void SetMapPickups(int mode) {
+  ReadEnv();
+  sMapPickups = std::clamp(mode, static_cast< int >(kMapPickups_Off),
+                           static_cast< int >(kMapPickups_All));
+  Persist();
+}
+
+bool MapPickupKinds() {
+  ReadEnv();
+  return EnvBool("MP2_MAP_PICKUP_KINDS", sMapPickupKinds);
+}
+
+void SetMapPickupKinds(bool enabled) {
+  ReadEnv();
+  sMapPickupKinds = enabled;
+  Persist();
+}
+
+bool RevealMap() {
+  ReadEnv();
+  return !OriginalExperience() && EnvBool("MP2_REVEAL_MAP", sRevealMap);
+}
+
+void SetRevealMap(bool enabled) {
+  ReadEnv();
+  sRevealMap = enabled;
+  Persist();
+}
+
 bool PointerMenus() {
   ReadEnv();
   return EnvBool("MP2_POINTER_MENUS", sPointerMenus);
@@ -1079,6 +1235,24 @@ void SetPointerMenus(bool enabled) {
   ReadEnv();
   sPointerMenus = enabled;
   Persist();
+}
+
+bool MenuExit() {
+  ReadEnv();
+  return EnvBool("MP2_MENU_EXIT", sMenuExit);
+}
+
+void SetMenuExit(bool enabled) {
+  ReadEnv();
+  sMenuExit = enabled;
+  Persist();
+}
+
+void RequestQuit() {
+  PortOverlaySettings::SaveSettings();
+  SDL_Event quit{};
+  quit.type = SDL_EVENT_QUIT;
+  SDL_PushEvent(&quit);
 }
 
 bool MapSwapFingers() {
@@ -1114,9 +1288,22 @@ void SetMapInvertY(bool invert) {
   Persist();
 }
 
-int WalkSpeed() {
+bool BallCamControl() {
   ReadEnv();
   if (OriginalExperience()) {
+    return false;
+  }
+  return EnvBool("MP2_BALL_CAM", sBallCam);
+}
+
+int BallCamSpeed() {
+  ReadEnv();
+  return EnvIntIn("MP2_BALL_CAM_SPEED", sBallCamSpeed, kBallCamSpeedMin, kBallCamSpeedMax);
+}
+
+int WalkSpeed() {
+  ReadEnv();
+  if (OriginalExperience() || !WalkSpeedEnabled()) {
     return kWalkSpeedDefault;
   }
   return EnvIntIn("MP2_WALK_SPEED", sWalkSpeed, kWalkSpeedMin, kWalkSpeedMax);
@@ -1141,6 +1328,17 @@ bool ConsumeShowHintRequest() {
   const bool requested = sShowHintRequested;
   sShowHintRequested = false;
   return requested;
+}
+
+bool WalkSpeedEnabled() {
+  ReadEnv();
+  return EnvBool("MP2_WALK_SPEED_ENABLED", sWalkSpeedEnabled);
+}
+
+void SetWalkSpeedEnabled(bool enabled) {
+  ReadEnv();
+  sWalkSpeedEnabled = enabled;
+  Persist();
 }
 
 void SetWalkSpeed(int percent) {
@@ -1242,6 +1440,20 @@ bool AimLockOn() {
 void SetAimLockOn(bool enabled) {
   ReadEnv();
   sAimLockOn = enabled;
+  Persist();
+}
+
+bool ScanShoot() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return false;
+  }
+  return EnvBool("MP2_SCAN_SHOOT", sScanShoot);
+}
+
+void SetScanShoot(bool enabled) {
+  ReadEnv();
+  sScanShoot = enabled;
   Persist();
 }
 
@@ -2150,6 +2362,21 @@ void SetScanSpeed(int percent) {
   Persist();
 }
 
+int BeamSwitchSpeed() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return kBeamSwitchSpeedDefault;
+  }
+  return EnvIntIn("MP2_BEAM_SWITCH_SPEED", sBeamSwitchSpeed, kBeamSwitchSpeedMin,
+                  kBeamSwitchSpeedMax);
+}
+
+void SetBeamSwitchSpeed(int percent) {
+  ReadEnv();
+  sBeamSwitchSpeed = std::clamp(percent, kBeamSwitchSpeedMin, kBeamSwitchSpeedMax);
+  Persist();
+}
+
 int MusicBoost() {
   ReadEnv();
   return EnvIntIn("MP2_MUSIC_BOOST", sMusicBoost, kVolumeBoostMin, kVolumeBoostMax);
@@ -2378,6 +2605,36 @@ void SetUnlockHardMode(bool enabled) {
   ReadEnv();
   sUnlockHardMode = enabled;
   Persist();
+}
+
+float DamageTakenMultiplier() {
+  ReadEnv();
+  return OriginalExperience() ? 1.f
+                              : EnvFloatIn("MP2_DAMAGE_TAKEN", sDamageTakenMult, kDamageMultMin,
+                                           kDamageMultMax);
+}
+
+void SetDamageTakenMultiplier(float m) {
+  ReadEnv();
+  if (std::isfinite(m)) {
+    sDamageTakenMult = std::clamp(m, kDamageMultMin, kDamageMultMax);
+    Persist();
+  }
+}
+
+float DamageDealtMultiplier() {
+  ReadEnv();
+  return OriginalExperience() ? 1.f
+                              : EnvFloatIn("MP2_DAMAGE_DEALT", sDamageDealtMult, kDamageMultMin,
+                                           kDamageMultMax);
+}
+
+void SetDamageDealtMultiplier(float m) {
+  ReadEnv();
+  if (std::isfinite(m)) {
+    sDamageDealtMult = std::clamp(m, kDamageMultMin, kDamageMultMax);
+    Persist();
+  }
 }
 
 bool UnlockGalleries() {

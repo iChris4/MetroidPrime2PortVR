@@ -69,11 +69,19 @@ Desktop and Android builds embed `assets/initial_pipeline_cache.db`: the pipelin
 the front end, a scripted in-game pass and every campaign area, so a first start compiles the
 game's shaders in the background instead of skipping draws as it meets them (Android, lazy,
 queues each area's rows when the game prefetches the area). Retail rows only (no
-Remastered-style rows). When aurora bumps a pipeline config version (`clear.hpp`,
+Remastered-style rows). A row holds the sample count it was recorded at; aurora also queues each
+non-shadow row at the running MSAA setting (`queue_cached_row`), so a seed recorded at either
+setting covers both. The fog curve, the alpha compare references and the TEV konst selections are
+uniforms, so rows differ only by fog on or off and by whether a reference makes the compare
+constant (aurora folds an older row's fog type, references and konst selections on load). When aurora bumps a pipeline config version (`clear.hpp`,
 `gx/pipeline.hpp`, `rmlui/pipeline.hpp`), aurora ignores the seed and the `port_pipeline_seed`
 test fails. Re-record from empty caches (needs a GPU path, ~41 min on the dev machine; no mods or texture packs):
-`python3 tools/pipeline_seed.py record`, then the `merge` line it prints. `MP2_PIPELINE_SEED=0`
-starts without the seed.
+`python3 tools/pipeline_seed.py record`, then the `merge` line it prints. The area sweep does not
+reach every spot (water, far corners), so `record` also plays `SPOTS` in `tools/pipeline_seed.py`:
+a console script per spot, direct-booted into its area (#44 Torvus underwater, 3 pipelines). When a
+report shows a miss the seed lacks, add its repro there, then `record --only <name> --extra
+assets/initial_pipeline_cache.db` and its merge line add it without a full re-record.
+`MP2_PIPELINE_SEED=0` starts without the seed.
 
 ## Release checklist
 

@@ -56,6 +56,16 @@ void Wheel(float steps);
 // story beats along with the intro.
 bool SkipCinematics();
 void SetSkipCinematics(bool skip);
+// Seamless pickups (`MP2_SEAMLESS_PICKUPS`, F1 > Enhancements > Pace): an item pickup gives its item
+// without the control lock, the pausing message box or the acquisition cinematic, as the Prime 1
+// randomizer does; the text shows as a HUD memo and a cinematic is skipped as its skip button would
+// (port_pickup_presentation.h). All: every pickup, and a map station's message box after its
+// download shows as a memo too. Repeats: only a pickup whose item the player already had (the
+// second and later expansion or tank of a kind), so each kind's first box still explains it. Off
+// under Original experience.
+enum ESeamlessPickups { kSeamlessPickups_Off, kSeamlessPickups_All, kSeamlessPickups_Repeats };
+int SeamlessPickups();
+void SetSeamlessPickups(int mode);
 // Two-press cinematic skip: the first A/Start press only arms a "Skip [A]" prompt for
 // kSkipConfirmSeconds (real time, bottom centre); a second press while armed skips. Armed state
 // lives here so CMFGame, CMFGameLoader and the overlay (and a tap on the prompt) share it.
@@ -91,6 +101,32 @@ void SetGodMode(bool enabled);
 // Light Suit (CPlayer::UpdateDarkAetherDamage); safe zones still heal. Never saved.
 bool NoDarkAetherDamage();
 void SetNoDarkAetherDamage(bool enabled);
+// Cheat (F1 > Cheats, console `moonjump`): holding Jump in the air lifts Samus at a steady speed,
+// on foot (CPlayer::ProcessInput). Never saved; off in the Original experience. The Set getters
+// return the values as set.
+bool MoonJumpSet();
+bool MoonJump();
+void SetMoonJump(bool enabled);
+// Cheat (F1 > Cheats, console `boost`): Boost Ball speed and duration multipliers, 1 = retail.
+// Speed scales the boost's push (CMorphBall::EnterBoosting), duration both the time the ball
+// stays boosted and, over that time, how slowly it loses speed. Never saved; 1 in the Original
+// experience.
+constexpr float kBoostScaleMax = 10.f;
+float BoostSpeedScaleSet();
+float BoostDurationScaleSet();
+float BoostSpeedScale();
+float BoostDurationScale();
+void SetBoostScales(float speed, float duration);
+// Cheats (F1 > Cheats, console `boost air|steer`). BoostAnywhere: the Boost Ball also fires in the
+// air (after a bomb or spring jump) and a boost no longer ends, damped, when the ball leaves the
+// ground. BoostSteer: the stick turns a boosted ball's course, keeping its speed. Never saved; off
+// in the Original experience.
+bool BoostAnywhereSet();
+bool BoostAnywhere();
+void SetBoostAnywhere(bool enabled);
+bool BoostSteerSet();
+bool BoostSteer();
+void SetBoostSteer(bool enabled);
 // Cheat (F1 > Cheats, a checkbox per counter; `MP2_INFINITE_AMMO=1` turns on all four): firing
 // spends none of the chosen ammo (CPlayerState::DecrementAmmoAndDisplayAlertIfOut). Never saved.
 enum : unsigned {
@@ -107,6 +143,10 @@ bool InfiniteAmmo(unsigned kinds);
 // Enhancement (F1 > Enhancements, saved, env `MP2_INFINITE_BEAM_AMMO`): Light and Dark Ammo are
 // infinite, whatever the cheat's bits say. Original experience turns it off.
 bool InfiniteBeamAmmo();
+// Enhancement (F1 > Enhancements > Music, saved, env `MP2_DARK_WORLD_LIGHT_MUSIC`, #36): Dark
+// Aether's area themes play their light world counterparts (CScriptStreamedMusic::Play); takes
+// effect at the next track start. Original experience turns it off.
+bool DarkWorldLightMusic();
 void SetInfiniteAmmo(unsigned kinds, bool enabled);
 // Gameplay tweaks (F1 > Enhancements, the pause menu's Options > Controller, and one console command
 // each), off by default and saved in the settings file.
@@ -123,12 +163,31 @@ bool PointerMenus();
 void SetPointerMenus(bool enabled);
 bool MapSwapFingers();
 void SetMapSwapFingers(bool swap);
+// Exit Game on the main menu (`MP2_MENU_EXIT`, issue #80; default on): the main menu shows an
+// "Exit Game" legend in its bottom-left corner with the Z button's prompt (its binding: RB by
+// default, View on the Remastered preset), and holding Z there, or a finger or mouse button on the
+// legend, for kMenuExitHoldSeconds quits as F1 > Game > Exit game does.
+const float kMenuExitHoldSeconds = 1.5f;
+bool MenuExit();
+void SetMenuExit(bool enabled);
+// Saves the settings and asks the main loop to shut down, as closing the window does.
+void RequestQuit();
 // Map rotate flips (Controls > Options > Map, `MP2_MAP_INVERT_X`/`_Y`): the game turns the map
 // opposite to the stick, so flipping both gives camera-style rotation (CAutoMapper).
 bool MapInvertX();
 void SetMapInvertX(bool invert);
 bool MapInvertY();
 void SetMapInvertY(bool invert);
+// Morph Ball camera control (`ball_cam`, env `MP2_BALL_CAM`, off by default and under Original
+// experience; issue #54): the mouse, the right stick and touch aim swipes orbit the Morph Ball
+// camera around the ball and raise or lower it (the stick only turns it while Spring Ball is on).
+// `ball_cam_speed` (percent) scales the turn.
+// Read by CBallCamera::PortManualOrbit.
+const int kBallCamSpeedMin = 25;
+const int kBallCamSpeedMax = 400;
+const int kBallCamSpeedDefault = 100;
+bool BallCamControl();
+int BallCamSpeed();
 // Walk speed (`MP2_WALK_SPEED`, percent, default 100 = retail): scales Samus's on-foot top speed,
 // acceleration and friction together (and the orbit strafe/approach speeds), so she moves k times
 // as fast and gets there in the same time. Jumps, sideways dashes, turning and the Morph Ball are
@@ -150,8 +209,12 @@ void SetComboMissileCost(int cost);
 // Dark/Light ammo a capacity pickup grants is multiplied by this / 50 (retail: 50).
 int BeamAmmoPerExpansion();
 void SetBeamAmmoPerExpansion(int ammo);
+// The walk speed in use: retail (100) while the Custom walk speed switch (`walk_speed_enabled`) is
+// off, so a custom action can flip between retail and the slider's speed as a sprint.
 int WalkSpeed();
 void SetWalkSpeed(int percent);
+bool WalkSpeedEnabled();
+void SetWalkSpeedEnabled(bool enabled);
 // Scan speed in percent (`MP2_SCAN_SPEED`, 100 = retail): ScanSpeed() scales the time a scan takes
 // (CPlayer::UpdateScanningState).
 const int kScanSpeedMin = 50;
@@ -159,6 +222,13 @@ const int kScanSpeedMax = 400;
 const int kScanSpeedDefault = 100;
 int ScanSpeed();
 void SetScanSpeed(int percent);
+// Beam switch speed in percent (`MP2_BEAM_SWITCH_SPEED`, 100 = retail): scales a beam change's
+// close, wipe and open animations (CPlayerGun::PortBeamSwitchScale); retail under Original experience.
+const int kBeamSwitchSpeedMin = 100;
+const int kBeamSwitchSpeedMax = 400;
+const int kBeamSwitchSpeedDefault = 100;
+int BeamSwitchSpeed();
+void SetBeamSwitchSpeed(int percent);
 // Music and sound-effects boost in percent (`MP2_MUSIC_BOOST`, `MP2_SFX_BOOST`, 100 = no boost):
 // the port's mixer scales the music path (the streamed voices) or every other voice, so 150 plays
 // that path louder than the game's own volume maximum alone. The F1 Game > Audio sliders use it
@@ -185,6 +255,20 @@ const char* PromptGlyphs();
 // Tap or click on the HUD minimap opens the map screen (default on; MP2_MINIMAP_TAP).
 bool MinimapTap();
 void SetMinimapTap(bool enabled);
+// Pickups on the map (`MP2_MAP_PICKUPS`: off|rooms|all; PortMapPickups): All draws a dot where each
+// item pickup sits until it is collected, Rooms tints the rooms that still hold one.
+enum EMapPickups { kMapPickups_Off, kMapPickups_Rooms, kMapPickups_All };
+int MapPickups();
+void SetMapPickups(int mode);
+// The dots tell a major item (filled) from a minor one (ring), and a collected pickup stays as a
+// cross (`MP2_MAP_PICKUP_KINDS`).
+bool MapPickupKinds();
+void SetMapPickupKinds(bool enabled);
+// Every room of every world shows on the map as a map station shows it, in Light and Dark Aether
+// alike, and the universe map lists every world (`MP2_REVEAL_MAP`; CMapWorldInfo). Nothing is
+// saved: turning it off brings back the map the save has.
+bool RevealMap();
+void SetRevealMap(bool enabled);
 // Elevator ride (`MP2_ELEVATOR_RIDE`: original|fast|skip): Fast doubles the ride's clock, Skip ends
 // it as soon as the next world has loaded (CWorldTransManager).
 enum EElevatorRide { kElevatorRide_Original, kElevatorRide_Fast, kElevatorRide_Skip };
@@ -239,6 +323,16 @@ bool UnlockHardMode();
 void SetUnlockHardMode(bool enabled);
 bool UnlockGalleries();
 void SetUnlockGalleries(bool enabled);
+// Custom difficulty (F1 > Game > Difficulty, `damage_taken` / `damage_dealt`, env
+// `MP2_DAMAGE_TAKEN` / `MP2_DAMAGE_DEALT`): multipliers on the damage the player takes in single
+// player and the damage the player deals to enemies, on top of a Hard file's own (Hard's x2 skips
+// atmosphere and hazard types; these don't). 1 is retail; Original experience reads 1.
+constexpr float kDamageMultMin = 0.1f;
+constexpr float kDamageMultMax = 10.f;
+float DamageTakenMultiplier();
+void SetDamageTakenMultiplier(float m);
+float DamageDealtMultiplier();
+void SetDamageDealtMultiplier(float m);
 // Beam doors (`MP2_UNLOCK_BEAM_DOORS`): a colour-locked door (a door or damageable trigger that some
 // of the Power, Dark, Light and Annihilator beams hit and others do not) takes any of the four beams.
 // Stack beams (`MP2_STACK_BEAMS`): a beam fired while another is selected also fires the other
@@ -300,6 +394,9 @@ bool SpiderToggle();
 void SetSpiderToggle(bool enabled);
 bool AimLockOn();
 void SetAimLockOn(bool enabled);
+// The arm cannon stays out and fires in the Scan Visor (MP1 #243).
+bool ScanShoot();
+void SetScanShoot(bool enabled);
 bool StickyCharge();
 void SetStickyCharge(bool enabled);
 // Auto-aim (`MP2_AUTO_AIM=0` turns it off, default on): off, the arm cannon aims only at a
@@ -430,6 +527,22 @@ void SetLogFile(bool enabled);
 // Applied by CCameraManager::UpdateCameras, because the first-person camera takes its FOV when it is
 // built; CCameraManager::mFirstPersonFov is what a rebuilt one reads.
 float FirstPersonFov();
+// 30..120, or 0 for the game's own.
+void SetFirstPersonFov(float degrees);
+// The arm cannon is drawn at its own FOV (GunFov, `gun_fov`, `MP2_GUN_FOV`, retail 55) whatever the
+// view's, like a view-model FOV, unless GunFollowsFov (`gun_follows_fov`, `MP2_GUN_FOLLOWS_FOV`):
+// then it shares the world's projection. Both are retail's under Original experience.
+const float kGunFovRetail = 55.f;
+const float kGunFovMin = 45.f;
+const float kGunFovMax = 120.f;
+bool GunFollowsFov();
+void SetGunFollowsFov(bool enabled);
+float GunFov();
+void SetGunFov(float degrees);
+// The FOV the arm cannon is drawn at, for a first-person camera whose FOV is cameraFov.
+inline float GunDrawFov(float cameraFov) { return GunFollowsFov() ? cameraFov : GunFov(); }
+// Whether the arm cannon gets its own projection (at GunDrawFov) this frame.
+inline bool GunOwnFov(float cameraFov) { return GunDrawFov(cameraFov) != cameraFov; }
 // Arm cannon offset from its retail place, in metres along the camera's right, forward and up axes
 // (`MP2_GUN_OFFSET="<right>,<forward>,<up>"`, F1 > Render), each clamped to +-kGunOffsetMax. It moves
 // the real gun, so shots leave from the moved muzzle (CPlayer::UpdateArmAndGunTransforms).
@@ -510,12 +623,16 @@ void SetAimCrosshair(bool enabled);
 // reticle model with the port's size, opacity and colour applied, and `remastered` replaces it
 // with the cursor drawn procedurally in CTargetReticles.cpp (that is the one this port can show:
 // the classic model's token does not resolve here). Size is a percent of the model's own scale
-// (25..100) and applies only while the port's aim owns the view; opacity is 0..100.
+// (25..100) and applies only while the port's aim owns the view. Opacity is 0..500 percent of the
+// style's own alpha, 100 by default: retail's GameCube crosshair alpha is a dim ~0.2 tweak value,
+// so values above 100 brighten it (500 is about what 0.6.x drew at 100, #56); the drawn alpha
+// stops at 1.
 const int kCrosshairSizeMin = 25;
 const int kCrosshairSizeMax = 100;
 const int kCrosshairSizeDefault = 50;
 const int kCrosshairOpacityMin = 0;
-const int kCrosshairOpacityMax = 100;
+const int kCrosshairOpacityMax = 500;
+const int kCrosshairOpacityDefault = 100;
 const int kCrosshairStyle_Classic = 0;
 const int kCrosshairStyle_Remastered = 1;
 // On a Trilogy disc: the GameCube crosshair model in place of Trilogy's aiming cursor; Classic on

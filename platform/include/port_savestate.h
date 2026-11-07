@@ -77,6 +77,10 @@ bool ModReloadActive();
 // state saved after skipping it in a fresh game) is skipped like START does, as the state was
 // captured with it over. Without it the placement waits on the cinematic until its timeout.
 bool LoadAwaitsCinematic();
+// The game's draw shows black instead of the room: a state load is putting Samus back, so the
+// rebuilt room's frames before then show it from the area's spawn, not the saved spot (and a quick
+// resume first boots the card's save there). A cinematic the load lands on is skipped unseen.
+bool HidesPicture(CStateManager& mgr);
 bool ReloadModsNow();
 // The pause menu's share: the pause screen holds the suit model, no room is running and Tick does not
 // run, so the request cannot take the world-restart route. Returns true once, on the frame it reopened
@@ -211,7 +215,8 @@ bool IsScriptGeneratedCopy(const CStateManager& mgr, CEntity& ent);
 bool EntityFieldsSaved(const CStateManager& mgr, CEntity& ent);
 bool SchemaFieldSaved(const PortSchemaClass& cls, const PortSchemaField& f);
 // Captures `ent`'s schema fields into a kTagFields block (false: not an entity that gets one);
-// applies one, returning the fields set; whether it covers every class of `ent` (the script
+// applies one, returning the writes that changed a value (0: the entity already held them all,
+// or the block did not fit it); whether it covers every class of `ent` (the script
 // messages that woke the enemy need no replay then).
 // `any` skips the which-entities gate (a debris' dropped pickup).
 bool CaptureEntityFields(const CStateManager& mgr, CEntity& ent, std::string& out, bool any = false);

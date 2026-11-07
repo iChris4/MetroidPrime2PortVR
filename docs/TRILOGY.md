@@ -57,6 +57,28 @@ byte-identical (strip-diff clean). Result: health warning -> main menu (Single P
 file select -> new game -> opening cinematic -> first room, no `MP2_SKIP_FRONTEND`
 (`MP2_INPUT=A@1300+3,A@2900+3,A@3400+3,A@3900+3,START@4300+3,...`, ~30 updates/s). Multiplayer and used slots: see "Multiplayer and used save slot" below.
 Screenshots from the run: `/tmp/opencode/trilogy/shots/`. GC USA still reaches title and gameplay.
+Since 2026-11-05 the title screen below comes first, so that input timeline needs a START once the logo loops.
+
+## GameCube title screen on Trilogy (2026-11-05)
+
+Trilogy's FrontEnd script (MREA 7d89f98e) opens straight on MOVI 0x1d2 `Video/Outro_to_Background.thp` and
+the menu music (STAU 0x456); GC's (cee3af0d) first plays `Intro_to_Logo.thp` (MOVI 0x11c, A/Start skips via
+GWIG 0x123), loops `Logo_Loop.thp` (0x11e) until A/Start (GWIG 0x42), then the outro, with the title music
+SOND 0xf6/0xf7 (sfx 0x2687 pan 126 / 0x2787 pan 0, volume 105, looped) stopped by SQTR 0x23e ~2.75 s
+after the press, when the STAU starts. Both THPs are on the Trilogy disc under `MP2/Video`, and the front end's
+audio group (`audio_groups_front_end_DGRP`) is identical on both discs, so the title sfx exist too.
+TARGET_PC in `CScriptStreamedMovie.cpp`: on a Trilogy disc the movie whose file is the outro turns its
+first Play into intro -> logo loop (A/Start on any pad) with the title music, then plays itself as the
+script asked; `CScriptStreamedMusic` holds a Play while `PortTitleHoldsMusic` says so and gets it 2.75 s
+into the outro (the countdown runs while the movie is inactive too). The movie's Arrived goes to SWTC 0x6
+(both discs): closed, SRLY 0x137 plays it within the same message dispatch; open (back from the
+multiplayer game-type screen) it is never played, so a movie still waiting a Think after its Arrived
+drops the title and releases the held STAU. Like GC, every front-end entry through the closed switch
+shows the title. Not ported: GC's attract movies (not on the Trilogy disc) and its menu-idle return to
+the title (TIMR 0x40 absent). Verified on Xvfb (USA Trilogy): intro, logo, START at update 2400 -> main
+menu, gdb dprintfs show the two sfx at the intro, the STAU held, then played after the outro; with
+`PortTitleStart` skipped in gdb (the open path) the STAU plays at once and no title sfx start. Same
+on the PAL Trilogy rvz (R3MP01, both paths; its movies show the PAL "Dark Echoes" logo).
 
 ## Disc picker (Android)
 
@@ -82,6 +104,11 @@ Real crash found by the trace: Trilogy FRME v5 text panes carry 9 more bytes (2 
 after `scaleToViewport`; `CGuiTextPane::Create` skips them for `version >= 5` (TARGET_PC).
 TARGET_PC guards: `CScriptGuiScreen.cpp` `StartMultiplayerGame`/`UpdateUnlocks` (null switches/menus/teleporters;
 the `[mp] start:` stderr line was dropped in `d90bd61c3`), `CWorldLayerState::GetLayerCount` (arena worlds have no SAVW layer table).
+Match end (2026-11-06, #76 comment): continuing from the results screen crashed in `CScriptGuiMenu::SetSelection`
+(USA and PAL Trilogy, not a font issue: every results-screen FONT/model exists on both). The front end's return path
+(`CScriptGuiScreen`, previous game was Coin/DeathMatch) sets each player's invert/rumble menu before that menu's own
+AreaLoaded built `mItems`, so retail indexes an empty list. TARGET_PC: `SetSelection` builds the list first and skips
+out-of-range indices. Verified on Xvfb, both rvz: Deathmatch, console `mpend`, A on results -> Game Mode, menus work.
 GC USA 2-player start was not reproduced through the GC front-end wheel (stick-direction selection, would not
 reach Multiplayer in 5 attempts); GC FRME is v4 so the text-pane change does not touch it.
 

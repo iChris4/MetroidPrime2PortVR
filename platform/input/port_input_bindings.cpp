@@ -57,7 +57,7 @@ constexpr std::string_view kTouchNames[] = {
 constexpr int kMouseAim = 0, kMouseState = 8, kMouseMenu = 16, kMouseHeld = 24;
 
 constexpr std::string_view kContextNames[16] = {
-    "gameplay", "morphball", "map", "menu", "scan", "", "", "",
+    "gameplay", "morphball", "map", "menu", "scan", "", "lockon", "",
     "layer1",   "layer2",    "layer3", "layer4", "", "", "", "",
 };
 
@@ -1056,6 +1056,40 @@ const BallRow* FindBallRow(Action a) {
     if (r.row == a)
       return &r;
   return nullptr;
+}
+
+const MapRow* FindMapRow(Action a) {
+  for (const MapRow& r : kMapRows)
+    if (r.row == a)
+      return &r;
+  return nullptr;
+}
+
+void ApplyMapRows(Profile& profile) {
+  for (Binding& b : profile.bindings) {
+    if (FindMapRow(b.action) == nullptr)
+      continue;
+    b.contexts = kCtxMap;
+    b.blocked = 0;
+  }
+  // Every binding, scoped or not: a key bound to a map row does only that on the map.
+  BlockRowInputs(
+      profile, [](const Binding& b) { return FindMapRow(b.action) != nullptr && BindingFamily(b) != Family::Touch; },
+      kCtxMap, false);
+}
+
+bool IsTargetRow(Action a) { return a == Action::TargetNext || a == Action::TargetPrev; }
+
+void ApplyTargetRows(Profile& profile) {
+  for (Binding& b : profile.bindings) {
+    if (!IsTargetRow(b.action))
+      continue;
+    b.contexts = kCtxLockOn;
+    b.blocked = 0;
+  }
+  BlockRowInputs(
+      profile, [](const Binding& b) { return IsTargetRow(b.action) && BindingFamily(b) != Family::Touch; },
+      kCtxLockOn, false);
 }
 
 const BallRow* BallRowForGame(Action game) {

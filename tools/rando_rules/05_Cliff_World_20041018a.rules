@@ -66,7 +66,7 @@ area 02_cliff_reactorcore
     # balcony 30 units up reached by the spider track.
     dock3 - dock0: any
     dock3 - dock4: MorphBall    # cannon + ball trigger by the pickup room door
-    dock3 > dock1: MorphBall & SpiderBall    # unsure: 30-unit climb
+    dock3 > dock1: MorphBall & SpiderBall    # the track foot hangs 11 above the floor: the ball cannon (Grab Ball) lifts onto it
     dock1 > dock3: any
     dock1 - dock2: any
     dock1 > loc0x00050063: MorphBall & SpiderBall    # unsure: spider track ends near the tank
@@ -218,7 +218,7 @@ area 07cliff_gyro
     dock0 - dock3: any
     dock0 - dock4: any
     dock3 - dock4: any
-    dock0 > dock2: MorphBall & BoostBall    # unsure: spinner by dock0 stops the gyro
+    dock0 > dock2: MorphBall & BoostBall & MorphBallBombs    # unsure: spinner by dock0 stops the gyro; terrain: the ball route drops into a 5-unit-high pit and leaves by a tunnel mouth 3 units up (z -11.2 to -8.2 at (90.5, 250.5)); standing Samus hits the ceiling before she can morph into it, so only a bomb jump climbs out
     dock2 > dock0: MorphBall & BoostBall    # unsure
     dock2 - dock1: MorphBall & BoostBall & MorphBallBombs    # glass ring + bomb slots
     dock2 > loc0x08240088: MorphBall & BoostBall & MorphBallBombs & SpiderBall & EchoVisor    # unsure: layer-2 item
@@ -383,9 +383,14 @@ area 05_cliff_engineroom_dark
     covers 0x003400B7 0x00340122 0x00340108 0x00340110 0x00340112 0x0034011B
 
 area 07cliff_gyro_dark
-    dock0 - dock3: any
-    dock0 - dock1: any    # unsure: gyro static in the dark room
-    dock1 - dock2: any
+    # The gyro is static here: lower floor (z -11.2) to the Ring Platforms
+    # (top -5.7) is a 4.8 to 5.0 step, rings to the two Platform 001 by the
+    # upper doors (top -0.2) 5.5; dock0 and dock1 are reached only by Space Jumps.
+    dock0 > dock3: any
+    dock3 > dock0: SpaceJumpBoots
+    dock0 - dock1: SpaceJumpBoots
+    dock1 > dock2: any
+    dock2 > dock1: SpaceJumpBoots
     dock0 > loc0x0032010B: MorphBall & SpiderBall
     covers 0x00320026 0x00000000
 

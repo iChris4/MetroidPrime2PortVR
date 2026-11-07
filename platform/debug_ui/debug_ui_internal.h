@@ -56,6 +56,7 @@ struct SRoomEntry {
   TToken< CMapArea >* mapArea; // pending map-area load, freed once read
 };
 extern std::vector< SRoomEntry > sRooms;
+extern uint32_t sRoomsWorld; // the world sRooms was taken from, 0 before any
 // The current area's layers, copied by SetAreaLayers on the game thread like the room list.
 struct SLayerEntry {
   std::string name;
@@ -223,6 +224,7 @@ void DrawControlsTab();
 void DrawMultiplayerTab();
 void DrawVideoTab();
 void DrawEnhancementsTab();
+void DrawTrackerTab();
 void DrawSystemTab();
 
 } // namespace PortDebug

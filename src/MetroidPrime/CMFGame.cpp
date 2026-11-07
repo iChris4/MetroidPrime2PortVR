@@ -9,6 +9,7 @@
 #include "port_radial.h"
 #include "port_overlay.h"
 #include "port_photo.h"
+#include "port_pickup_presentation.h"
 #include "port_savestate.h"
 #include "port_touch.h"
 #include "port_pipeline_context.h"
@@ -46,6 +47,7 @@
 #include "MetroidPrime/Player/CPlayerState.hpp"
 #include "MetroidPrime/Player/CWorldTransManager.hpp"
 #ifdef TARGET_PC
+#include "MetroidPrime/ScriptObjects/CScriptControllerAction.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptStreamedMovie.hpp"
 #endif
 #include "MetroidPrime/TCastTo.hpp"
@@ -66,6 +68,10 @@ bool sHarnessCinematicSkip = false;
 bool sPortUserCinematicSkip = false;
 // A skip waits out a stopped movie scene's gap at normal speed behind black (kFS_CinematicSkip).
 bool sPortSkipGapHold = false;
+// The current skip was started by a state load that landed on a cinematic (the state was captured
+// with it over, PortSaveState::LoadAwaitsCinematic): its fade is drawn black instead of fading the
+// cinematic out, which showed its first shot (Samus at a save station, 007b) for a quarter second.
+bool sPortLoadCinematicSkip = false;
 // The credits (or the end-game results) have started: no port skip runs or starts after this, or
 // the max-speed loop (one draw a second, CMain) makes them scroll in jerks. Reset with the game flow.
 bool sPortGameEnded = false;
@@ -74,6 +80,19 @@ float sPortCinematicTime = 0.f;
 const float kPortSkipAGuard = 0.5f;
 // When the current skip started (PortHarness::Seconds), for the "[skip] done" line.
 double sPortSkipStart = 0.0;
+// How long the current port skip has gone without a cinematic camera, in game time. A sequence can
+// pass a frame or two between two of its shots with none current (007b, quick resume's arrival in
+// the Great Temple): ending the skip there handed back control and the next shot then played over
+// the first-person view and HUD for a couple of frames. The skip ends once none has been current for
+// kPortSkipSettle; at max speed that is a few milliseconds of wall time, with nothing drawn.
+float sPortSkipNoCameraTime = 0.f;
+// The current skip is in that wait (kPortSkipSettle): it runs at normal speed behind black, not at
+// max speed, because a sequence's cosmetic connections do not fire at max speed
+// (CScriptSequenceTimer::ApplyTime) and retail, which ends the skip there, plays them normally.
+bool sPortSkipSettling = false;
+// A kFS_CinematicSkip is in progress, settle included (CMFGame::PortCinematicSkipActive).
+bool sPortSkipFlow = false;
+const float kPortSkipSettle = 0.5f;
 } // namespace
 #endif
 
@@ -107,6 +126,9 @@ CMFGame::~CMFGame() {
   gpMain->SetMaxSpeed(false);
 #ifdef TARGET_PC
   sPortGameEnded = false;
+  sPortSkipFlow = false;
+  sPortSkipSettling = false;
+  sPortLoadCinematicSkip = false;
 #endif
   CSfxManager::SetMuted(false);
   CDecalManager::Reinitialize();
@@ -114,7 +136,10 @@ CMFGame::~CMFGame() {
   // Port: back in the front end there is no game flow and no player, so the touch controls
   // (and anything else reading these) stop seeing the last in-game state: the Ball page on the title.
   PortHarness::GameFlowState(-1, false);
-  for (int player = 0; player < 4; ++player) PortTouch::SetMorphed(false, player);
+  for (int player = 0; player < 4; ++player) {
+    PortTouch::SetMorphed(false, player);
+    PortTouch::SetOrbitLocked(false, false, player);
+  }
   PortTouch::SetScanTextUp(false);
   // Port: the render mode is widened by the aspect setting.
   CGraphics::SetViewport(0, 0, CGraphics::GetRenderMode().fbWidth,
@@ -128,11 +153,14 @@ CMFGame::~CMFGame() {
 }
 
 #ifdef TARGET_PC
+bool CMFGame::PortCinematicSkipActive() { return sPortSkipFlow; }
+
 void CMFGame::PortMarkGameEnded() {
   // The credits' window takes the updates, so kFS_CinematicSkip's update case may never run again
   // to end the skip: drop max speed here, and the draw case below keeps it off.
   sPortGameEnded = true;
   sPortSkipGapHold = false;
+  sPortSkipSettling = false;
   gpMain->SetMaxSpeed(false);
 }
 #endif
@@ -149,7 +177,10 @@ void CMFGame::SetFlowState(EFlowState state) {
                  PortHarness::Seconds() - sPortSkipStart);
     sPortUserCinematicSkip = false;
     sPortSkipGapHold = false;
+    sPortSkipSettling = false;
+    sPortLoadCinematicSkip = false;
     sPortCinematicTime = 0.f;
+    sPortSkipFlow = false;
     PortOverlay::SkipConfirmDisarm();
 #endif
     break;
@@ -168,6 +199,9 @@ void CMFGame::SetFlowState(EFlowState state) {
     CSfxManager::SetMuted(true);
 #ifdef TARGET_PC
     sPortSkipStart = PortHarness::Seconds();
+    sPortSkipNoCameraTime = 0.f;
+    sPortSkipSettling = false;
+    sPortSkipFlow = true;
 #endif
     break;
   case kFS_PortalTransition:
@@ -285,6 +319,17 @@ CIOWin::EMessageReturn CMFGame::OnMessage(const CArchitectureMessage& message,
         CMidiManager::StopAll();
         mSkippedCineCam = introCam->GetScriptCameraId();
         sHarnessCinematicSkip = true;
+        sPortLoadCinematicSkip = PortSaveState::LoadAwaitsCinematic();
+        SetFlowState(kFS_CinematicSkip);
+        mFlowTime = 0.f;
+      } else if (introCam && PortPickupPresentation::Take(PortPickupPresentation::kCamera,
+                                                          introCam->GetScriptCameraId().Value())) {
+        // Seamless pickups: a cinematic the item's pickup chain started is skipped the way the
+        // skip button skips it, so everything the scene changes still changes.
+        PortOverlay::SkipConfirmDisarm();
+        CMidiManager::StopAll();
+        mSkippedCineCam = introCam->GetScriptCameraId();
+        sPortUserCinematicSkip = true;
         SetFlowState(kFS_CinematicSkip);
         mFlowTime = 0.f;
       }
@@ -401,19 +446,27 @@ CIOWin::EMessageReturn CMFGame::OnMessage(const CArchitectureMessage& message,
           }
           const int portResult = mStateManager->SpecialSkipCinematic();
           ++sSkipAttempts;
-          if (portResult == 1 || portResult == 2) {
-            // The scene skipped itself. Result 1 stopped the camera too; result 2 is a skip function
-            // of another type (kSF_CinematicSkipSignal), which only sends the scene's skip messages,
-            // and retail's canSkip branch only counts result 1 as done, so the port stops the camera.
-            if (portResult != 1) {
-              mStateManager->CameraManager(0)->StopCinematics(*mStateManager);
+          if (portResult == 2) {
+            // A skip function of another type (kSF_CinematicSkipSignal): it only sends the scene's
+            // skip messages, and retail's canSkip branch does not count it as done either. The
+            // camera keeps running here, fast-forwarded like a scene with no skip function (the
+            // signal cleared the skip function, so the asks from now on take that branch below),
+            // because its time is the scene's timeline: CCinematicCamera::Think drives the scene's
+            // CScriptTimeKeyframe, and through it the sequence timers that fire the scene's events.
+            // Stopping the camera here froze that timeline before its end, so the end's events
+            // never fired: the spawn point that moves Samus to the scene's stand-in did not, and
+            // she was left where the scene began, the posed stand-in still in the Dark World
+            // bubble (Temple Grounds' 01_temple_hive03_dark, cinematic 016f).
+            if (!sSkipReported) {
+              std::fprintf(stderr,
+                           "[skip] cinematic %04x: the scene's skip signal; fast-forwarding the rest\n",
+                           portCamId & 0xffffu);
+              sSkipReported = true;
             }
+          } else if (portResult == 1) {
+            // The scene skipped itself, and SpecialSkipCinematic stopped the camera.
             if (!sSkipAnswered) {
-              if (portResult == 2) {
-                std::fprintf(stderr,
-                             "[skip] cinematic %04x: the scene's skip signal, camera stopped\n",
-                             portCamId & 0xffffu);
-              } else if (sSkipAttempts > 1) {
+              if (sSkipAttempts > 1) {
                 std::fprintf(stderr, "[skip] cinematic %04x: the scene's own skip (attempt %u)\n",
                              portCamId & 0xffffu, sSkipAttempts);
               } else {
@@ -469,6 +522,17 @@ CIOWin::EMessageReturn CMFGame::OnMessage(const CArchitectureMessage& message,
         }
       }
 #ifdef TARGET_PC
+      if (PortOverlay::SkipCinematics() || sHarnessCinematicSkip || sPortUserCinematicSkip) {
+        // Port: see kPortSkipSettle. A camera that comes back (the next shot, or the one a skip left
+        // current) restarts the wait, and is skipped the same way.
+        sPortSkipNoCameraTime = cineCam ? 0.f : sPortSkipNoCameraTime + dt;
+        sPortSkipSettling = false;
+        if (finished && sPortSkipNoCameraTime < kPortSkipSettle && mFlowTime < 600.f) {
+          finished = false;
+          sPortSkipSettling = true;
+          gpMain->SetMaxSpeed(false); // see sPortSkipSettling; the draw case keeps it off
+        }
+      }
       sPortSkipGapHold =
           !cineCam &&
           (PortOverlay::SkipCinematics() || sHarnessCinematicSkip || sPortUserCinematicSkip) &&
@@ -680,10 +744,15 @@ CIOWin::EMessageReturn CMFGame::OnMessage(const CArchitectureMessage& message,
       // skip takes the robust path in kFS_CinematicSkip (sPortUserCinematicSkip).
       // The first press only arms the "Skip [A]" prompt; a second one while it shows skips
       // (PortOverlay::SkipConfirm*). The retail START path below follows the same rule.
+      // An A press the scene itself is waiting on (a dialog turning its page) is the scene's, so
+      // it does not arm the prompt; once START has armed it, A still confirms the skip.
       bool portSkipArmedNow = false;
+      const bool sceneTakesA = input.PA() && cineCam && !PortOverlay::SkipConfirmArmed() &&
+                               CScriptControllerAction::PortSceneWaitsOn(input, *mStateManager);
       if (PortOverlay::SkipCinematics() && !sPortGameEnded &&
           static_cast< int >(input.ControllerNumber()) == 0 && cineCam &&
-          (input.PStart() || (input.PA() && sPortCinematicTime >= kPortSkipAGuard)) &&
+          (input.PStart() ||
+           (input.PA() && sPortCinematicTime >= kPortSkipAGuard && !sceneTakesA)) &&
           !mStateManager->IsMultiplayer() &&
           gpGameState->GetGameMode().GetGameModeType() != 'FRND' &&
           !(portSkipArmedNow = !PortOverlay::SkipConfirmArmed())) {
@@ -731,6 +800,7 @@ CIOWin::EMessageReturn CMFGame::OnMessage(const CArchitectureMessage& message,
       mStateManager->SetRandomAvailable(true);
 #ifdef TARGET_PC
       // Port: the free camera takes controller 0's input while it is on.
+      PortFreeCam::TakeRequests(*mStateManager);
       if (!(static_cast< int >(input.ControllerNumber()) == 0 && PortPhoto::Input(input)))
 #endif
       mStateManager->ProcessInput(input);
@@ -940,6 +1010,16 @@ void CMFGame::Draw() const {
   case kFS_InGame:
   case kFS_Paused:
   case kFS_PlayerDied:
+#ifdef TARGET_PC
+    if (mFlowState == kFS_InGame && PortSaveState::HidesPicture(*mStateManager)) {
+      // Port: a state load (or quick resume) is still putting Samus back; the room until then is
+      // seen from its spawn, which flashed between the area's title and the saved view.
+      CCameraFilterPass::DrawFilter(CCameraFilterPass::kFT_Multiply,
+                                    CCameraFilterPass::kFS_Fullscreen,
+                                    CColor(0.f, 0.f, 0.f, 1.f), nullptr, 1.f);
+      return;
+    }
+#endif
     CGraphics::SetUseStreamVertexDelay(mFlowState == kFS_Paused);
     if (mStateManager->mPendingDockArea == kInvalidAreaId || mTransitionPhase != kTP_Load) {
       DrawWorld(singleViewport);
@@ -958,7 +1038,16 @@ void CMFGame::Draw() const {
     const float fadeTime =
         PortOverlay::SkipCinematics() || sHarnessCinematicSkip || sPortUserCinematicSkip ? 0.25f
                                                                                          : 1.f;
-    if (sPortSkipGapHold) {
+    if (sPortLoadCinematicSkip && !sPortSkipGapHold && !sPortGameEnded && mFlowTime < fadeTime) {
+      // The fade's time still runs at normal speed, as for any skip: a sequence's cosmetic
+      // connections do not fire at max speed (CScriptSequenceTimer::ApplyTime), and the early ones
+      // set up the room (a save station's light column, 007b). Only the cinematic is not drawn.
+      CCameraFilterPass::DrawFilter(CCameraFilterPass::kFT_Multiply,
+                                    CCameraFilterPass::kFS_Fullscreen,
+                                    CColor(0.f, 0.f, 0.f, 1.f), nullptr, 1.f);
+      return;
+    }
+    if (sPortSkipGapHold || sPortSkipSettling) {
       // The sequence plays on at normal speed behind a black screen (see the update case).
       gpMain->SetMaxSpeed(false);
       DrawWorld(singleViewport);
@@ -1041,6 +1130,10 @@ void CMFGame::EnterMapScreen() {
   gui.GetAutoMapper().SetMapMode(CAutoMapper::kMM_Normal);
   gui.PauseGame(*mStateManager, kIGGS_MapScreen);
   mStateManager->SetInMapScreen(true);
+#ifdef TARGET_PC
+  // Port: the input's Map context (issue #31).
+  PortHarness::GameMapScreen();
+#endif
 }
 
 void CMFGame::PauseGame() {
@@ -1049,6 +1142,9 @@ void CMFGame::PauseGame() {
   gui.GetAutoMapper().SetMapMode(CAutoMapper::kMM_Teleport);
   gui.PauseGame(*mStateManager, kIGGS_MapScreen);
   mStateManager->SetInMapScreen(true);
+#ifdef TARGET_PC
+  PortHarness::GameMapScreen();
+#endif
 }
 
 void CMFGame::EnterLogBook() {

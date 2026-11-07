@@ -65,6 +65,7 @@ constexpr SContextInfo kContexts[] = {
     {PortInput::kCtxScan, "Scan Visor"},   {PortInput::kCtxLayer1, "Layer 1"},
     {PortInput::kCtxLayer2, "Layer 2"},    {PortInput::kCtxLayer3, "Layer 3"},
     {PortInput::kCtxLayer4, "Layer 4"},
+    {PortInput::kCtxLockOn, "Locked on"},
 };
 
 constexpr const char* kFamilies[] = {"Keyboard & mouse", "Controller", "Touch"};
@@ -723,6 +724,14 @@ void DrawAdvancedEditor(const Binding& parsed, bool inputsOk) {
     ImGui::TextDisabled("Works only in Morph Ball, where its inputs do nothing else.");
     return;
   }
+  if (PortInput::FindMapRow(sDraft.action) != nullptr) {
+    ImGui::TextDisabled("Works only on the map screen, where its inputs do nothing else.");
+    return;
+  }
+  if (PortInput::IsTargetRow(sDraft.action)) {
+    ImGui::TextDisabled("Works only while locked on, where its inputs do nothing else.");
+    return;
+  }
   bool everywhere = sDraft.contexts == PortInput::kCtxAll;
   if (ImGui::Checkbox("Works everywhere", &everywhere)) {
     sDraft.contexts = everywhere ? PortInput::kCtxAll : PortInput::kCtxGameplay;
@@ -1066,7 +1075,7 @@ void DrawPresetOptions(const PortCustomActions::Preset& preset) {
   }
 
   if (preset.hasMode) {
-    int mode = sCustom.mode == "on" ? 1 : sCustom.mode == "off" ? 2 : 0;
+    int mode = sCustom.mode == "on" ? 1 : sCustom.mode == "off" ? 2 : sCustom.mode == "hold" ? 3 : 0;
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("When pressed:");
     ImGui::SameLine();
@@ -1075,7 +1084,10 @@ void DrawPresetOptions(const PortCustomActions::Preset& preset) {
     ImGui::RadioButton("Turn on", &mode, 1);
     ImGui::SameLine();
     ImGui::RadioButton("Turn off", &mode, 2);
-    sCustom.mode = mode == 1 ? "on" : mode == 2 ? "off" : "toggle";
+    ImGui::SameLine();
+    ImGui::RadioButton("While held", &mode, 3);
+    ImGui::SetItemTooltip("Switch it the other way while the binding is held, and back on release.");
+    sCustom.mode = mode == 1 ? "on" : mode == 2 ? "off" : mode == 3 ? "hold" : "toggle";
   }
 
   // The name follows the options until the player types one; clearing it goes
@@ -1239,7 +1251,7 @@ const std::vector<SGroup>& Groups() {
         // The C-stick is the right stick: twin-stick aim, classic beam picks, map panning.
         {"Move and aim",
          {Action::MainUp, Action::MainDown, Action::MainLeft, Action::MainRight, Action::CUp, Action::CDown,
-          Action::CLeft, Action::CRight, Action::Dodge},
+          Action::CLeft, Action::CRight, Action::Dodge, Action::TargetNext, Action::TargetPrev},
          true},
         // Direct picks work in every scheme; the GameCube inputs behind them are listed above.
         {"Beams",
@@ -1261,6 +1273,11 @@ const std::vector<SGroup>& Groups() {
          {Action::MenuA, Action::MenuB, Action::MenuX, Action::MenuY, Action::MenuL, Action::MenuR,
           Action::MenuLAnalog, Action::MenuRAnalog, Action::MenuUp, Action::MenuDown, Action::MenuLeft,
           Action::MenuRight},
+         true},
+        // Issue #31: the map's own stick directions; an input on one does only that on the map.
+        {"Map",
+         {Action::MapRotateUp, Action::MapRotateDown, Action::MapRotateLeft, Action::MapRotateRight,
+          Action::MapPanUp, Action::MapPanDown, Action::MapPanLeft, Action::MapPanRight},
          true},
         {"Port", {Action::PortMenu, Action::SaveState, Action::LoadState, Action::Screenshot, Action::ToggleOriginal,
           Action::ToggleTexturePack, Action::PhotoMode, Action::PrevStateSlot, Action::NextStateSlot}, true},
@@ -1323,6 +1340,14 @@ const char* GameHint(Action a) {
   case Action::MenuDown:
   case Action::MenuLeft:
   case Action::MenuRight: return "Navigate";
+  case Action::MapRotateUp:
+  case Action::MapRotateDown:
+  case Action::MapRotateLeft:
+  case Action::MapRotateRight: return "Control stick when unset";
+  case Action::MapPanUp:
+  case Action::MapPanDown:
+  case Action::MapPanLeft:
+  case Action::MapPanRight: return "C-stick when unset";
   default: break;
   }
   const PortInput::BallRow* ball = PortInput::FindBallRow(a);

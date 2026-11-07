@@ -1,5 +1,5 @@
 // The stream converter behind the Trilogy save.bin (port_save_trilogy.h): a file's CGameState stream
-// in the GameCube framing (a G2ME or R3ME .gci slot) <-> the Wii's two halves of a save.bin slot.
+// in the GameCube framing (a G2ME, R3ME or R3MP .gci slot) <-> the Wii's two halves of a save.bin slot.
 //
 // Layouts measured on the real save.bins (docs/TRILOGY.md, docs/SAVE_RELEASES.md):
 //  * part B is the slot stream behind 20 zero bytes: GMST, the time, 2 flag bits (hard mode and the
@@ -505,6 +505,8 @@ void BuildSysBlock(const Model& m, uint8_t* sys) {
   WriteBits(w, m.sysBits);
   w.Put(Fourcc('S', 'Y', 'N', 'D'), 32);
   w.Align();
+  // The other release's block may run longer: nothing of it stays past this one's SYND.
+  std::memset(sys, 0, kSysBytes);
   std::memcpy(sys, w.bytes.data(), std::min(w.bytes.size(), kSysBytes));
 }
 
@@ -851,6 +853,110 @@ bool GciFromPayload(const Payload& payload, std::vector<uint8_t>& gci, std::stri
   std::memcpy(gci.data() + CopyOffset(g, 1 - g.chosen), base, g.copyBytes);
   for (int c = 0; c < 2; ++c) {
     uint8_t* block = gci.data() + CopyOffset(g, c);
+    const uint32_t crc = CardCrc(block + 4, g.copyBytes - 4);
+    if (g.little) {
+      PutLe32(block, crc);
+    } else {
+      PutBe32(block, crc);
+    }
+  }
+  return true;
+}
+
+// The save header's signature the port checks on each disc (docs/SAVE_RELEASES.md §3, console
+// order, the value the port writes, as port_save_convert.cpp does). The PAL Trilogy's (R3MP) SAVW,
+// MLVL and HINT data is the USA disc's (tools/trilogy_tables.py writes the same tables from either),
+// so both use one signature and one layout.
+static bool IsTrilogy(const std::string& code) { return code == "R3ME" || code == "R3MP"; }
+
+static uint32_t CardSignature(const std::string& code) {
+  if (code == "G2ME") {
+    return 0x44bfc715u;
+  }
+  if (IsTrilogy(code)) {
+    return 0xfe44ecfeu;
+  }
+  return 0;
+}
+
+bool CanConvertGci(const std::string& from, const std::string& to) {
+  return (from == "G2ME" && IsTrilogy(to)) || (IsTrilogy(from) && to == "G2ME") ||
+         (IsTrilogy(from) && IsTrilogy(to) && from != to);
+}
+
+bool ConvertGci(const std::vector<uint8_t>& in, const std::string& to, std::vector<uint8_t>& out,
+                std::string& error, ConvertReport* report) {
+  const std::string from = in.size() >= 4 ? std::string(reinterpret_cast< const char* >(in.data()), 4) : "";
+  if (!CanConvertGci(from, to)) {
+    error = "no conversion from " + from + " to " + to;
+    return false;
+  }
+  Gci g;
+  if (!Locate(in, g, error)) {
+    return false;
+  }
+  ConvertReport local;
+  ConvertReport& rep = report != nullptr ? *report : local;
+  rep = ConvertReport();
+
+  out = in;
+  std::memcpy(out.data(), to.data(), 4);
+  if (IsTrilogy(from) && IsTrilogy(to)) {
+    return true; // same layout and signature: only the game code changes
+  }
+  const STriDirection& d = from == "G2ME" ? kMEtoR3 : kR3toME;
+  const uint8_t* src = in.data() + CopyOffset(g, g.chosen);
+  uint8_t* base = out.data() + CopyOffset(g, g.chosen);
+  uint8_t* user = base + kUserHeader;
+  // Every present slot is remapped; the system block (cinematics seen, system variables) is the
+  // card's, shared by its slots, and goes over with the first.
+  bool converted = false;
+  for (int s = 0; s < 3; ++s) {
+    uint8_t* slot = user + kSlotsStart + size_t(s) * kSlotStride;
+    if (user[8 + s] == 0 || std::memcmp(slot, "GMST", 4) != 0) {
+      continue;
+    }
+    Model m;
+    if (!ParseSysBlock(src + kUserHeader + kSysOffset, *g.rel, m, error) ||
+        !ParseGcSlot(src + kUserHeader + kSlotsStart + size_t(s) * kSlotStride, *g.rel, m, error)) {
+      error = "slot " + N(size_t(s) + 1) + ": " + error;
+      return false;
+    }
+    Model target;
+    ConvertReport slotReport;
+    if (!Convert(m, d, target, slotReport, error)) {
+      return false;
+    }
+    std::vector<uint8_t> built;
+    if (!BuildGcSlot(target, built, error)) {
+      return false;
+    }
+    std::memcpy(slot, built.data(), built.size());
+    if (!converted) {
+      BuildSysBlock(target, user + kSysOffset);
+      rep = slotReport;
+      converted = true;
+    } else {
+      // The system block's cinematics are counted once; the rest per slot.
+      rep.droppedScans += slotReport.droppedScans;
+      rep.droppedHints += slotReport.droppedHints;
+      rep.droppedRelays += slotReport.droppedRelays;
+      rep.droppedDoors += slotReport.droppedDoors;
+      rep.droppedUnmappable += slotReport.droppedUnmappable;
+      rep.droppedLayers += slotReport.droppedLayers;
+    }
+  }
+  if (!converted) {
+    error = "the card file has no saved game";
+    return false;
+  }
+  PutBe32(user, CardSignature(to));
+
+  // Both copies carry the converted data with the chosen copy's generation, each with its CRC in
+  // the byte order the file used.
+  std::memcpy(out.data() + CopyOffset(g, 1 - g.chosen), base, g.copyBytes);
+  for (int c = 0; c < 2; ++c) {
+    uint8_t* block = out.data() + CopyOffset(g, c);
     const uint32_t crc = CardCrc(block + 4, g.copyBytes - 4);
     if (g.little) {
       PutLe32(block, crc);

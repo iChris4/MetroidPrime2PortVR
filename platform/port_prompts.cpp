@@ -5,6 +5,7 @@
 #include "port_entry.h"
 #include "port_embedded.h"
 #include "port_env.h"
+#include "port_harness.h"
 #include "port_overlay.h"
 
 #include "input/port_input_devices.h"
@@ -128,7 +129,9 @@ constexpr PromptAsset kAssets[] = {
     {0xD89B9F7C, PAD_TRIGGER_R}, {0xDE5170B7, PAD_BUTTON_A}, {0xDEA628DC, PAD_BUTTON_B},
     {0xDFC47FA2, PAD_BUTTON_A},
     {0xE2F4B915, PROMPT_DPAD}, // Trilogy only: "hold and point" to pick a Visor (GameCube: D-pad)
-    {0xE43966EC, PROMPT_CSTICK}, {0xE72B1419, PAD_BUTTON_A},
+    {0xE43966EC, PROMPT_CSTICK},
+    {0xE6835669, PAD_BUTTON_START}, // the scan box's grey Start disc (a lore scan's "Press START for Logbook" page)
+    {0xE72B1419, PAD_BUTTON_A},
     {0xF1328253, PAD_BUTTON_A}, // multiplayer front end
     {0xF1FA8D68, PAD_BUTTON_X}, {0xF237E982, PAD_TRIGGER_R}, {0xF43C48EF, PROMPT_STICK_LEFT},
     {0xF6E8276F, PAD_TRIGGER_R}, {0xF7D62F50, PAD_BUTTON_UP}, {0xFF73F326, PROMPT_STICK},
@@ -909,6 +912,48 @@ const std::string& ActionStem(uint32_t prompt) {
   return kNone;
 }
 
+// A bound icon's texels, decoded once and kept for the session (there are only as many as distinct
+// icon files): Aurora borrows a raw replacement's bytes rather than copying them.
+struct IconPixels {
+  std::vector<uint8_t> rgba;
+  uint32_t width = 0;
+  uint32_t height = 0;
+};
+const IconPixels* StablePixels(const IconSource* source) {
+  static std::unordered_map<const IconSource*, IconPixels> sPixels;
+  if (const auto it = sPixels.find(source); it != sPixels.end()) {
+    return it->second.rgba.empty() ? nullptr : &it->second;
+  }
+  IconPixels& pixels = sPixels[source];
+  std::vector<uint8_t> bytes;
+  constexpr size_t kHeader = 128; // tools/make_prompt_glyphs.py's DDS: header, then 8-bit RGBA
+  if (!ReadIconFile(source->first, bytes) || bytes.size() <= kHeader ||
+      std::memcmp(bytes.data(), "DDS ", 4) != 0) {
+    return nullptr;
+  }
+  if (source->second) {
+    GlowVariant(bytes);
+  }
+  uint32_t both[2] = {};
+  std::memcpy(both, bytes.data() + 12, sizeof(both));
+  if (both[0] == 0 || both[1] == 0 || bytes.size() - kHeader != size_t(both[0]) * both[1] * 4) {
+    return nullptr;
+  }
+  // The pixel format's bit count and R/G/B/A masks: only RGBA in byte order is uploaded raw. A
+  // user's BGRA or other DDS goes through the virtual path, whose DDS reader honours the masks.
+  uint32_t format[5] = {};
+  std::memcpy(format, bytes.data() + 88, sizeof(format));
+  if (format[0] != 32 || format[1] != 0x000000FF || format[2] != 0x0000FF00 || format[3] != 0x00FF0000 ||
+      format[4] != 0xFF000000) {
+    return nullptr;
+  }
+  pixels.height = both[0];
+  pixels.width = both[1];
+  // The rows as the file stores them: Aurora's DDS reader uploads them unflipped too.
+  pixels.rgba.assign(bytes.begin() + kHeader, bytes.end());
+  return &pixels;
+}
+
 void ApplyBound(const void* owner, BoundPrompt& bound, const std::string& stem) {
   if (bound.registered) {
     aurora::texture::unregister_replacement(bound.handle);
@@ -926,6 +971,26 @@ void ApplyBound(const void* owner, BoundPrompt& bound, const std::string& stem) 
     return;
   }
   const IconSource* source = StablePath(iconPath, bound.glow);
+  // Port: registered decoded, so the icon shows on the texture's first draw. A file or virtual
+  // replacement streams in on Aurora's workers after that first lookup, and the game's own
+  // (GameCube) art shows until it lands: the pause screen's stick frames, each a texture of its
+  // own drawn only while the stick is pushed that way, flashed GameCube art for each direction
+  // the first time. The icons are a few KiB each, so decoding them here costs nothing.
+  if (const IconPixels* pixels = StablePixels(source)) {
+    bound.handle = aurora::texture::register_replacement(
+        aurora::texture::TexturePointerKey{owner},
+        aurora::texture::RawTextureReplacement{.bytes = pixels->rgba,
+                                               .width = pixels->width,
+                                               .height = pixels->height,
+                                               .mipCount = 1,
+                                               .gxFormat = GX_TF_RGBA8_PC,
+                                               .label = source->first},
+        aurora::texture::ReplacementOptions{.priority = 2});
+    bound.registered = bound.handle.id != 0;
+    if (bound.registered) {
+      return;
+    }
+  }
   // Above the user's texture pack (priority 1) and the static device set (0): a remapped
   // action still shows the key or button it is bound to.
   bound.handle = aurora::texture::register_virtual_replacement(
@@ -1071,15 +1136,19 @@ void Poll() {
   }
   const char* device = ActiveDevice();
   // Resolving every action's binding builds strings and rescans the bindings, so it runs when
-  // the device changes and otherwise a few times a second, which still follows a rebind.
+  // the device changes or the map opens or closes (the map rows name the sticks there), and
+  // otherwise a few times a second, which still follows a rebind.
   static std::string sLastDevice;
+  static bool sLastMap = false;
   static uint64_t sLastResolveNs = 0;
   const uint64_t nowNs = SDL_GetTicksNS();
-  const bool deviceChanged = sLastDevice != device;
-  if (!deviceChanged && sLastResolveNs != 0 && nowNs - sLastResolveNs < 250000000ull) {
+  const bool map = PortHarness::MapScreenOpen();
+  const bool changed = sLastDevice != device || sLastMap != map;
+  if (!changed && sLastResolveNs != 0 && nowNs - sLastResolveNs < 250000000ull) {
     return;
   }
   sLastDevice = device;
+  sLastMap = map;
   sLastResolveNs = nowNs != 0 ? nowNs : 1;
   for (size_t a = 0; a < std::size(kActions); ++a) {
     const PromptAction& action = kActions[a];
@@ -1154,6 +1223,10 @@ void UnbindTexture(const void* owner) {
   sBound.erase(it);
 }
 bool KeyboardActive() { return sActiveInput.load(std::memory_order_relaxed) == ActiveInput::Keyboard; }
+
+bool PadActive() {
+  return sActiveInput.load(std::memory_order_relaxed) == ActiveInput::Pad && PADGetIndexForPort(PAD_CHAN0) >= 0;
+}
 
 void NoteTouchInput(bool xboxLayout) {
   sActiveInput.store(xboxLayout ? ActiveInput::TouchXbox : ActiveInput::TouchGameCube,

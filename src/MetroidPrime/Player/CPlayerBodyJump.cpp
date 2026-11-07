@@ -25,7 +25,11 @@ void CPlayerBodyController::SJumpState::Start(CStateManager& mgr,
                                  CPASAnimParm::FromEnum(mAnimationVariant),
                                  CPASAnimParm::FromEnum(kAP_IntoJump));
     const CPASDatabase& database = controller.GetPASDatabase();
+#ifdef TARGET_PC
+    const rstl::pair< float, int > best = controller.PortFindBestAnimation(parms, *mgr.Random());
+#else
     const rstl::pair< float, int > best = database.FindBestAnimation(parms, *mgr.Random(), -1);
+#endif
     if (CMath::IsEpsilon(best.first, 100.f, 0.00001f)) {
       controller.RequestAnimation(CAnimPlaybackParms(best.second, -1, 1.f, true), false, false);
       mState = kS_IntoJump;
@@ -95,7 +99,11 @@ bool CPlayerBodyController::SJumpState::PlayDoubleJump(CStateManager& mgr,
   const CPASAnimParmData parms(static_cast< pas::EAnimationState >(kPAS_Jump),
                                CPASAnimParm::FromEnum(variant), CPASAnimParm::FromEnum(kAP_Jump));
   const CPASDatabase& database = controller.GetPASDatabase();
+#ifdef TARGET_PC
+  const rstl::pair< float, int > best = controller.PortFindBestAnimation(parms, *mgr.Random());
+#else
   const rstl::pair< float, int > best = database.FindBestAnimation(parms, *mgr.Random(), -1);
+#endif
   if (best.first > FLT_EPSILON) {
     controller.RequestAnimation(CAnimPlaybackParms(best.second, -1, 1.f, true), false, false);
     mState = kS_Jump;
@@ -110,7 +118,11 @@ bool CPlayerBodyController::SJumpState::PlayJump(CStateManager& mgr,
                                CPASAnimParm::FromEnum(mAnimationVariant),
                                CPASAnimParm::FromEnum(kAP_Jump));
   const CPASDatabase& database = controller.GetPASDatabase();
+#ifdef TARGET_PC
+  const rstl::pair< float, int > best = controller.PortFindBestAnimation(parms, *mgr.Random());
+#else
   const rstl::pair< float, int > best = database.FindBestAnimation(parms, *mgr.Random(), -1);
+#endif
   if (best.first > FLT_EPSILON) {
     controller.RequestAnimation(CAnimPlaybackParms(best.second, -1, 1.f, true), false, false);
     mState = kS_Jump;
@@ -125,7 +137,11 @@ void CPlayerBodyController::SJumpState::PlayJumpLoop(CStateManager& mgr,
                                CPASAnimParm::FromEnum(mAnimationVariant),
                                CPASAnimParm::FromEnum(kAP_Loop));
   const CPASDatabase& database = controller.GetPASDatabase();
+#ifdef TARGET_PC
+  const rstl::pair< float, int > best = controller.PortFindBestAnimation(parms, *mgr.Random());
+#else
   const rstl::pair< float, int > best = database.FindBestAnimation(parms, *mgr.Random(), -1);
+#endif
   if (best.first > FLT_EPSILON) {
     controller.RequestAnimation(CAnimPlaybackParms(best.second, -1, 1.f, true), true, false);
     mState = kS_Loop;
@@ -146,7 +162,11 @@ void CPlayerBodyController::SJumpState::PlayLanding(CStateManager& mgr,
                                  CPASAnimParm::FromEnum(mAnimationVariant),
                                  CPASAnimParm::FromEnum(kAP_Landing));
     const CPASDatabase& database = controller.GetPASDatabase();
+#ifdef TARGET_PC
+    const rstl::pair< float, int > best = controller.PortFindBestAnimation(parms, *mgr.Random());
+#else
     const rstl::pair< float, int > best = database.FindBestAnimation(parms, *mgr.Random(), -1);
+#endif
     if (best.first > FLT_EPSILON) {
       controller.RequestAnimation(CAnimPlaybackParms(best.second, -1, 1.f, true), false, false);
       mState = kS_Landing;
@@ -162,7 +182,11 @@ bool CPlayerBodyController::SJumpState::PlayHardLanding(CStateManager& mgr,
   const CPASAnimParmData parms(static_cast< pas::EAnimationState >(kPAS_Jump),
                                CPASAnimParm::FromEnum(mAnimationVariant),
                                CPASAnimParm::FromEnum(kAP_HardLanding));
+#ifdef TARGET_PC
+  const rstl::pair< float, int > best = controller.PortFindBestAnimation(parms, *mgr.Random());
+#else
   const rstl::pair< float, int > best = database.FindBestAnimation(parms, *mgr.Random(), -1);
+#endif
   if (best.first > FLT_EPSILON) {
     controller.RequestAnimation(CAnimPlaybackParms(best.second, -1, 1.f, true), false, false);
     mState = kS_Landing;

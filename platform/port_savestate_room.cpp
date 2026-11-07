@@ -38,6 +38,8 @@
 #include "MetroidPrime/ScriptObjects/CScriptPickup.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptActor.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptPlatform.hpp"
+#include "MetroidPrime/ScriptObjects/CScriptSequenceTimer.hpp"
+#include "MetroidPrime/ScriptObjects/CScriptSpecialFunction.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptStreamedMusic.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptSwitch.hpp"
 #include "MetroidPrime/ScriptObjects/CScriptTimer.hpp"
@@ -49,8 +51,8 @@
 #include <map>
 #include <set>
 
-// Friend of CScriptTimer, CScriptCounter and CScriptDoor (their TARGET_PC blocks): their state is
-// private.
+// Friend of CScriptTimer, CScriptCounter, CScriptDoor, CScriptSequenceTimer and others (their
+// TARGET_PC blocks): their state is private.
 struct PortRoomState {
   // A flotsam Dark Trooper is a corpse by design (AreaLoaded clears mAlive, HP -1): the reload
   // rebuilds it, so it is not a kill the state should remember.
@@ -116,6 +118,19 @@ struct PortRoomState {
       r.mActors.push_back(rstl::pair< TUniqueId, CTransform4f >(a.first, a.second));
     }
   }
+
+  // Sequence timer: its clock, the run flag and who started it (the originator its activations
+  // send with). Set without firing: what fired before the save already ran.
+  static float SeqTime(const CScriptSequenceTimer& t) { return t.mCurrentTime; }
+  static bool SeqRunning(const CScriptSequenceTimer& t) { return t.mRunning; }
+  static TUniqueId SeqOriginator(const CScriptSequenceTimer& t) {
+    return t.mStartMessage.GetOriginator();
+  }
+  static void SetSequence(CScriptSequenceTimer& t, float time, bool running, TUniqueId originator) {
+    t.mCurrentTime = time;
+    t.mRunning = running;
+    t.mStartMessage.m_originator = originator;
+  }
 };
 
 namespace PortSaveState {
@@ -135,11 +150,14 @@ enum : uint32_t {
   kTagDock = 12,     // u8 reference count, u8 refs, refs x u8 load-other: a CScriptDock's Dock
   kTagGenerated = 13, // empty: a script generator's copy of a template, made again on load
   kTagMessages = 14,  // u8 n, n x (u32 message, u32 sender editor id): what woke a scripted enemy
-  kTagFields = 15,    // the schema fields of an enemy, pickup or debris (port_savestate_fields.cpp)
+  kTagFields = 15,    // the schema fields of a script object or generated pickup/debris (port_savestate_fields.cpp)
   kTagRng = 16,       // u32 seed of the state manager's CRandom16: room-wide, on the first object
   kTagPlayer = 17,    // 4 x f32 dark-air clocks of the player (CPlayer::PortGetDarkAir): room-wide, first object
   kTagDrop = 18,      // u8 live, then the drop's kTagFields bytes: the pickup a debris' Activate dropped
   kTagSwitch = 19,    // u32 opened: a CScriptSwitch
+  kTagMaterial = 20,  // u32 lo, u32 hi of an enemy's CMaterialList (solid, shootable, targetable)
+  kTagInArea = 21,    // u32 player in area: a PlayerInAreaRelay CScriptSpecialFunction
+  kTagSequence = 22,  // f32 time, u32 running, u32 originator editor id: a CScriptSequenceTimer
 };
 
 // Per-object lines a restore logs, at most; the summary line always follows.
@@ -323,6 +341,16 @@ void CaptureObject(CStateManager& mgr, CEntity& ent, RoomObject& obj) {
       w.F32(health->GetKnockBackResistance());
       obj.blocks.push_back({kTagHealth, w.bytes});
     }
+    // The machine restore jumps straight to the saved state, so the states before it never
+    // set up their materials: a sleeper Dark Trooper kept the passthrough of its sleep, which
+    // Rise lifts, and beams and Samus went through it (issue #74).
+    if (TCastToPtr< CPatterned >(&ent) != nullptr) {
+      const uint64_t m = actor->GetMaterialList().GetValue();
+      BlockWriter w;
+      w.U32(static_cast< uint32_t >(m));
+      w.U32(static_cast< uint32_t >(m >> 32));
+      obj.blocks.push_back({kTagMaterial, w.bytes});
+    }
   }
   CPhysicsActor* physics = TCastToPtr< CPhysicsActor >(&ent);
   if (physics != nullptr && TCastToPtr< CScriptDoor >(&ent) == nullptr) {
@@ -386,6 +414,15 @@ void CaptureObject(CStateManager& mgr, CEntity& ent, RoomObject& obj) {
     w.U32(timer->IsTiming() ? 1 : 0);
     obj.blocks.push_back({kTagTimer, w.bytes});
   }
+  if (CScriptSequenceTimer* seq = TCastToPtr< CScriptSequenceTimer >(&ent)) {
+    BlockWriter w;
+    w.F32(PortRoomState::SeqTime(*seq));
+    w.U32(PortRoomState::SeqRunning(*seq) ? 1 : 0);
+    const TUniqueId origin = PortRoomState::SeqOriginator(*seq);
+    const CEntity* o = origin != kInvalidUniqueId ? mgr.GetObjectById(origin) : nullptr;
+    w.U32(o != nullptr ? o->GetEditorId().value : 0xffffffffu);
+    obj.blocks.push_back({kTagSequence, w.bytes});
+  }
   if (CScriptCounter* counter = TCastToPtr< CScriptCounter >(&ent)) {
     BlockWriter w;
     w.U32(static_cast< uint32_t >(counter->GetCurrent()));
@@ -395,6 +432,13 @@ void CaptureObject(CStateManager& mgr, CEntity& ent, RoomObject& obj) {
     BlockWriter w;
     w.U32(sw->IsOpened() ? 1 : 0);
     obj.blocks.push_back({kTagSwitch, w.bytes});
+  }
+  if (const CScriptSpecialFunction* sf = TCastToConstPtr< CScriptSpecialFunction >(&ent)) {
+    if (sf->GetFunction() == CScriptSpecialFunction::kSF_PlayerInAreaRelay) {
+      BlockWriter w;
+      w.U32(sf->PortPlayerInArea() ? 1 : 0);
+      obj.blocks.push_back({kTagInArea, w.bytes});
+    }
   }
   if (CScriptDoor* door = TCastToPtr< CScriptDoor >(&ent)) {
     // Open, then the lock (MP1's door block carries open plus close flags; Echoes' doors have a
@@ -529,7 +573,17 @@ struct DeferredFields {
 bool ApplyObject(CStateManager& mgr, CEntity& ent, const RoomObject& obj, ChangeLog& log,
                  bool holdTimers, std::vector< uint32_t >& held, std::vector< DeferredFields >& later) {
   bool changed = false;
-  if (ent.GetActive() != obj.active) {
+  CScriptCamera* camera = TCastToPtr< CScriptCamera >(&ent);
+  if (ent.GetActive() != obj.active && obj.active && camera != nullptr &&
+      FindBlock(obj, kTagCinematic) == nullptr) {
+    // A script camera's kSM_Activate starts its cinematic, and the camera stays active after the
+    // shot ends: only the one driving the cinematic at save time plays again (issue #67: Sanctuary
+    // Entrance's door cinematic replayed after every load).
+    camera->SetActive(true);
+    mgr.UpdateActorInSortedLists(camera);
+    log.Note(obj.editorId, "activated (no cinematic)");
+    changed = true;
+  } else if (ent.GetActive() != obj.active) {
     // Through the message, as a relay does: an object's own kSM_Activate sets up what its Think
     // relies on (a patterned enemy's body controller, helper actors); flipping the flag alone
     // left it thinking without that.
@@ -668,6 +722,18 @@ bool ApplyObject(CStateManager& mgr, CEntity& ent, const RoomObject& obj, Change
       }
     }
   }
+  if (CScriptSpecialFunction* sf = TCastToPtr< CScriptSpecialFunction >(&ent)) {
+    // A relay that saw the player arrive must not send Entered again: Command Chamber's plays the
+    // area's ambient music, which replaced the restarted Dark Trooper battle music (issue #74).
+    if (const RoomBlock* b = FindBlock(obj, kTagInArea)) {
+      BlockReader r(b->data);
+      const bool in = r.U32() != 0;
+      if (r.ok && in != sf->PortPlayerInArea()) {
+        sf->PortSetPlayerInArea(in);
+        log.Note(obj.editorId, "player-in-area restored");
+      }
+    }
+  }
   if (CScriptDoor* door = TCastToPtr< CScriptDoor >(&ent)) {
     if (const RoomBlock* b = FindBlock(obj, kTagDoor)) {
       BlockReader r(b->data);
@@ -766,7 +832,10 @@ bool ApplyObject(CStateManager& mgr, CEntity& ent, const RoomObject& obj, Change
       }
     }
   }
-  if (fieldsBlock != nullptr || FindBlock(obj, kTagDrop) != nullptr) {
+  // A sequence timer goes in with the deferred blocks too: a camera's Activate above can Start it
+  // (back to 0), and that message runs only at the dispatch before them.
+  if (fieldsBlock != nullptr || FindBlock(obj, kTagDrop) != nullptr ||
+      FindBlock(obj, kTagSequence) != nullptr) {
     later.push_back({ent.GetUniqueId(), &obj});
   }
   // Velocity and momentum go in last, after every block above: a class's own block can stop the
@@ -1136,6 +1205,40 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
         stats.fields += set;
         log.Note(d.obj->editorId, "fields restored");
         ++stats.changed;
+        // The fields may have moved, shown or hidden the actor: the collision lists take its bounds
+        // again on the next sort (states written before mNotInSortedLists was left out saved it).
+        if (CActor* actor = TCastToPtr< CActor >(ent)) {
+          actor->SetTransformDirty();
+        }
+      }
+    }
+    // After the fields: entering the saved states changed the materials too.
+    if (const RoomBlock* b = FindBlock(*d.obj, kTagMaterial)) {
+      CActor* actor = TCastToPtr< CActor >(ent);
+      BlockReader r(b->data);
+      const uint64_t lo = r.U32();
+      const uint64_t m = lo | (static_cast< uint64_t >(r.U32()) << 32);
+      if (r.ok && actor != nullptr && mgr.ObjectById(d.uid) == ent &&
+          actor->GetMaterialList().GetValue() != m) {
+        actor->MaterialList() = CMaterialList(m);
+        mgr.UpdateObjectInLists(*actor);
+        log.Note(d.obj->editorId, "materials restored");
+      }
+    }
+    if (const RoomBlock* b = FindBlock(*d.obj, kTagSequence)) {
+      CScriptSequenceTimer* seq = TCastToPtr< CScriptSequenceTimer >(ent);
+      BlockReader r(b->data);
+      const float time = r.F32();
+      const bool running = r.U32() != 0;
+      const uint32_t origin = r.U32();
+      const TUniqueId originator =
+          origin != 0xffffffffu ? mgr.GetIdForScript(TEditorId(origin)) : kInvalidUniqueId;
+      if (seq != nullptr && r.ok && time == time && time >= 0.f &&
+          (PortRoomState::SeqTime(*seq) != time || PortRoomState::SeqRunning(*seq) != running ||
+           PortRoomState::SeqOriginator(*seq) != originator)) {
+        PortRoomState::SetSequence(*seq, time, running, originator);
+        log.Note(d.obj->editorId, "sequence restored");
+        ++stats.changed;
       }
     }
     if (debris != nullptr && FindBlock(*d.obj, kTagDrop) != nullptr) {
@@ -1148,8 +1251,11 @@ int ApplyRoomState(CStateManager& mgr, const RoomState& room, RoomApplyProgress&
       CScriptPickup* drop = DebrisDrop(mgr, *debris);
       if (drop != nullptr) {
         if (!dropBlock->data.empty() && dropBlock->data[0] != 0) {
-          const int set = ApplyEntityFields(mgr, *drop, dropBlock->data.substr(1));
-          if (set) {
+          // ApplyEntityFields counts only the values it changed; a drop that already held them
+          // all still takes the debris' place.
+          const std::string dropFields = dropBlock->data.substr(1);
+          const int set = ApplyEntityFields(mgr, *drop, dropFields);
+          if (set || EntityFieldsCover(*drop, dropFields)) {
             stats.fields += set;
             log.Note(d.obj->editorId, "dropped pickup fields restored");
             drop->SetTranslation(debris->GetTranslation());

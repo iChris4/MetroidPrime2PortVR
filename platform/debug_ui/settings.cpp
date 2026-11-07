@@ -7,6 +7,7 @@
 #include "vr/vr_settings.h"
 #include "../port_overlay_internal.h"
 
+#include "port_controls.h"
 #include "port_discord.h"
 #include "port_env.h"
 #include "port_livesplit.h"
@@ -19,6 +20,7 @@
 #include "port_suit_colours.h"
 #include "port_textures.h"
 #include "port_utf8_path.h"
+#include "port_third_person.h"
 #include "port_update_check.h"
 #include "port_video.h"
 
@@ -197,16 +199,17 @@ constexpr SettingKey PlayerKey(const char* key, const char* sampleA, const char*
           WritePlayerSetting< Player, Key, Kind >, true, sampleA, sampleB};
 }
 
-// p<N>.twin_stick and the stick rates: PortMouse keeps those overrides.
+// p<N>.twin_stick, flick stick and the stick rates: PortMouse keeps those overrides.
 template < int Player, PortMouse::StickKey Key >
 void ReadPlayerStick(const std::string& value) {
   if (Trim(value).empty()) {
     PortMouse::ClearPlayerStick(Player, Key);
     return;
   }
-  if (Key == PortMouse::kStick_Enabled || Key == PortMouse::kStick_Split) {
+  if (Key == PortMouse::kStick_Enabled || Key == PortMouse::kStick_Split || Key == PortMouse::kStick_Flick) {
     (Key == PortMouse::kStick_Enabled ? PortMouse::SetPlayerStickEnabled
-                                      : PortMouse::SetPlayerStickAimSplit)(Player, ParseBool(value));
+     : Key == PortMouse::kStick_Split ? PortMouse::SetPlayerStickAimSplit
+                                      : PortMouse::SetPlayerFlickStick)(Player, ParseBool(value));
     return;
   }
   float parsed = 0.f;
@@ -225,6 +228,7 @@ void WritePlayerStick(std::ostream& out) {
   case PortMouse::kStick_Rate: out << PortMouse::StickAimRate(Player); break;
   case PortMouse::kStick_Split: WriteBool(out, PortMouse::StickAimSplit(Player)); break;
   case PortMouse::kStick_RateY: out << PortMouse::StickAimRateY(Player); break;
+  case PortMouse::kStick_Flick: WriteBool(out, PortMouse::FlickStickSetting(Player)); break;
   }
 }
 
@@ -234,12 +238,24 @@ constexpr SettingKey PlayerStickKey(const char* key, const char* sampleA, const 
           sampleB};
 }
 
+// pad_preset, p<N>.pad_preset: the last controller preset of pad port `Port`, which a
+// controller connected there later gets (PortControls::ApplySavedPadPresets). Per port, not a
+// Player 1 override: an empty one means none.
+template < unsigned Port >
+constexpr SettingKey PadPresetKey(const char* key) {
+  return {key, [](const std::string& value) { PortControls::SetSavedPadPreset(Port, Trim(value)); },
+          [](std::ostream& out) { out << PortControls::SavedPadPreset(Port); }, true, "remastered",
+          "southpaw"};
+}
+
 // Every per-player key of player N (2-4), as p<N>.<Player 1's key>.
 #define PLAYER_SETTING_KEYS(N)                                                                     \
   PlayerStickKey< N - 1, PortMouse::kStick_Enabled >("p" #N ".twin_stick", "1", "0"),              \
       PlayerStickKey< N - 1, PortMouse::kStick_Rate >("p" #N ".stick_aim_rate", "900", "1200"),    \
       PlayerStickKey< N - 1, PortMouse::kStick_Split >("p" #N ".stick_aim_split", "1", "0"),       \
       PlayerStickKey< N - 1, PortMouse::kStick_RateY >("p" #N ".stick_aim_rate_y", "900", "1200"), \
+      PlayerStickKey< N - 1, PortMouse::kStick_Flick >("p" #N ".flick_stick", "1", "0"),           \
+      PadPresetKey< N - 1 >("p" #N ".pad_preset"),                                                 \
       PlayerKey< N - 1, PortOverlay::kPlayer_LockOnToggle, kPlayerBool >("p" #N ".lockon_toggle",  \
                                                                          "1", "0"),                \
       PlayerKey< N - 1, PortOverlay::kPlayer_StickyCharge, kPlayerBool >("p" #N ".sticky_charge",  \
@@ -300,20 +316,61 @@ bool sGameOptionsRestored = false;
 const SettingKey kSettingKeys[] = {
     BoolKey< &sOriginalExperience >("original_experience"),
     BoolKey< &sSkipCinematics >("skip_cinematics"),
+    // 0/1 (or a flag, as the checkbox it was wrote) and 2 or `repeats` (PortOverlay::ESeamlessPickups).
+    {"seamless_pickups",
+     [](const std::string& value) {
+       int parsed = 0;
+       if (value == "repeats" ||
+           (ParseInt(value, parsed) && parsed == PortOverlay::kSeamlessPickups_Repeats))
+         sSeamlessPickups = PortOverlay::kSeamlessPickups_Repeats;
+       else
+         sSeamlessPickups = ParseBool(value) ? PortOverlay::kSeamlessPickups_All
+                                             : PortOverlay::kSeamlessPickups_Off;
+     },
+     [](std::ostream& out) { out << sSeamlessPickups; }, false, "1", "2"},
     BoolKey< &sUnlockHardMode >("unlock_hard_mode"),
     BoolKey< &sUnlockGalleries >("unlock_galleries"),
+    {"damage_taken",
+     [](const std::string& value) {
+       float parsed = 0.f;
+       if (ParseFloat(value, parsed) && parsed >= PortOverlay::kDamageMultMin &&
+           parsed <= PortOverlay::kDamageMultMax)
+         sDamageTakenMult = parsed;
+     },
+     [](std::ostream& out) { out << sDamageTakenMult; },
+     false,
+     "0.5",
+     "3"},
+    {"damage_dealt",
+     [](const std::string& value) {
+       float parsed = 0.f;
+       if (ParseFloat(value, parsed) && parsed >= PortOverlay::kDamageMultMin &&
+           parsed <= PortOverlay::kDamageMultMax)
+         sDamageDealtMult = parsed;
+     },
+     [](std::ostream& out) { out << sDamageDealtMult; },
+     false,
+     "0.5",
+     "3"},
     BoolKey< &sUnlockBeamDoors >("unlock_beam_doors"),
     BoolKey< &sStackBeams >("stack_beams"),
     BoolKey< &sStackBeamsSkipDark >("stack_beams_skip_dark"),
     BoolKey< &sFastMorph >("fast_morph"),
     BoolKey< &sPointerMenus >("pointer_menus"),
+    BoolKey< &sMenuExit >("menu_exit"),
     BoolKey< &sMapSwapFingers >("map_swap_fingers"),
     BoolKey< &sMapInvertX >("map_invert_x"),
     BoolKey< &sMapInvertY >("map_invert_y"),
+    BoolKey< &sBallCam >("ball_cam"),
+    IntKey< &sBallCamSpeed, PortOverlay::kBallCamSpeedMin, PortOverlay::kBallCamSpeedMax >("ball_cam_speed", "50",
+                                                                                          "200"),
+    BoolKey< &sWalkSpeedEnabled >("walk_speed_enabled"),
     IntKey< &sWalkSpeed, PortOverlay::kWalkSpeedMin, PortOverlay::kWalkSpeedMax >("walk_speed", "50",
                                                                                   "200"),
     IntKey< &sScanSpeed, PortOverlay::kScanSpeedMin, PortOverlay::kScanSpeedMax >("scan_speed", "50",
                                                                                   "400"),
+    IntKey< &sBeamSwitchSpeed, PortOverlay::kBeamSwitchSpeedMin, PortOverlay::kBeamSwitchSpeedMax >(
+        "beam_switch_speed", "100", "400"),
     // The F1 Game > Audio rows' part above 100 percent: the mixer reads a boost, so a loaded value
     // is handed to it here as well as by the rows (a plain IntKey could not).
     {"music_boost",
@@ -350,6 +407,10 @@ const SettingKey kSettingKeys[] = {
     IntKey< &sPromptGlyphs, PortOverlay::kPromptGlyphs_Auto, PortOverlay::kPromptGlyphs_Keyboard >(
         "prompt_glyphs", "0", "5"),
     BoolKey< &sMinimapTap >("minimap_tap"),
+    IntKey< &sMapPickups, PortOverlay::kMapPickups_Off, PortOverlay::kMapPickups_All >(
+        "map_pickups", "0", "2"),
+    BoolKey< &sMapPickupKinds >("map_pickup_kinds"),
+    BoolKey< &sRevealMap >("reveal_map"),
     BoolKey< &sIgtTimer >("igt_timer"),
     IntKey< &sLanguage, 0, PortOverlay::kLanguageMax >("language", "0", "6"),
     IntKey< &sHintDelay, PortOverlay::kHintDelayMin, PortOverlay::kHintDelayMax >("hint_delay", "0",
@@ -370,6 +431,7 @@ const SettingKey kSettingKeys[] = {
     BoolKey< &sQuickResume >("quick_resume"),
     BoolKey< &sLockOnToggle >("lockon_toggle"),
     BoolKey< &sAimLockOn >("aim_lock_on"),
+    BoolKey< &sScanShoot >("scan_shoot"),
     BoolKey< &sSpiderToggle >("spider_toggle"),
     BoolKey< &sStickyCharge >("sticky_charge"),
     BoolKey< &sRapidCharge >("rapid_charge"),
@@ -467,6 +529,7 @@ const SettingKey kSettingKeys[] = {
        }
      },
      [](std::ostream& out) { out << PortMouse::MouseDpi(); }, false, "800", "1600"},
+    PadPresetKey< 0 >("pad_preset"),
     {"twin_stick",
      [](const std::string& value) { PortMouse::SetStickEnabled(ParseBool(value)); },
      [](std::ostream& out) { WriteBool(out, PortMouse::StickEnabled()); }, false, "1", "0"},
@@ -489,9 +552,34 @@ const SettingKey kSettingKeys[] = {
        }
      },
      [](std::ostream& out) { out << PortMouse::StickAimRateY(); }, false, "900", "1200"},
+    {"flick_stick",
+     [](const std::string& value) { PortMouse::SetFlickStick(ParseBool(value)); },
+     [](std::ostream& out) { WriteBool(out, PortMouse::FlickStickSetting()); }, false, "1", "0"},
+    {"flick_stick_outer_deadzone",
+     [](const std::string& value) {
+       float parsed = 0.f;
+       if (ParseFloat(value, parsed) && parsed >= 0.f && parsed <= PortMouse::kFlickOuterDeadZoneMax) {
+         PortMouse::SetFlickOuterDeadZone(parsed);
+       }
+     },
+     [](std::ostream& out) { out << PortMouse::FlickOuterDeadZone(); }, false, "10", "20"},
+    {"touch_flick_stick",
+     [](const std::string& value) { PortMouse::SetTouchFlickStick(ParseBool(value)); },
+     [](std::ostream& out) { WriteBool(out, PortMouse::TouchFlickStick()); }, false, "1", "0"},
     BoolKey< &sCardBackup >("card_backup"),
     BoolKey< &sLogFile >("log_file"),
     BoolKey< &sHideHelmet >("no_helmet"),
+    {"third_person", [](const std::string& value) { PortThirdPerson::SetEnabled(ParseBool(value)); },
+     [](std::ostream& out) { WriteBool(out, PortThirdPerson::Enabled()); }, false, "1", "0"},
+    {"third_person_distance",
+     [](const std::string& value) { PortThirdPerson::SetDistance(std::strtof(value.c_str(), nullptr)); },
+     [](std::ostream& out) { out << PortThirdPerson::GetParams().distance; }, false, "2.5", "4"},
+    {"third_person_shoulder",
+     [](const std::string& value) { PortThirdPerson::SetShoulder(std::strtof(value.c_str(), nullptr)); },
+     [](std::ostream& out) { out << PortThirdPerson::GetParams().shoulder; }, false, "0.7", "-0.5"},
+    {"third_person_height",
+     [](const std::string& value) { PortThirdPerson::SetHeight(std::strtof(value.c_str(), nullptr)); },
+     [](std::ostream& out) { out << PortThirdPerson::GetParams().height; }, false, "0.5", "0"},
     {"trilogy_radial_selectors",
      [](const std::string& value) { PortOverlay::SetTrilogyRadialSelectors(ParseBool(value)); },
      [](std::ostream& out) { WriteBool(out, sTrilogyRadialSelectors); }, false, "1", "0"},
@@ -504,6 +592,7 @@ const SettingKey kSettingKeys[] = {
     BoolKey< &sDarkVisorFull >("dark_visor_full"),
     IntKey< &sDarkVisorStatic, 0, PortOverlay::kDarkVisorStaticMax >("dark_visor_static", "50", "100"),
     BoolKey< &sInfiniteBeamAmmo >("infinite_beam_ammo"),
+    BoolKey< &sDarkWorldLightMusic >("dark_world_light_music"),
     IntKey< &sHudOpacityEcho, PortOverlay::kHudOpacityVisor, PortOverlay::kHudOpacityMax >(
         "hud_opacity_echo", "-1", "40"),
     IntKey< &sHudOpacityDark, PortOverlay::kHudOpacityVisor, PortOverlay::kHudOpacityMax >(
@@ -519,6 +608,16 @@ const SettingKey kSettingKeys[] = {
        }
      },
      [](std::ostream& out) { out << sFirstPersonFov; }, false, "45", "72.5"},
+    BoolKey< &sGunFollowsFov >("gun_follows_fov"),
+    {"gun_fov",
+     [](const std::string& value) {
+       float parsed = 0.f;
+       if (ParseFloat(value, parsed) && parsed >= PortOverlay::kGunFovMin &&
+           parsed <= PortOverlay::kGunFovMax) {
+         sGunFov = parsed;
+       }
+     },
+     [](std::ostream& out) { out << sGunFov; }, false, "45", "72.5"},
     {"gun_offset",
      [](const std::string& value) {
        ParseFloat3(value, sGunOffset, -PortOverlay::kGunOffsetMax, PortOverlay::kGunOffsetMax);
@@ -597,7 +696,7 @@ const SettingKey kSettingKeys[] = {
     IntKey< &sCrosshairSize, PortOverlay::kCrosshairSizeMin, PortOverlay::kCrosshairSizeMax >(
         "crosshair_size", "25", "100"),
     IntKey< &sCrosshairOpacity, PortOverlay::kCrosshairOpacityMin,
-            PortOverlay::kCrosshairOpacityMax >("crosshair_opacity", "0", "100"),
+            PortOverlay::kCrosshairOpacityMax >("crosshair_opacity", "0", "300"),
     {"crosshair_color",
      [](const std::string& value) { ParseFloat3(value, sCrosshairColor, 0.f, 1.f); },
      [](std::ostream& out) {

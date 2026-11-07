@@ -8,6 +8,7 @@
 
 #include "input/port_input_devices.h"
 #include "port_input_bindings.h"
+#include "port_custom_actions.h"
 #include "port_debug.h"
 #include "port_overlay.h"
 #include "port_photo.h"
@@ -112,6 +113,12 @@ Java_org_metroidprime2_port_TouchControlsView_nativeTouchControlsEnabled(JNIEnv*
 JNIEXPORT jboolean JNICALL
 Java_org_metroidprime2_port_TouchControlsView_nativeTouchWheelsEnabled(JNIEnv*, jclass) {
   return PortTouch::WheelsEnabled() ? JNI_TRUE : JNI_FALSE;
+}
+
+// The view has moved the retired setting's wheels into the layout as added buttons.
+JNIEXPORT void JNICALL Java_org_metroidprime2_port_TouchControlsView_nativeRetireTouchWheels(JNIEnv*,
+                                                                                            jclass) {
+  PortTouch::SetWheelsEnabled(false);
 }
 
 JNIEXPORT jboolean JNICALL
@@ -383,6 +390,19 @@ JNIEXPORT jobjectArray JNICALL Java_org_metroidprime2_port_TouchControlsView_nat
     const PortInput::ActionInfo& info = PortInput::Info(a);
     items.emplace_back(info.key);
     items.emplace_back(info.label);
+    if (a == PortInput::Action::VisorPrev) {
+      items.insert(items.end(), std::begin(PortTouch::kTouchWheelActions),
+                   std::end(PortTouch::kTouchWheelActions));
+    }
+  }
+  // Then the player's own actions (controls.toml), as touch_overlay.cpp's ButtonActions lists them.
+  for (const PortInput::CustomActionDef& def : PortInputDevices::UserBindings()->customActions) {
+    const PortInput::Action a = PortInput::CustomAction(def.id);
+    if (!PortInput::TouchButtonAction(a)) {
+      continue;
+    }
+    items.emplace_back(PortInput::ActionKey(a));
+    items.emplace_back(PortCustomActions::DisplayName(def));
   }
   jclass stringClass = env->FindClass("java/lang/String");
   if (stringClass == nullptr) {
@@ -396,6 +416,12 @@ JNIEXPORT jobjectArray JNICALL Java_org_metroidprime2_port_TouchControlsView_nat
   }
   env->DeleteLocalRef(stringClass);
   return out;
+}
+
+// Changes when nativeTouchButtonActions' list may have (controls.toml loaded or edited).
+JNIEXPORT jlong JNICALL Java_org_metroidprime2_port_TouchControlsView_nativeTouchButtonActionsVersion(
+    JNIEnv*, jclass) {
+  return static_cast<jlong>(PortInputDevices::UserBindingsVersion());
 }
 
 JNIEXPORT jstring JNICALL

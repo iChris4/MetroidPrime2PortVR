@@ -24,6 +24,7 @@
 #include "MetroidPrime/CActor.hpp"
 #include "port_overlay.h"
 
+#include <float.h>
 #include <stdlib.h>
 #include <string.h>
 #endif
@@ -1427,5 +1428,30 @@ const CPoseAsTransforms_Linear& CAnimData::PortPresentedPose() const {
     elem.mOffset = prevOffset + (curOffset - prevOffset) * t;
   }
   return blend;
+}
+
+rstl::pair< float, int > CAnimData::PortBorrowAnimation(int character, const CPASAnimParmData& parms,
+                                                        CRandom16& random, float minWeight) {
+  const rstl::pair< float, int > none(0.f, -1);
+  const CCharacterFactory& factory = **mCharFactory;
+  if (character < 0 || character >= factory.GetCharacterCount()) {
+    return none;
+  }
+  const CCECharacterInfo& donor = factory.GetCharInfo(character);
+  const rstl::pair< float, int > best = donor.GetPASDatabase().FindBestAnimation(parms, random, -1);
+  const rstl::vector< uint >& donorAnims = donor.GetAnimationIndexList();
+  if (best.first <= minWeight || best.first <= FLT_EPSILON || best.second < 0 ||
+      best.second >= static_cast< int >(donorAnims.size())) {
+    return none;
+  }
+  const uint animSetIndex = donorAnims[best.second];
+  rstl::vector< uint >& anims = mCharInfo.PortAnimationIndexList();
+  for (int i = 0; i < static_cast< int >(anims.size()); ++i) {
+    if (anims[i] == animSetIndex) {
+      return rstl::pair< float, int >(best.first, i);
+    }
+  }
+  anims.push_back(animSetIndex);
+  return rstl::pair< float, int >(best.first, static_cast< int >(anims.size()) - 1);
 }
 #endif

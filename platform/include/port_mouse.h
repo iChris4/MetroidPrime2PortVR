@@ -234,6 +234,11 @@ void SetStickEnabled(bool enabled);
 // Whether `player`'s view follows the platform aim: for Player 1 any of mouse, twin stick and
 // touch; the others have only their own twin stick.
 bool DirectAim(int player = 0);
+// Direct aim takes the pad off the classic scheme (the left stick strafes, R no longer looks), so
+// mouse aim counts for it only while this is clear: set once per poll while a connected pad is
+// the last-used input and aims by neither twin stick nor gyro, else the GameCube preset could
+// neither turn nor look (MP1 #253). A key or click hands aiming back to the mouse.
+void SetMouseYieldsToPad(bool yields);
 // Twin stick takes the C-stick for aim, so the game's C-stick beam picks ignore it (issue #15).
 // Under mouse aim a keyboard key held on a C-stick direction (the mouse-and-keyboard preset's
 // 1-4) gives it back for that poll: the key picks a beam and does not aim, as in MP1.
@@ -247,9 +252,28 @@ bool StickAimSplit(int player = 0);
 void SetStickAimSplit(bool enabled);
 float StickAimRateY(int player = 0);
 void SetStickAimRateY(float pixelsPerSecond);
+// MP1's Flick Stick (PortFlickStick, issue MP1 #251): twin stick's right stick turns the view to
+// face the way it points and turns with it, yaw only. FlickStick(player) is whether it applies:
+// twin stick on and, for Player 1, the touch twin-stick layout's own switch while touch is the
+// active input (SetTouchTwinStickActive), else the controller's.
+bool FlickStick(int player = 0);
+bool FlickStickSetting(int player = 0); // the controller's switch, whatever touch does
+void SetFlickStick(bool enabled);
+bool TouchFlickStick();
+void SetTouchFlickStick(bool enabled);
+// PortTouch, each frame: touch is the active input and its layout is the twin stick.
+void SetTouchTwinStickActive(bool active);
+// Flick stick's outer deadzone, percent of travel (0-50): the stick counts as fully tilted this
+// far from its edge, so a pad whose gate never reaches the circle still flicks.
+constexpr float kFlickOuterDeadZoneMax = 50.f;
+float FlickOuterDeadZone();
+void SetFlickOuterDeadZone(float percent);
+// The input engine's right stick for pad port `port` (-1..1, x right, y up), round dead zone,
+// before PADClamp pulls a stick near an axis onto it: flick stick turns by its angle.
+void SetFlickRawStick(int port, float x, float y);
 // Per-player overrides (settings.cfg `p2.twin_stick=` etc.). Player 0's setters set the global
 // value; for players 1-3 they set that player's override.
-enum StickKey { kStick_Enabled, kStick_Rate, kStick_Split, kStick_RateY };
+enum StickKey { kStick_Enabled, kStick_Rate, kStick_Split, kStick_RateY, kStick_Flick };
 bool PlayerStickSet(int player, StickKey key);
 void ClearPlayerStick(int player);
 void ClearPlayerStick(int player, StickKey key);
@@ -257,6 +281,7 @@ void SetPlayerStickEnabled(int player, bool enabled);
 void SetPlayerStickAimRate(int player, float pixelsPerSecond);
 void SetPlayerStickAimSplit(int player, bool enabled);
 void SetPlayerStickAimRateY(int player, float pixelsPerSecond);
+void SetPlayerFlickStick(int player, bool enabled);
 // Feeds a normalised right-stick vector (-1..1, x right, y up) for one tick.
 // Fed to `player`'s aim only (the pad port's player in a match).
 void AddStickAim(float x, float y, float dt, int player = 0);
@@ -291,6 +316,9 @@ void SetTouchAimSpeedY(float pixelsPerDp);
 // The debug overlay owns the cursor while it is open: no capture, no aim applied.
 void SetUiActive(bool active);
 bool UiActive();
+// Once per loop iteration: a pointer screen (pause, map, a GUI menu) is up, so the aim's grab is
+// released and not taken again until it closes (MP1's pointerMenu). Photo mode's grab is its own.
+void SetPointerScreen(bool active);
 // Mouse aim holds the pointer (cursor hidden, motion turns the view). Our own state, not
 // SDL's relative mode, which Android can report off while its pointer capture is on.
 bool Captured();
@@ -308,6 +336,12 @@ void SetPhotoCapture(bool want);
 // Photo mode ends: release the grab and give SetCapture back to the aim.
 void EndPhotoCapture();
 bool TakePhotoLook(float& yawDegrees, float& pitchDegrees);
+// Morph Ball camera control (CBallCamera, PortOverlay::BallCamControl): takes this tick's mouse,
+// twin-stick and touch travel, which the aim leaves alone while the ball owns the view, as a turn
+// in radians (yaw left, pitch up; the aim's sensitivity and inversion). Under gyro aim only the
+// stick's part, so the gyro does not swing the ball camera. `stickPitch` false drops the twin
+// stick's vertical part (Spring Ball owns stick up). False with no travel or the UI open.
+bool TakeBallLook(float& yaw, float& pitch, bool stickPitch, int player = 0);
 // Aim state is per player (the pad port's player in a match): the functions below that take
 // `player` default to 0, which single player and every caller without a player use. The mouse,
 // and touch feed player 0 only; a player above 0 follows its own pad's twin stick and gyro. The

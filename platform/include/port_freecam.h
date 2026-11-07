@@ -34,6 +34,14 @@ Pose GetPose();
 // camera's own moves; true (default): a jump.
 void SetPose(const Pose& pose, bool snap = true);
 
+// Moves Samus to the camera, her eyes (or the ball's middle) where it is, facing its way and
+// standing still, and turns the camera off. False when the camera is off or there is no player.
+bool MovePlayerHere(CStateManager& mgr);
+// MovePlayerHere at the next game tick, for callers without the state manager (the F1 menu).
+void RequestMovePlayerHere();
+// Once per tick before input: runs the requests above.
+void TakeRequests(CStateManager& mgr);
+
 // A vertical field of view in degrees that replaces the game camera's while the camera is on
 // (photo mode); 0 leaves the game's. FovFor widens it to the game's aspect like the camera does.
 float FovOverride();
@@ -50,7 +58,8 @@ void AddTouchTurn(float yaw, float pitch);
 // L and Z (or the d-pad's up and down) go down and up. Returns true when the input was
 // taken and the player must not see it.
 bool Input(const CFinalInput& input);
-// The view the world is drawn from, blended between ticks; `game` when the camera is off.
+// The view the world is drawn from, blended between ticks; when the camera is off, `game` or
+// the third-person view of it (PortThirdPerson::View).
 CTransform4f View(const CTransform4f& game);
 
 } // namespace PortFreeCam
