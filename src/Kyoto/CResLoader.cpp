@@ -4,6 +4,7 @@
 #include "dolphin/ar.h"
 #include "dolphin/os.h"
 #include "port_breadcrumb.h"
+#include "port_cannon_repair.h"
 #include "rstl/vector.hpp"
 #include <stdio.h>
 #include <string.h>
@@ -76,6 +77,9 @@ CResLoader::CResLoader()
 , mForwardSeek(false) {}
 
 CResLoader::~CResLoader() {
+#ifdef TARGET_PC
+  PortCannonRepair::Reset();
+#endif
   for (PakList::iterator it = mPakLoadingList.begin(); it != mPakLoadingList.end(); ++it) {
     CPakFile* pak = it->get();
     while (!pak->IsCompletelyLoaded()) {
@@ -163,6 +167,7 @@ CPakFile* CResLoader::FindResource(const SObjectTag& tag) {
 
 #ifdef TARGET_PC
 void CResLoader::PortReopenPaks(void (*between)()) {
+  PortCannonRepair::Reset();
   struct SPak {
     rstl::auto_ptr< CPakFile >* slot;
     rstl::string name;

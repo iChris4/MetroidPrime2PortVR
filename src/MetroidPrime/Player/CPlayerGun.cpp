@@ -3318,6 +3318,24 @@ void CPlayerGun::RenderGunWithHologram(const CStateManager& mgr, const CVector3f
     break;
   case CGunMorph::kGS_InWipe:
   case CGunMorph::kGS_OutWipe: {
+#ifdef TARGET_PC
+    if (PortVr::VrImmersive()) {
+      // Keep the wipe attached to the tracked cannon throughout the transition.
+      const CVector3f normal = gunTransform.GetForward();
+      const CVector3f point = elbowTransform * CVector3f(
+          0.f, mGunMorph.mYLerp - 0.4f * (1.f - mGunMorph.mTransitionFactor), 0.f);
+      if (mLights.HasShadowLight()) {
+        shadow->EnableModelProjectedShadow(gunTransform, mLights.GetShadowLightArrayIndex(), 2.15f);
+      }
+      mCurrentBeam->PortDrawHologramTransition(
+          mgr, gunTransform, normal, point, mgr.MaskUIdNumPlayers(mPlayerUniqueId), gunFlags, &mLights);
+      BeginDarkVisorRender(mgr);
+      DrawArm(mgr, cameraTranslation, armFlags);
+      EndDarkVisorRender(mgr);
+      shadow->DisableModelProjectedShadow();
+      break;
+    }
+#endif
     const bool echoVisor = mgr.GetRenderVisorMode() == CStateManager::kRVM_Echo;
     const CTransform4f morphTransform =
         elbowTransform * CTransform4f::Translate(0.f, mGunMorph.mYLerp, 0.f);

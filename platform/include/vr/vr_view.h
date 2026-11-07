@@ -54,6 +54,8 @@ bool VrHeadGaze(const CTransform4f& cameraXf, CVector3f& origin, CVector3f& dire
 // icons, target reticles), which would otherwise face the body and show their
 // edge when the head turns, and would roll with a tilted head.
 CMatrix3f VrHeadViewRotation(const CTransform4f& cameraXf) noexcept;
+// World-space headset heading, including while the map is paused.
+bool VrMapPlayerYaw(const CTransform4f& cameraXf, float& yaw) noexcept;
 // Head orientation and position for CPU effects; the world render camera
 // remains unchanged so stereo replay does not apply head tracking twice.
 CTransform4f VrHeadViewTransform(const CTransform4f& cameraXf) noexcept;

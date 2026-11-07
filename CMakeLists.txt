@@ -804,6 +804,8 @@ if(AURORA_SDL3_TARGET)
     # set is always built, with stubs when OpenXR is off, so the game's PortVr calls link either
     # way; the rest needs the OpenXR loader.
     add_library(mp_port_vr OBJECT
+        platform/port_cannon_repair.cpp
+        platform/vr/vr_cannon_repair.cpp
         platform/vr/vr_host_echoes.cpp
         platform/vr/vr_settings.cpp
         platform/vr/prime_vr_policy.cpp
@@ -1123,6 +1125,9 @@ if(AURORA_SDL3_TARGET)
     # PrimedGun Echoes: the VR layer's GPU-free tests, as in the Metroid Prime VR fork
     # (cmake/PortTests.cmake's mp_port_test, label "port").
     include(cmake/PortTests.cmake)
+    mp_port_test(port_cannon_repair_tests
+        SOURCES tests/port_cannon_repair.cpp platform/port_cannon_repair.cpp
+        INCLUDES platform/include)
     mp_port_test(port_vr_visibility_tests
         SOURCES tests/port_vr_visibility.cpp
             src/Kyoto/Math/CFrustumPlanes.cpp src/Kyoto/Math/CAABox.cpp

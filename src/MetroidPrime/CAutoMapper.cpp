@@ -1621,7 +1621,11 @@ void CAutoMapper::Draw(const CStateManager& mgr, const CTransform4f& xf, float a
                                                          gpTweakAutoMapper->GetMinCamDistance());
       const CEulerAngles eulers = CEulerAngles::FromTransform(
           mgr.GetCameraManager(mPlayerIndex)->GetCurrentCameraTransform(mgr, 1));
-      const float angle = CMath::ClampRadians(eulers.GetYaw());
+      float angle = CMath::ClampRadians(eulers.GetYaw());
+#ifdef TARGET_PC
+      if (mPlayerIndex == 0)
+        PortVr::VrMapPlayerYaw(mgr.GetCameraManager(0)->GetCurrentCameraTransform(mgr, true), angle);
+#endif
 #ifdef TARGET_PC
       CMapArea* const nextArea = GetMapArea(*mWorld, mgr.GetNextAreaId().value);
       if (nextArea == nullptr) {
@@ -2587,16 +2591,13 @@ void CAutoMapper::LeaveMapScreenState() {
 CQuaternion CAutoMapper::GetMiniMapCameraOrientation(const CStateManager& mgr) const {
   const float miniCamXAngle = gpTweakAutoMapper->GetMiniCamXAngle();
 #ifdef TARGET_PC
-  if (mPlayerIndex == 0 && PortVr::VrImmersive()) {
-    // PortVr: the minimap turns with the head, not the body: the level right axis keeps the yaw
-    // even looking straight up or down.
-    const CMatrix3f head = PortVr::VrHeadViewRotation(
-        mgr.GetCameraManager(0)->GetCurrentCameraTransform(mgr, true));
-    const CVector3f right = head.GetColumn(kDX);
-    return CQuaternion::ZRotation(
-               CRelAngle::FromRadians(CMath::ClampRadians(atan2f(right.GetY(), right.GetX())))) *
+  float headYaw = 0.f;
+  if (mPlayerIndex == 0 && PortVr::VrImmersive() && PortVr::VrMapPlayerYaw(
+          mgr.GetCameraManager(0)->GetCurrentCameraTransform(mgr, true), headYaw)) {
+    return CQuaternion::ZRotation(CRelAngle::FromRadians(CMath::ClampRadians(headYaw))) *
            CQuaternion::XRotation(CRelAngle::FromDegrees(miniCamXAngle));
   }
+
 #endif
   const CGameCamera* camera = mgr.GetCameraManager(mPlayerIndex)->GetCurrentCamera(mgr, 1);
   const CEulerAngles angles =

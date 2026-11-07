@@ -1,3 +1,6 @@
+#ifdef TARGET_PC
+#include "port_cannon_repair.h"
+#endif
 #include "Kyoto/Graphics/CModel.hpp"
 
 #include "Kyoto/Alloc/CMemory.hpp"
@@ -446,7 +449,15 @@ CFactoryFnReturn FModelFactory(const SObjectTag& tag, const rstl::auto_ptr< ucha
   GXInvalidateVtxCache();
 #ifdef TARGET_PC
   CCubeModel::PortSetBuildContext(tag.id, -1, -1);
-  CModel* model = rs_new CModel(ptr, len, *pool);
+  CModel* model;
+  if (const auto* repaired = PortCannonRepair::FindForGame(tag.id)) {
+    rstl::auto_ptr<uchar> data(static_cast<uchar*>(CMemory::Alloc(
+        repaired->data.size(), IAllocator::kHI_RoundUpLen)));
+    memcpy(data.get(), repaired->data.data(), repaired->data.size());
+    model = rs_new CModel(data, repaired->data.size(), *pool);
+  } else {
+    model = rs_new CModel(ptr, len, *pool);
+  }
   CCubeModel::PortClearBuildContext();
   PortDrawDebug::LabelAsset(model->GetModelInstance(), tag.id);
   return model;

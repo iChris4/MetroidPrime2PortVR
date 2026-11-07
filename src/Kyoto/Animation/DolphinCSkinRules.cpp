@@ -1,3 +1,7 @@
+#ifdef TARGET_PC
+#include "port_cannon_repair.h"
+#include "Kyoto/Streams/CMemoryInStream.hpp"
+#endif
 #include "Kyoto/Animation/CSkinRules.hpp"
 
 #include "Kyoto/Animation/CCharLayoutInfo.hpp"
@@ -43,6 +47,12 @@ void CSkinRules::BuildAccumulatedTransforms(const CPoseAsTransforms_Linear& pose
 
 CFactoryFnReturn FSkinRulesFactory(const SObjectTag& tag, CInputStream& in,
                                    const CVParamTransfer& params) {
+#ifdef TARGET_PC
+  if (const auto* repaired = PortCannonRepair::FindForGame(tag.id)) {
+    CMemoryInStream replacement(repaired->data.data(), repaired->data.size());
+    return rs_new CSkinRules(replacement);
+  }
+#endif
   return rs_new CSkinRules(in);
 }
 

@@ -137,6 +137,12 @@ public:
   void EnterComboFire(CStateManager& mgr); // Guessed name
   bool IsChargeAnimOver() const;
   CElementGen* GetMuzzleFx(int index) const; // Guessed name
+#ifdef TARGET_PC
+  void PortDrawHologramTransition(const CStateManager& mgr, const CTransform4f& xf,
+                                  const CVector3f& normal, const CVector3f& point,
+                                  int playerIndex, const CModelFlags& flags,
+                                  const CActorLights* lights) const;
+#endif
   void DrawHologram(const CStateManager& mgr, const CTransform4f& xf,
                     const CModelFlags& flags) const;
   void ReturnToDefault(CStateManager& mgr, bool reset);

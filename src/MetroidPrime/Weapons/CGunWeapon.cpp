@@ -1,3 +1,6 @@
+#ifdef TARGET_PC
+#include "dolphin/gx/GXExtra.h"
+#endif
 #include "MetroidPrime/Weapons/CGunWeapon.hpp"
 
 #include "Kyoto/Animation/CPASAnimParmData.hpp"
@@ -356,6 +359,35 @@ void CGunWeapon::Draw(bool drawSuitArm, int playerIndex, const CStateManager& mg
   }
   CGraphics::SetViewPointMatrix(view);
 }
+
+#ifdef TARGET_PC
+// As in Prime 1 VR, split the solid and hologram at a world-space plane.
+// Stereo replay transforms this plane with each eye's position matrices.
+void CGunWeapon::PortDrawHologramTransition(const CStateManager& mgr, const CTransform4f& xf,
+                                            const CVector3f& normal, const CVector3f& point,
+                                            int playerIndex, const CModelFlags& flags,
+                                            const CActorLights* lights) const {
+  if (!mLoaded) return;
+  const CTransform4f& view = CGraphics::GetViewMatrix();
+  const float distance = CVector3f::Dot(normal, point);
+  const f32 plane[4] = {
+      CVector3f::Dot(view.GetColumn(kDX), normal),
+      CVector3f::Dot(view.GetColumn(kDZ), normal),
+      -CVector3f::Dot(view.GetColumn(kDY), normal),
+      CVector3f::Dot(normal, view.GetTranslation()) - distance};
+  const f32 opposite[4] = {-plane[0], -plane[1], -plane[2], -plane[3]};
+  GXSetClipPlane(GX_TRUE, opposite);
+  Draw(false, playerIndex, mgr, xf, flags, lights);
+  GXSetClipPlane(GX_TRUE, plane);
+  DrawHologram(mgr, xf, CModelFlags(CModelFlags::kT_Opaque, 1.f));
+  GXSetClipPlane(GX_FALSE, nullptr);
+  if (mSuitArmModelData) {
+    const CTransform4f arm =
+        xf * mSolidModelData->GetScaledLocatorTransform(rstl::string_l(skElbowLocator));
+    mSuitArmModelData->Render(mgr, arm, lights, flags.UseShaderSet(mCurrentPlayerSuit));
+  }
+}
+#endif
 
 void CGunWeapon::DrawHologram(const CStateManager& mgr, const CTransform4f& xf,
                               const CModelFlags& flags) const {
