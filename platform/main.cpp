@@ -1178,24 +1178,6 @@ int main(int argc, char** argv) {
   }
 #endif
 
-  // The disc, resolved and - if the image is missing or is not this game - picked from the
-  // user's storage, all before Aurora comes up: `EnsureDiscImage` says why the trigger is the
-  // image not being usable rather than the disc check after the renderer starts. The desktop
-  // keeps the resolution it always had, below.
-#if defined(__ANDROID__)
-  const std::string androidDiscImage =
-      optionsOnly ? std::string() : EnsureDiscImage(port::entry::ResolveDiscPath(argc, argv, EnvOrFallback("MP2_DISC", appPaths.disc),
-                                                   ExecutableDir(argc > 0 ? argv[0] : nullptr)),
-                      appPaths.disc);
-  if (!optionsOnly && androidDiscImage.empty()) {
-    // Nothing was picked, so there is nothing to boot: exiting here, before Aurora is up,
-    // rather than at the disc check below, which would bring the renderer up only to close it.
-    std::fprintf(stderr, "metroid_prime2_port: no disc image to boot\n");
-    PortLogDrain();
-    return 1;
-  }
-#endif
-
   // The touch overlay's own settings live in the user directory, next to the memory card:
   // the layout the player moved, and which of the two layouts is active. On the desktop this
   // is MP2_USER_PATH or nothing at all - there is no overlay there, and an empty directory
@@ -1229,10 +1211,10 @@ int main(int argc, char** argv) {
   // desktop keeps the resolution it always had, below.
 #if defined(__ANDROID__)
   const std::string androidDiscImage =
-      EnsureDiscImage(port::entry::ResolveDiscPath(argc, argv, AndroidDiscFallback(appPaths).c_str(),
+      optionsOnly ? std::string() : EnsureDiscImage(port::entry::ResolveDiscPath(argc, argv, AndroidDiscFallback(appPaths).c_str(),
                                                    ExecutableDir(argc > 0 ? argv[0] : nullptr)),
                       appPaths.disc);
-  if (androidDiscImage.empty()) {
+  if (!optionsOnly && androidDiscImage.empty()) {
     // Nothing was picked, so there is nothing to boot: exiting here, before Aurora is up,
     // rather than at the disc check below, which would bring the renderer up only to close it.
     std::fprintf(stderr, "metroid_prime2_port: no disc image to boot\n");
