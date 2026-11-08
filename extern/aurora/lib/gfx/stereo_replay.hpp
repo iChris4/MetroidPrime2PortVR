@@ -496,8 +496,14 @@ inline EyeUvRect head_locked_plane_uv_rect(const Mat4x4<float>& eyeFrustum,
   }
   // A corner of the rectangle on the plane, into the eye's view space, then
   // through the frustum's four terms into the eye's texture coordinates.
+  // plane.offsetX/offsetY is the same constant shift of the plane's center
+  // compose_hud_screen_projection applies to the quad itself (screen.offsetX/Y
+  // there); omitting it here would copy from where the plane used to be while
+  // the quad it's painted onto has already moved, cropping the content at
+  // whatever edge of the stale capture the moved quad now overhangs.
   const auto project = [&](float nx, float ny, float& u, float& v) {
-    const float p[3] = {nx * plane.halfWidth, ny * plane.halfHeight, -plane.distance};
+    const float p[3] = {nx * plane.halfWidth + plane.offsetX, ny * plane.halfHeight + plane.offsetY,
+                        -plane.distance};
     float e[3];
     for (size_t row = 0; row < 3; ++row) {
       const auto& m = *(&headLockedViewFromCenter.m0 + row);
