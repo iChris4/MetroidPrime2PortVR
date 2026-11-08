@@ -19,7 +19,12 @@ launcher_bridge.cpp the game's name.
 - Dawn is the same revision as Prime's, so its visionOS packages are interchangeable.
 - Checked in the visionOS simulator: the USA NKit disc mounts (G2ME01 1.00), the session reaches
   FOCUSED, the health warning shows on the virtual screen, and a quit saves settings.cfg and returns
-  to the launcher. Unchecked: everything on a headset (Sense controllers, comfort, pacing).
+  to the launcher.
+- The first headset run crashed at Play in Dawn's MetalPixelFormat: BC texture compression is
+  enabled on the iOS family but mapped to Metal only on macOS (tools/Build-VisionOSDawn.sh now
+  patches it), and port_logfile.cpp's forked copier left the log empty there (fork() is forbidden on
+  the iOS family; a thread copies instead). After both: the session reaches FOCUSED on the headset
+  and a quit is clean. Unchecked: gameplay in stereo, the Sense controllers, comfort.
 
 ## The Rezbit virus in the headset (2026-11-04)
 
