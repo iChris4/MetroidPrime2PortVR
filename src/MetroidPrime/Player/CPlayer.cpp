@@ -1043,6 +1043,15 @@ void CPlayer::UpdateGunTransform(const CVector3f& position, CStateManager& mgr) 
     UpdateAssistedAiming(vrAimTransform, mgr);
     return;
   }
+  // PortVr: without a tracked controller (a gamepad), an L lock turns the cannon to the target
+  // as the TV camera did, which the level headset view no longer does. The camera the holster
+  // pose is built from turns with it.
+  CTransform4f portVrLockTurn = CTransform4f::Identity();
+  if (mgr.GetPlayer(0) == this && PortVr::VrLockAimTurn(mgr, *this, cameraTransform, portVrLockTurn)) {
+    cameraTransform = portVrLockTurn * cameraTransform;
+    gunPosition = portVrLockTurn * gunPosition;
+    gunTransform = portVrLockTurn * gunTransform;
+  }
 #endif
 #ifdef TARGET_PC
   // Port: pointer aim (MP1's pointer block in CPlayer::UpdateGunTransform). The gun sits off to
