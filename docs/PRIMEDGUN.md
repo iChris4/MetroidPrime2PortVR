@@ -1,5 +1,26 @@
 # PrimedGun Echoes: engineering notes
 
+## Apple Vision Pro (2026-11-08)
+
+The Metroid Prime port's visionOS layer (its docs/VISIONOS.md and PORT_NOTES entry of the same day),
+which comes from Wiicompiled VR, carried over: docs/VISIONOS.md here. The files are shared with
+PrimedGun v2 byte for byte (platform/vr/visionos, openxr_metal.mm, platform/visionos,
+extern/aurora/lib/webgpu/metal_interop.cpp, visionos/App) except visionos/App/GameInfo.swift,
+the app's names and the icon. Echoes' differences are CMake definitions, not edits:
+visionos_host.mm gets `MP2_` switches, `settings.cfg` and `metroid_prime2_port`
+(MP_VISIONOS_ENV_PREFIX, MP_VISIONOS_SETTINGS_FILE, MP_VISIONOS_PROGRAM_NAME), and
+launcher_bridge.cpp the game's name.
+
+- The CMake structure differs from Prime's: openxr_metal.mm is in mp_port_vr; the framework
+  (MetroidPrime2Game) is assembled from the scoped module objects as the other branches are, and
+  links without aurora::main; MP_SDK_HEADERS_ONLY=OFF comes from visionos/Build-VisionOS.sh.
+- The REL module scoping runs with `--format macho` there as on iOS; llvm-objcopy comes from
+  Homebrew's llvm.
+- Dawn is the same revision as Prime's, so its visionOS packages are interchangeable.
+- Checked in the visionOS simulator: the USA NKit disc mounts (G2ME01 1.00), the session reaches
+  FOCUSED, the health warning shows on the virtual screen, and a quit saves settings.cfg and returns
+  to the launcher. Unchecked: everything on a headset (Sense controllers, comfort, pacing).
+
 ## The Rezbit virus in the headset (2026-11-04)
 
 User report: a Rezbit's virus (`CPlayer::StartRezbitState`, held until the L + R + B reboot that
