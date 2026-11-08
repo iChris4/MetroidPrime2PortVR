@@ -1426,8 +1426,9 @@ void set_stereo_diagnostics(bool enabled) noexcept {
 
 uint8_t stereo_draw_route() noexcept { return g_recorder.stereoRoute; }
 
-void set_stereo_head_locked_plane(float tanHalfWidth, float tanHalfHeight, float distance) noexcept {
-  g_recorder.headLockedPlane = {tanHalfWidth, tanHalfHeight, distance};
+void set_stereo_head_locked_plane(float tanHalfWidth, float tanHalfHeight, float distance, float offsetX,
+                                  float offsetY) noexcept {
+  g_recorder.headLockedPlane = {tanHalfWidth, tanHalfHeight, distance, offsetX, offsetY};
 }
 
 stereo_replay::HeadLockedPlane stereo_head_locked_plane() noexcept { return g_recorder.headLockedPlane; }

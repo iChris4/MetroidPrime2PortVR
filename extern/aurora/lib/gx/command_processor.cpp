@@ -2449,12 +2449,14 @@ void handle_aurora(ByteReader& reader) noexcept {
     const f32 tanHalfWidth = reader.read<f32>();
     const f32 tanHalfHeight = reader.read<f32>();
     const f32 distance = reader.read<f32>();
+    const f32 offsetX = reader.read<f32>();
+    const f32 offsetY = reader.read<f32>();
     const auto current = gfx::stereo_head_locked_plane();
     if (current.tanHalfWidth != tanHalfWidth || current.tanHalfHeight != tanHalfHeight ||
-        current.distance != distance) {
+        current.distance != distance || current.offsetX != offsetX || current.offsetY != offsetY) {
       // The eye copies of a 2D draw on the plane depend on it.
       g_gxState.dirty |= DirtyUniform;
-      gfx::set_stereo_head_locked_plane(tanHalfWidth, tanHalfHeight, distance);
+      gfx::set_stereo_head_locked_plane(tanHalfWidth, tanHalfHeight, distance, offsetX, offsetY);
     }
   } else if (subCmd == GX_AURORA_STEREO_PLACEMENT_3D) {
     gfx::StereoPlacement3D placement;

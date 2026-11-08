@@ -266,6 +266,11 @@ struct HudScreen {
   float halfWidth = 0.0f;
   float halfHeight = 0.0f;
   float distance = 0.0f;
+  // Constant shift of the screen's center, in the same recorded-space units as
+  // halfWidth/halfHeight (meters at `distance`): right/up positive. Lets a
+  // calibration offset move the screen without changing its size.
+  float offsetX = 0.0f;
+  float offsetY = 0.0f;
 
   [[nodiscard]] bool valid() const noexcept { return halfWidth > 0.0f && halfHeight > 0.0f && distance > 0.0f; }
 };
@@ -362,6 +367,10 @@ inline Mat4x4<float> compose_hud_screen_projection(const Mat4x4<float>& eyeFrust
     screenPoint.m1[i] = frameProjection.m1[i] * screen.halfHeight;
     screenPoint.m2[i] = 0.0f;
   }
+  // The offset is a constant shift of the screen's center, so like -distance it
+  // only lands in the homogeneous (i == 3) term, not in the NDC-dependent ones.
+  screenPoint.m0[3] += screen.offsetX;
+  screenPoint.m1[3] += screen.offsetY;
   screenPoint.m2[3] = -screen.distance;
 
   // The same functionals carried into eye view space. viewFromCenter's own
@@ -412,6 +421,10 @@ struct HeadLockedPlane {
   float tanHalfWidth = 0.0f;  // tan of half the view angle the viewport spans across
   float tanHalfHeight = 0.0f; // tan of half the view angle it spans up
   float distance = 0.0f;      // along the view, in the recorded space's units
+  // Constant shift of the plane's center, in the same raw units as
+  // tanHalfWidth/tanHalfHeight*distance, before the head-locked scales.
+  float offsetX = 0.0f;
+  float offsetY = 0.0f;
 
   [[nodiscard]] bool valid() const noexcept {
     return tanHalfWidth > 0.0f && tanHalfHeight > 0.0f && distance > 0.0f;
@@ -429,6 +442,8 @@ inline HudScreen head_locked_plane_screen(const HeadLockedPlane& plane, float sc
       .halfWidth = plane.tanHalfWidth * plane.distance * scaleXY,
       .halfHeight = plane.tanHalfHeight * plane.distance * scaleXY,
       .distance = plane.distance * scaleZ,
+      .offsetX = plane.offsetX * scaleXY,
+      .offsetY = plane.offsetY * scaleXY,
   };
 }
 
