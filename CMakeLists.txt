@@ -1,7 +1,18 @@
 cmake_minimum_required(VERSION 3.25)
 project(metroid_prime2_port LANGUAGES C CXX)
-if(IOS)
-    enable_language(OBJCXX)  # platform/port_ios.mm (disc picker, Documents folder)
+# Apple Vision Pro (docs/VISIONOS.md). CMake sets no IOS for it, so it has a switch of its own.
+# The game is built here as a framework (MetroidPrime2Game.framework) that the SwiftUI app in
+# visionos/ embeds; visionos/Build-VisionOS.sh drives both builds.
+if(CMAKE_SYSTEM_NAME STREQUAL "visionOS")
+    set(MP_VISIONOS ON)
+else()
+    set(MP_VISIONOS OFF)
+endif()
+if(IOS OR MP_VISIONOS)
+    enable_language(OBJCXX)  # platform/port_ios.mm (disc picker, Documents folder), platform/visionos
+endif()
+if(MP_VISIONOS)
+    add_compile_definitions(MP_PLATFORM_VISIONOS=1)
 endif()
 
 # Native-PC port scaffold for Metroid Prime 2: Echoes (`G2ME01`), a fork of the
@@ -101,8 +112,9 @@ set(MP_DOL_SYMBOLS "${CMAKE_CURRENT_SOURCE_DIR}/config/G2ME01/symbols.txt" CACHE
 # PrimedGun Echoes: OpenXR VR (docs/PRIMEDGUN.md): Windows D3D12 or Vulkan, and the Quest
 # (Android Vulkan). The VR host layer is platform/vr, its Aurora side
 # extern/aurora/lib/stereo*. Off, the game builds without it (the PortVr calls compile to stubs).
+# Apple Vision Pro (Metal) goes through the OpenXR provider in platform/vr/visionos.
 set(MP_ENABLE_OPENXR_DEFAULT OFF)
-if(WIN32)
+if(WIN32 OR MP_VISIONOS)
     set(MP_ENABLE_OPENXR_DEFAULT ON)
 endif()
 option(MP_ENABLE_OPENXR "Build OpenXR VR support (PrimedGun Echoes)" ${MP_ENABLE_OPENXR_DEFAULT})
@@ -150,9 +162,38 @@ target_compile_definitions(mp_game PUBLIC MUSY_TARGET=MUSY_TARGET_PC)
 # fetched at configure time (static loader), as the Metroid Prime VR fork does.
 set(MP_OPENXR_TARGET "")
 if(MP_ENABLE_OPENXR)
-    if(NOT WIN32 AND NOT ANDROID)
-        message(WARNING "OpenXR is only wired for Windows and Android (Quest) in PrimedGun Echoes; disabling MP_ENABLE_OPENXR")
+    if(NOT WIN32 AND NOT ANDROID AND NOT MP_VISIONOS)
+        message(WARNING "OpenXR is only wired for Windows, Android (Quest) and visionOS in PrimedGun Echoes; disabling MP_ENABLE_OPENXR")
         set(MP_ENABLE_OPENXR OFF)
+    elseif(MP_VISIONOS)
+        # visionOS has no OpenXR runtime. platform/vr/visionos implements the xr* entry points
+        # the host layer calls on top of CompositorServices and ARKit (Wiicompiled VR's provider),
+        # and is linked in place of the Khronos loader; only the SDK's headers are used.
+        include(FetchContent)
+        FetchContent_Declare(openxr
+            URL https://github.com/KhronosGroup/OpenXR-SDK/archive/refs/tags/release-1.1.61.tar.gz
+            URL_HASH SHA256=d5e2773d282642e6e250bd10266f316fc3ff3b8602c83db009a1f434205998e6
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+            SOURCE_SUBDIR include-only-no-cmake)
+        FetchContent_MakeAvailable(openxr)
+        add_library(mp_openxr_headers INTERFACE)
+        target_include_directories(mp_openxr_headers SYSTEM INTERFACE "${openxr_SOURCE_DIR}/include")
+        add_library(mp_openxr_visionos STATIC
+            platform/vr/visionos/xr_visionos_runtime.mm
+            platform/vr/visionos/xr_visionos_compositor.mm
+            platform/vr/visionos/xr_visionos_input.mm
+            platform/vr/visionos/xr_visionos_hand_tracking.mm
+            platform/vr/visionos/xr_visionos_accessories.mm)
+        target_include_directories(mp_openxr_visionos PUBLIC platform/include)
+        target_link_libraries(mp_openxr_visionos PUBLIC mp_openxr_headers)
+        target_compile_options(mp_openxr_visionos PRIVATE -fobjc-arc)
+        set_target_properties(mp_openxr_visionos PROPERTIES UNITY_BUILD OFF)
+        foreach(framework CompositorServices ARKit Metal IOSurface QuartzCore Foundation GameController
+                CoreHaptics)
+            target_link_libraries(mp_openxr_visionos PUBLIC "-framework ${framework}")
+        endforeach()
+        set(MP_OPENXR_TARGET mp_openxr_visionos)
+        message(STATUS "OpenXR VR enabled (visionOS provider ${MP_OPENXR_TARGET})")
     else()
         if(NOT MP_OPENXR_SDK_DIR AND NOT FETCHCONTENT_SOURCE_DIR_OPENXR)
             find_package(OpenXR CONFIG QUIET)
@@ -856,6 +897,11 @@ if(AURORA_SDL3_TARGET)
                 platform/vr/openxr_android.cpp
                 platform/vr/openxr_vulkan.cpp
                 platform/vr/openxr_vulkan_direct.cpp)
+        elseif(MP_VISIONOS)
+            # Apple Vision Pro: Dawn Metal on one side, the visionOS provider's IOSurface
+            # swapchains on the other (Aurora's lib/webgpu/metal_interop.cpp in between).
+            target_sources(mp_port_vr PRIVATE platform/vr/openxr_metal.mm)
+            set_source_files_properties(platform/vr/openxr_metal.mm PROPERTIES COMPILE_OPTIONS -fobjc-arc)
         endif()
         # The platform files that call into the VR layer (main.cpp, port_events.cpp, the F1 page).
         target_compile_definitions(mp_port_entry PRIVATE MP_ENABLE_OPENXR=1)
@@ -1223,6 +1269,41 @@ elseif(IOS)
         MACOSX_BUNDLE_BUNDLE_VERSION "${MP_APP_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${MP_APP_VERSION}"
         MACOSX_BUNDLE_LONG_VERSION_STRING "${MP_APP_VERSION}")
+elseif(MP_VISIONOS)
+    # Apple Vision Pro: SwiftUI owns main() and the immersive space, so the game is a framework the
+    # app in visionos/ embeds and links, driven through platform/include/visionos/*.h. The game runs
+    # on a thread of its own (visionos_host.mm). port_ios.mm supplies the Documents and Caches
+    # folders main.cpp's SDL_PLATFORM_IOS paths use; SDL defines that macro on visionOS too.
+    add_library(metroid_prime2_port SHARED
+        platform/port_ios.mm
+        platform/visionos/visionos_host.mm
+        platform/visionos/launcher_bridge.cpp)
+    set_source_files_properties(platform/port_ios.mm platform/visionos/visionos_host.mm
+        PROPERTIES COMPILE_OPTIONS -fobjc-arc)
+    set(MP_VISIONOS_FRAMEWORK_NAME "MetroidPrime2Game" CACHE STRING "Name of the game framework")
+    set(MP_VISIONOS_FRAMEWORK_ID "org.primedgun.echoes.vision.game" CACHE STRING
+        "Bundle identifier of the game framework")
+    file(STRINGS android/app/build.gradle _mp_version_line REGEX "versionName \"[^\"]+\"" LIMIT_COUNT 1)
+    string(REGEX REPLACE ".*versionName \"([^\"]+)\".*" "\\1" MP_APP_VERSION "${_mp_version_line}")
+    set_target_properties(metroid_prime2_port PROPERTIES
+        FRAMEWORK TRUE
+        OUTPUT_NAME "${MP_VISIONOS_FRAMEWORK_NAME}"
+        MACOSX_FRAMEWORK_IDENTIFIER "${MP_VISIONOS_FRAMEWORK_ID}"
+        MACOSX_FRAMEWORK_SHORT_VERSION_STRING "${MP_APP_VERSION}"
+        MACOSX_FRAMEWORK_BUNDLE_VERSION "${MP_APP_VERSION}"
+        INSTALL_NAME_DIR "@rpath"
+        BUILD_WITH_INSTALL_NAME_DIR ON
+        PUBLIC_HEADER "platform/include/visionos/visionos_host.h;platform/include/visionos/launcher_bridge.h")
+    # The host glue's switches and names are Echoes' (MP2_*, settings.cfg).
+    set_source_files_properties(platform/visionos/visionos_host.mm PROPERTIES COMPILE_DEFINITIONS
+        "MP_VISIONOS_ENV_PREFIX=\"MP2_\";MP_VISIONOS_SETTINGS_FILE=\"settings.cfg\";MP_VISIONOS_PROGRAM_NAME=\"metroid_prime2_port\"")
+    set_source_files_properties(platform/visionos/launcher_bridge.cpp PROPERTIES COMPILE_DEFINITIONS
+        "MP_VISIONOS_GAME_NAME=\"Metroid Prime 2: Echoes\"")
+    target_include_directories(metroid_prime2_port PRIVATE platform/include launcher/core
+        $<TARGET_PROPERTY:${AURORA_SDL3_TARGET},INTERFACE_INCLUDE_DIRECTORIES>)
+    target_link_libraries(metroid_prime2_port PRIVATE primedgun_launcher_core ${AURORA_SDL3_TARGET}
+        "-framework UIKit" "-framework UniformTypeIdentifiers" "-framework GameController"
+        "-framework AVFoundation" "-framework AudioToolbox" "-framework CoreAudio")
 else()
     add_executable(metroid_prime2_port)
 endif()
@@ -1275,7 +1356,12 @@ endif()
 
 # aurora_core (webgpu/gpu.cpp) and aurora_gx reference each other; group them so the
 # linker rescans and resolves the cycle. Same construct, same reason, as the Prime 1 port.
-if(MSVC)
+if(MP_VISIONOS)
+    # Not aurora::main: its SDL main() would start SDL's UIKit application, and SwiftUI owns the
+    # process there. platform/main.cpp's main is aurora_main (aurora/main.h), which
+    # platform/visionos/visionos_host.mm calls on the game thread. ld64 rescans archives.
+    target_link_libraries(metroid_prime2_port PRIVATE mp_game aurora::core aurora::gx)
+elseif(MSVC)
     target_link_libraries(metroid_prime2_port PRIVATE mp_game aurora::main aurora::core aurora::gx)
     target_link_options(metroid_prime2_port PRIVATE /INCREMENTAL:NO)
 elseif(CMAKE_LINK_GROUP_USING_RESCAN_SUPPORTED OR CMAKE_CXX_LINK_GROUP_USING_RESCAN_SUPPORTED)
@@ -1401,7 +1487,7 @@ endif()
 
 # Install rules (desktop only): the executable, and for Linux menus and software centres the desktop
 # entry (Categories=Game), its icon under the app id, and the AppStream metainfo (category Game).
-if(NOT ANDROID AND NOT IOS)
+if(NOT ANDROID AND NOT IOS AND NOT MP_VISIONOS)
     include(GNUInstallDirs)
     install(TARGETS metroid_prime2_port RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     if(NOT MP_EMBED_RESOURCES)
