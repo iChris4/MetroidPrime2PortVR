@@ -1612,22 +1612,6 @@ std::array<uint32_t, 2> stage_stereo_uniforms(const uint8_t* mono, Range monoRan
       } else if (onPlane) {
         clips[eye] = stereo_replay::compose_head_locked_2d_projection(
             params.projection, params.headLockedViewFromCenter, plane, monoProjection);
-        // TEMP DIAGNOSTIC, remove once confirmed: once per distinct plane offset, the
-        // resulting clip matrix's rows that carry clip.x/y/w, so we can check by hand
-        // whether this quad's own projection actually moved.
-        if (eye == 0) {
-          static float sLastPlaneOffX = -999.f, sLastPlaneOffY = -999.f;
-          if (plane.offsetX != sLastPlaneOffX || plane.offsetY != sLastPlaneOffY) {
-            Log.info("[hudoffset-diag3] onPlane offsetX={} offsetY={} halfW={} halfH={} dist={} -> "
-                     "clip m0={},{},{},{} m1={},{},{},{} m3={},{},{},{}",
-                     plane.offsetX, plane.offsetY, plane.halfWidth, plane.halfHeight, plane.distance,
-                     clips[eye].m0[0], clips[eye].m0[1], clips[eye].m0[2], clips[eye].m0[3], clips[eye].m1[0],
-                     clips[eye].m1[1], clips[eye].m1[2], clips[eye].m1[3], clips[eye].m3[0], clips[eye].m3[1],
-                     clips[eye].m3[2], clips[eye].m3[3]);
-            sLastPlaneOffX = plane.offsetX;
-            sLastPlaneOffY = plane.offsetY;
-          }
-        }
       } else {
         const Mat3x4<float> placedViewFromCenter = placed3D ? placedView(params) : params.viewFromCenter;
         const Mat3x4<float>& viewFromCenter = headLocked                            ? params.headLockedViewFromCenter
@@ -1638,21 +1622,6 @@ std::array<uint32_t, 2> stage_stereo_uniforms(const uint8_t* mono, Range monoRan
                                       viewFromCenter, positionScaleXY, positionScaleZ,
                                       headLocked ? state.headLockedOffsetX : 0.0f,
                                       headLocked ? state.headLockedOffsetY : 0.0f);
-        // TEMP DIAGNOSTIC, remove once confirmed: once per distinct offset while this is a
-        // head-locked draw, the resulting clip matrix's rows that carry clip.x/y/w.
-        if (eye == 0 && headLocked) {
-          static float sLastEyeClipOffX = -999.f, sLastEyeClipOffY = -999.f;
-          if (state.headLockedOffsetX != sLastEyeClipOffX || state.headLockedOffsetY != sLastEyeClipOffY) {
-            Log.info("[hudoffset-diag4] compose_eye_clip route={} offsetX={} offsetY={} scaleXY={} scaleZ={} -> "
-                     "clip m0={},{},{},{} m1={},{},{},{} m3={},{},{},{}",
-                     route, state.headLockedOffsetX, state.headLockedOffsetY, positionScaleXY, positionScaleZ,
-                     clips[eye].m0[0], clips[eye].m0[1], clips[eye].m0[2], clips[eye].m0[3], clips[eye].m1[0],
-                     clips[eye].m1[1], clips[eye].m1[2], clips[eye].m1[3], clips[eye].m3[0], clips[eye].m3[1],
-                     clips[eye].m3[2], clips[eye].m3[3]);
-            sLastEyeClipOffX = state.headLockedOffsetX;
-            sLastEyeClipOffY = state.headLockedOffsetY;
-          }
-        }
       }
     }
     return stage_eye_clips(clips, true);

@@ -588,14 +588,6 @@ void aurora_set_stereo_head_locked(float sizeScale, float distanceScale, float o
   g_headLockedDistance.store(distanceScale > 0.0f ? distanceScale : 1.0f, std::memory_order_relaxed);
   g_headLockedOffsetX.store(offsetX, std::memory_order_relaxed);
   g_headLockedOffsetY.store(offsetY, std::memory_order_relaxed);
-  // TEMP DIAGNOSTIC, remove once confirmed.
-  static float sLastOffsetX = -999.f, sLastOffsetY = -999.f;
-  if (offsetX != sLastOffsetX || offsetY != sLastOffsetY) {
-    Log.info("[hudoffset-diag2] aurora_set_stereo_head_locked sizeScale={} distanceScale={} offsetX={} offsetY={}",
-             sizeScale, distanceScale, offsetX, offsetY);
-    sLastOffsetX = offsetX;
-    sLastOffsetY = offsetY;
-  }
 }
 
 void aurora_set_stereo_visor(float eyeOffsetScale) {
