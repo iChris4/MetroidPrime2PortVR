@@ -210,20 +210,25 @@ inline Mat4x4<float> compose_eye_clip(const Mat4x4<float>& eyeProjection, const 
                     projectionRow[2] * pose[2][column] + projectionRow[3] * pose[3][column];
     }
   }
-  // An off-axis shift, the same technique a camera's principal point uses: add
-  // offsetX/offsetY times each row's own column-3 (its contribution to clip.w)
-  // into that row's column-0/1 (its contribution to clip.x/y). For any vertex V,
-  // clip.x = V . out_column0, clip.w = V . out_column3; after this, clip.x_new =
-  // clip.x + offsetX * clip.w, so screen.x = clip.x_new / clip.w = screen.x_old +
-  // offsetX: a constant screen-space shift, independent of the vertex. Plain
-  // translation (e.g. in viewFromCenter's column 3) cannot do this: in this
-  // row-vector convention it only ever reaches column 3 (clip.w) of `out`,
-  // never columns 0/1, so it changes apparent scale, not position.
+  // An off-axis shift, the same technique a camera's principal point uses.
+  // The shader computes `vec4f(mv_pos, 1) * ubuf.proj`: WGSL stores a mat4x4
+  // as four columns, and the upload copies m0..m3 in as those four columns in
+  // order, so for any vertex V, clip.x = V . m0 and clip.w = V . m3 (each a
+  // dot product against ONE whole field, not one component picked from each
+  // of the four). So the edit that makes clip.x_new = clip.x_old +
+  // offsetX*clip.w_old for every vertex is m0_new = m0_old + offsetX*m3_old,
+  // as a whole-vector add (and the matching m1/offsetY for clip.y) - NOT
+  // `m_row[0] += offsetX*m_row[3]` applied per row, which was tried first:
+  // that adds offsetX*m_row[3]*V[row] to clip.x, a shift proportional to the
+  // vertex's own local coordinate (a shear) rather than a constant, and was
+  // confirmed on-device to cut/shear the HUD instead of translating it.
+  // Plain translation (e.g. in viewFromCenter's column 3) cannot do this
+  // either: it only ever reaches clip.w, never clip.x/y, so it changes
+  // apparent scale, not position.
   if (offsetX != 0.0f || offsetY != 0.0f) {
-    for (size_t row = 0; row < 4; ++row) {
-      auto& dst = *(&out.m0 + row);
-      dst[0] += offsetX * dst[3];
-      dst[1] += offsetY * dst[3];
+    for (size_t i = 0; i < 4; ++i) {
+      out.m0[i] += offsetX * out.m3[i];
+      out.m1[i] += offsetY * out.m3[i];
     }
   }
   return out;
