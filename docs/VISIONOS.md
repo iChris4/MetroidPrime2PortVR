@@ -11,6 +11,7 @@ visionOS files this repository shares.
 | Part | State |
 |---|---|
 | Build for the device and the simulator | Works. |
+| Signing, installing on the headset, copying a disc image to it | Works (`--install`, `devicectl device copy to`). |
 | Launcher, disc import, disc check | Works in the simulator. |
 | Game start, OpenXR session, first screen on the virtual screen | Works in the simulator (head tracking only): the USA NKit disc mounts and the health warning shows. |
 | Quit and return to the launcher | Works in the simulator. |
