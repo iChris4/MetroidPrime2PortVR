@@ -94,7 +94,13 @@ void CFirstPersonCamera::UpdateTransform(CStateManager& mgr, float dt) {
   float cosPitch = cosf(mPitch);
   cosPitch = CMath::Limit(cosPitch, 1.f);
   CVector3f lookDir = playerXf.Rotate(CVector3f(0.f, cosPitch, sinPitch));
-  if (player->IsInFreeLook()) {
+  if (player->IsInFreeLook()
+#ifdef TARGET_PC
+      // PortVr: in the headset R's free look aims the cannon alone
+      // (PortVr::VrPadAimTurn); the view stays on the body's facing.
+      && !PortVr::VrFlattenLookPitch()
+#endif
+  ) {
     const float freeLookPitch = player->GetFreeLookAngleX();
     float angle = mPitch + freeLookPitch;
     if (!CMath::IsEpsilon(freeLookPitch, 0.f, 0.00001f)) {

@@ -1044,13 +1044,13 @@ void CPlayer::UpdateGunTransform(const CVector3f& position, CStateManager& mgr) 
     return;
   }
   // PortVr: without a tracked controller (a gamepad), an L lock turns the cannon to the target
-  // as the TV camera did, which the level headset view no longer does. The camera the holster
-  // pose is built from turns with it.
-  CTransform4f portVrLockTurn = CTransform4f::Identity();
-  if (mgr.GetPlayer(0) == this && PortVr::VrLockAimTurn(mgr, *this, cameraTransform, portVrLockTurn)) {
-    cameraTransform = portVrLockTurn * cameraTransform;
-    gunPosition = portVrLockTurn * gunPosition;
-    gunTransform = portVrLockTurn * gunTransform;
+  // and R's free look tilts it, as the TV camera did; the level headset view does not. The
+  // camera the holster pose is built from turns with it.
+  CTransform4f portVrPadTurn = CTransform4f::Identity();
+  if (mgr.GetPlayer(0) == this && PortVr::VrPadAimTurn(mgr, *this, cameraTransform, portVrPadTurn)) {
+    cameraTransform = portVrPadTurn * cameraTransform;
+    gunPosition = portVrPadTurn * gunPosition;
+    gunTransform = portVrPadTurn * gunTransform;
   }
 #endif
 #ifdef TARGET_PC
