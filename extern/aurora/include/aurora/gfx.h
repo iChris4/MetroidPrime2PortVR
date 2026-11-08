@@ -224,8 +224,13 @@ typedef enum AuroraStereoDrawRoute {
 // AURORA_STEREO_ROUTE_HEAD_LOCKED draws are scaled about the camera origin
 // before the eye offset: sizeScale sets their angular size, distanceScale
 // their distance (0.75 and 0.75: the HUD at three quarters of its authored
-// size and distance). Read at frame begin.
-void aurora_set_stereo_head_locked(float sizeScale, float distanceScale);
+// size and distance). offsetX/offsetY are an off-axis shift (the same
+// technique a camera's principal point uses), applied in compose_eye_clip: a
+// constant shift of the on-screen position, right/up positive, in clip-space
+// NDC-like fractions of the half-screen (roughly -1..1 for the full frustum
+// edge to edge), independent of sizeScale/distanceScale. A calibration nudge,
+// not a content-space move. Read at frame begin.
+void aurora_set_stereo_head_locked(float sizeScale, float distanceScale, float offsetX = 0.0f, float offsetY = 0.0f);
 // AURORA_STEREO_ROUTE_VISOR draws see each eye's offset from the head centre
 // times eyeOffsetScale (1 by default: true depth). A draw at distance d is then
 // seen at d / eyeOffsetScale. Read at frame begin.

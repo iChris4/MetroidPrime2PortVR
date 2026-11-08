@@ -188,7 +188,8 @@ inline void compose_stereo_uniform(uint8_t* uniform, const StereoUniformLayout& 
 // the head-locked scales. Rows of the column-vector matrix, as Aurora stores
 // them (the shader computes vec4 * mat).
 inline Mat4x4<float> compose_eye_clip(const Mat4x4<float>& eyeProjection, const Mat3x4<float>& viewFromCenter,
-                                      float positionScaleXY, float positionScaleZ) noexcept {
+                                      float positionScaleXY, float positionScaleZ, float offsetX = 0.0f,
+                                      float offsetY = 0.0f) noexcept {
   // The pose with the scales applied on its right (columns), as a 4x4.
   const float scales[3] = {positionScaleXY, positionScaleXY, positionScaleZ};
   float pose[4][4] = {};
@@ -207,6 +208,22 @@ inline Mat4x4<float> compose_eye_clip(const Mat4x4<float>& eyeProjection, const 
     for (size_t column = 0; column < 4; ++column) {
       dst[column] = projectionRow[0] * pose[0][column] + projectionRow[1] * pose[1][column] +
                     projectionRow[2] * pose[2][column] + projectionRow[3] * pose[3][column];
+    }
+  }
+  // An off-axis shift, the same technique a camera's principal point uses: add
+  // offsetX/offsetY times each row's own column-3 (its contribution to clip.w)
+  // into that row's column-0/1 (its contribution to clip.x/y). For any vertex V,
+  // clip.x = V . out_column0, clip.w = V . out_column3; after this, clip.x_new =
+  // clip.x + offsetX * clip.w, so screen.x = clip.x_new / clip.w = screen.x_old +
+  // offsetX: a constant screen-space shift, independent of the vertex. Plain
+  // translation (e.g. in viewFromCenter's column 3) cannot do this: in this
+  // row-vector convention it only ever reaches column 3 (clip.w) of `out`,
+  // never columns 0/1, so it changes apparent scale, not position.
+  if (offsetX != 0.0f || offsetY != 0.0f) {
+    for (size_t row = 0; row < 4; ++row) {
+      auto& dst = *(&out.m0 + row);
+      dst[0] += offsetX * dst[3];
+      dst[1] += offsetY * dst[3];
     }
   }
   return out;

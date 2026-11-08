@@ -24,11 +24,27 @@ val upstreamCmakeArguments = listOf(
     "-DMP_ANDROID_NOD_STUB=OFF",
     "-DAURORA_SDL3_PROVIDER=vendor",
     "-DAURORA_SDL3_LINKAGE=static",
-    "-DAURORA_DAWN_PROVIDER=package",
+    // LOCAL BUILD WORKAROUND, not for upstream: Odrannnn/dawn's android-aarch64 (and
+    // linux-aarch64) release assets 504 consistently across every recent release tag
+    // (confirmed with curl against the raw GitHub URLs, not a cmake/network fluke here).
+    // vendor builds from the same ref's source archive instead, which is unaffected.
+    "-DAURORA_DAWN_PROVIDER=vendor",
     "-DAURORA_DAWN_LINKAGE=static",
     "-DAURORA_NOD_PROVIDER=vendor",
     "-DAURORA_NOD_LINKAGE=static",
+    // LOCAL BUILD WORKAROUND, not for upstream: facebook/zstd's v1.5.7 release asset
+    // also 504s consistently from here (same symptom as the Dawn package above, a
+    // different repo entirely). Aurora's own zstd fetch (WebGPU pipeline cache
+    // compression, unrelated to anything in this patch) is optional; turning it off
+    // skips that fetch rather than chasing a mirror with a matching hash.
+    "-DAURORA_CACHE_USE_ZSTD=OFF",
     "-DRust_CARGO_TARGET=aarch64-linux-android",
+    // LOCAL BUILD WORKAROUND, not for upstream: AGP picks the SDK's own bundled
+    // ninja (cmake/3.22.1, Ninja 1.10.2) for CMAKE_MAKE_PROGRAM regardless of what
+    // local.properties' cmake.dir points at. Dawn's Tracy dependency needs Ninja
+    // 1.11+ for C++20 modules. This comes after upstreamCmakeArguments on the
+    // actual command line, so it overrides AGP's own -DCMAKE_MAKE_PROGRAM=.
+    "-DCMAKE_MAKE_PROGRAM=/home/linuxbrew/.linuxbrew/bin/ninja",
 )
 // The module-scoping step runs tools/scope_module.py, and CMake's FindPython3 does not look
 // outside the NDK sysroot, so the host interpreter is named (upstream's hostPython3; Build-Quest.ps1
@@ -46,6 +62,10 @@ val questCmakeArguments = listOf(
     // The launcher panel's native half (launcher/jni): the PC launcher's core.
     "-DMP_BUILD_QUEST_LAUNCHER=ON",
     "-DPython3_EXECUTABLE=" + hostPython.replace('\\', '/'),
+    // LOCAL BUILD WORKAROUND, not for upstream: Dawn's vendored protobuf needs a
+    // host protoc when cross-compiling for Android (it generates code at build
+    // time, which can't run as an arm64-v8a Android binary).
+    "-DPROTOC_EXECUTABLE=/home/linuxbrew/.linuxbrew/bin/protoc",
 )
 // PrimedGun's patched Dawn (quest/Build-QuestDawn.ps1: Vulkan multiview, so one render
 // pass draws both eyes), as the package Build-Quest.ps1 passes with -PquestDawnPackage;

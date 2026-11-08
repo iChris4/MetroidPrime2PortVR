@@ -90,6 +90,12 @@ struct StereoFrameState {
   // it (z) the distance, so a camera-space HUD can be shrunk and pulled closer.
   float headLockedScaleXY = 1.0f;
   float headLockedScaleZ = 1.0f;
+  // A calibration nudge of head-locked content's on-screen position: an off-
+  // axis shift (aurora_set_stereo_head_locked), applied in compose_eye_clip as
+  // a constant shift in clip-space NDC-like fractions of the half-screen
+  // (right/up positive), independent of headLockedScaleXY/Z.
+  float headLockedOffsetX = 0.0f;
+  float headLockedOffsetY = 0.0f;
   // AURORA_STEREO_ROUTE_SCREEN_2D draws: the virtual screen they are laid on
   // (stereo_replay.hpp compose_screen_2d_projection), its half width and its
   // distance ahead in the recorded space's units; its height follows the

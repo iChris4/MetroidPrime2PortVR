@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+#include <cstdio>
+
 #include "vr/vr_view.h"
 
 #include "vr/openxr_controller_snapshot.h"
@@ -578,8 +580,21 @@ void VrHeadLockedOffsets(float tanHalfWidth, float tanHalfHeight, float distance
     const float netY = settings.metroid_hud_offset_up - settings.metroid_hud_offset_down;
     const float halfWidth = tanHalfWidth * distance;
     const float halfHeight = tanHalfHeight * distance;
-    offsetX = netX * halfWidth;
-    offsetY = netY * halfHeight;
+    // A calibration nudge, not "slide it off its own half-width": net=1 (the slider's
+    // full range) shifts the plane by 15% of its half-width/height, matching the scale
+    // vr_settings.cpp uses for the same sliders' other consumer (aurora_set_stereo_head_locked).
+    constexpr float kHudOffsetFullRange = 0.15f;
+    offsetX = netX * halfWidth * kHudOffsetFullRange;
+    offsetY = netY * halfHeight * kHudOffsetFullRange;
+    // TEMP DIAGNOSTIC, remove once confirmed: log once per distinct (netX, netY) so we
+    // can tell from the log whether this function is even called, and with what.
+    static float sLastNetX = -999.f, sLastNetY = -999.f;
+    if (netX != sLastNetX || netY != sLastNetY) {
+        std::fprintf(stderr, "[hudoffset-diag] netX=%.3f netY=%.3f tanHalfW=%.3f tanHalfH=%.3f dist=%.3f -> offsetX=%.3f offsetY=%.3f\n",
+                     netX, netY, tanHalfWidth, tanHalfHeight, distance, offsetX, offsetY);
+        sLastNetX = netX;
+        sLastNetY = netY;
+    }
 }
 
 namespace {

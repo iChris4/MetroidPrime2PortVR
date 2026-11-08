@@ -1619,7 +1619,9 @@ std::array<uint32_t, 2> stage_stereo_uniforms(const uint8_t* mono, Range monoRan
                                               : route == AURORA_STEREO_ROUTE_SKY ? params.skyViewFromCenter
                                                                                  : placedViewFromCenter;
         clips[eye] = compose_eye_clip(stereo_replay::compose_projection(params.projection, monoProjection),
-                                      viewFromCenter, positionScaleXY, positionScaleZ);
+                                      viewFromCenter, positionScaleXY, positionScaleZ,
+                                      headLocked ? state.headLockedOffsetX : 0.0f,
+                                      headLocked ? state.headLockedOffsetY : 0.0f);
       }
     }
     return stage_eye_clips(clips, true);

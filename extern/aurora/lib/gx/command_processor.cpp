@@ -1638,6 +1638,7 @@ static void reconcile_merge_state(GXPrimitive prim, GXVtxFmt fmt) noexcept {
   if (cache.uniformRoute != gfx::stereo_draw_route() ||
       cache.uniformPlane.tanHalfWidth != plane.tanHalfWidth ||
       cache.uniformPlane.tanHalfHeight != plane.tanHalfHeight || cache.uniformPlane.distance != plane.distance ||
+      cache.uniformPlane.offsetX != plane.offsetX || cache.uniformPlane.offsetY != plane.offsetY ||
       cache.uniformScreenTexMtx.texSlot != screen.texSlot || cache.uniformScreenTexMtx.pnSlot != screen.pnSlot ||
       !(cache.uniformPlacement == gfx::stereo_placement_3d())) {
     state.dirty |= DirtyUniform;
