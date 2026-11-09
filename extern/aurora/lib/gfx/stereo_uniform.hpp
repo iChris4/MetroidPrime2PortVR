@@ -210,21 +210,9 @@ inline Mat4x4<float> compose_eye_clip(const Mat4x4<float>& eyeProjection, const 
                     projectionRow[2] * pose[2][column] + projectionRow[3] * pose[3][column];
     }
   }
-  // An off-axis shift, the same technique a camera's principal point uses.
-  // The shader computes `vec4f(mv_pos, 1) * ubuf.proj`: WGSL stores a mat4x4
-  // as four columns, and the upload copies m0..m3 in as those four columns in
-  // order, so for any vertex V, clip.x = V . m0 and clip.w = V . m3 (each a
-  // dot product against ONE whole field, not one component picked from each
-  // of the four). So the edit that makes clip.x_new = clip.x_old +
-  // offsetX*clip.w_old for every vertex is m0_new = m0_old + offsetX*m3_old,
-  // as a whole-vector add (and the matching m1/offsetY for clip.y) - NOT
-  // `m_row[0] += offsetX*m_row[3]` applied per row, which was tried first:
-  // that adds offsetX*m_row[3]*V[row] to clip.x, a shift proportional to the
-  // vertex's own local coordinate (a shear) rather than a constant, and was
-  // confirmed on-device to cut/shear the HUD instead of translating it.
-  // Plain translation (e.g. in viewFromCenter's column 3) cannot do this
-  // either: it only ever reaches clip.w, never clip.x/y, so it changes
-  // apparent scale, not position.
+  // An off-axis shift: clip.x = V . m0 and clip.w = V . m3 (each a dot
+  // product against one whole field), so m0 += offsetX * m3 shifts clip.x by
+  // a constant offsetX*clip.w for every vertex.
   if (offsetX != 0.0f || offsetY != 0.0f) {
     for (size_t i = 0; i < 4; ++i) {
       out.m0[i] += offsetX * out.m3[i];

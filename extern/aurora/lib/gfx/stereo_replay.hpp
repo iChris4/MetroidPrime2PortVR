@@ -266,9 +266,6 @@ struct HudScreen {
   float halfWidth = 0.0f;
   float halfHeight = 0.0f;
   float distance = 0.0f;
-  // Constant shift of the screen's center, in the same recorded-space units as
-  // halfWidth/halfHeight (meters at `distance`): right/up positive. Lets a
-  // calibration offset move the screen without changing its size.
   float offsetX = 0.0f;
   float offsetY = 0.0f;
 
@@ -367,8 +364,6 @@ inline Mat4x4<float> compose_hud_screen_projection(const Mat4x4<float>& eyeFrust
     screenPoint.m1[i] = frameProjection.m1[i] * screen.halfHeight;
     screenPoint.m2[i] = 0.0f;
   }
-  // The offset is a constant shift of the screen's center, so like -distance it
-  // only lands in the homogeneous (i == 3) term, not in the NDC-dependent ones.
   screenPoint.m0[3] += screen.offsetX;
   screenPoint.m1[3] += screen.offsetY;
   screenPoint.m2[3] = -screen.distance;
@@ -421,8 +416,6 @@ struct HeadLockedPlane {
   float tanHalfWidth = 0.0f;  // tan of half the view angle the viewport spans across
   float tanHalfHeight = 0.0f; // tan of half the view angle it spans up
   float distance = 0.0f;      // along the view, in the recorded space's units
-  // Constant shift of the plane's center, in the same raw units as
-  // tanHalfWidth/tanHalfHeight*distance, before the head-locked scales.
   float offsetX = 0.0f;
   float offsetY = 0.0f;
 
@@ -496,11 +489,6 @@ inline EyeUvRect head_locked_plane_uv_rect(const Mat4x4<float>& eyeFrustum,
   }
   // A corner of the rectangle on the plane, into the eye's view space, then
   // through the frustum's four terms into the eye's texture coordinates.
-  // plane.offsetX/offsetY is the same constant shift of the plane's center
-  // compose_hud_screen_projection applies to the quad itself (screen.offsetX/Y
-  // there); omitting it here would copy from where the plane used to be while
-  // the quad it's painted onto has already moved, cropping the content at
-  // whatever edge of the stale capture the moved quad now overhangs.
   const auto project = [&](float nx, float ny, float& u, float& v) {
     const float p[3] = {nx * plane.halfWidth + plane.offsetX, ny * plane.halfHeight + plane.offsetY,
                         -plane.distance};

@@ -55,8 +55,6 @@ std::atomic<float> g_headLockedSize{1.0f};
 std::atomic<float> g_headLockedDistance{1.0f};
 // AURORA_STEREO_ROUTE_VISOR's eye offset factor (aurora_set_stereo_visor).
 std::atomic<float> g_visorEyeOffsetScale{1.0f};
-// A calibration nudge of the head-locked view's own translation, in real-world
-// meters (right/up positive), unaffected by g_headLockedSize/g_headLockedDistance.
 std::atomic<float> g_headLockedOffsetX{0.0f};
 std::atomic<float> g_headLockedOffsetY{0.0f};
 // AURORA_STEREO_ROUTE_SCREEN_2D's virtual screen, in the recorded space's units.
@@ -198,11 +196,6 @@ gfx::StereoFrameState begin_frame(uint64_t contentTag) noexcept {
   const float headLockedDistance = g_headLockedDistance.load(std::memory_order_relaxed);
   state.headLockedScaleXY = g_headLockedSize.load(std::memory_order_relaxed) * headLockedDistance;
   state.headLockedScaleZ = headLockedDistance;
-  // A calibration nudge of head-locked content's on-screen position (off-axis
-  // shift, applied in compose_eye_clip): unlike the scales above, this is
-  // unrelated to the per-eye IPD offset computed into headLockedViewFromCenter
-  // below, which keeps the head's rotation and position out so only this
-  // eye's offset from the head centre remains.
   state.headLockedOffsetX = g_headLockedOffsetX.load(std::memory_order_relaxed);
   state.headLockedOffsetY = g_headLockedOffsetY.load(std::memory_order_relaxed);
   state.screen2DHalfWidth = g_screen2DHalfWidth.load(std::memory_order_relaxed);

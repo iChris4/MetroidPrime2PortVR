@@ -572,15 +572,10 @@ void VrHeadLockedScales(float& xy, float& depth) noexcept {
 void VrHeadLockedOffsets(float tanHalfWidth, float tanHalfHeight, float distance, float& offsetX,
                          float& offsetY) noexcept {
     const PortVrSettings& settings = GetVrSettings();
-    // Each axis is a non-negative push each way (calibration_tab.cpp AddHudAxis);
-    // the net is the usual signed slider value, -2..2.
     const float netX = settings.metroid_hud_offset_right - settings.metroid_hud_offset_left;
     const float netY = settings.metroid_hud_offset_up - settings.metroid_hud_offset_down;
     const float halfWidth = tanHalfWidth * distance;
     const float halfHeight = tanHalfHeight * distance;
-    // A calibration nudge, not "slide it off its own half-width": net=1 shifts the plane
-    // by 15% of its half-width/height, matching the scale vr_settings.cpp uses for the
-    // same sliders' other consumer (aurora_set_stereo_head_locked).
     constexpr float kHudOffsetFullRange = 0.15f;
     offsetX = netX * halfWidth * kHudOffsetFullRange;
     offsetY = netY * halfHeight * kHudOffsetFullRange;
@@ -629,9 +624,6 @@ bool VrHeadLockedPlaneRay(const CTransform4f& cameraXf, float ndcX, float ndcY, 
     float depth = 1.f;
     VrHeadLockedScales(xy, depth);
     const float across = depth > 0.f ? xy / depth : 1.f;
-    // The calibration offset is a linear shift at s_headLockedPlaneDistance (as noted by the
-    // caller); dividing by that distance turns it into the same tangent space as
-    // s_headLockedPlaneTanHalfWidth/Height, so it can scale by `across` the same way.
     const float offsetTanX = s_headLockedPlaneDistance > 0.f ? s_headLockedPlaneOffsetX / s_headLockedPlaneDistance : 0.f;
     const float offsetTanY = s_headLockedPlaneDistance > 0.f ? s_headLockedPlaneOffsetY / s_headLockedPlaneDistance : 0.f;
     direction = view.GetForward() +

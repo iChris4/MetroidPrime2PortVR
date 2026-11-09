@@ -359,12 +359,7 @@ void PushVrSettingsToAurora() noexcept {
     PrimeVRPolicyConfigure(policy);
     // PrimedGun's HUD distance and size: in the native build both are factors
     // of the HUD frame's authored distance and size (0.75 each by default).
-    // vr_metroid_hud_offset_up/down/left/right (calibration_tab.cpp AddHudAxis: each
-    // axis a non-negative push each way, net is the usual signed -2..2) become an
-    // off-axis shift (aurora_set_stereo_head_locked's offsetX/offsetY): clip-space
-    // NDC-like fractions of the half-screen, independent of metroid_hud_size/distance
-    // above. 0.15f full-range (15% of the half-screen) is a first guess, not measured
-    // against a headset; retune if it over- or under-shoots.
+    // HUD offset in vertical/horizontal direction.
     constexpr float kHudOffsetNdcFullRange = 0.15f;
     const float hudOffsetX =
         (settings.metroid_hud_offset_right - settings.metroid_hud_offset_left) * kHudOffsetNdcFullRange;

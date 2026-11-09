@@ -164,20 +164,12 @@ void VrMapHologram(float& distance, float& halfHeight, float& clearance, float& 
 // a HUD position's x and z (Prime camera space) by `xy`, its depth (y) by `depth`.
 void VrHeadLockedScales(float& xy, float& depth) noexcept;
 // The head-locked route's calibration offset (vr_metroid_hud_offset_up/down/
-// left/right): a constant shift of the HUD's center, in the same raw units as
-// tanHalfWidth/tanHalfHeight * distance (i.e. before VrHeadLockedScales' `xy`
-// applies), given the raw tangents/distance the caller is about to place the
-// plane at. Right/up positive, scaled to 15% of the plane's half-width/height
-// at the slider's net 1 (vr_settings.cpp's kHudOffsetNdcFullRange uses the
-// same 15% for its own, clip-space-fraction consumer). Net range is -2..2 on
-// each axis.
+// left/right): a constant shift of the HUD's center.
 void VrHeadLockedOffsets(float tanHalfWidth, float tanHalfHeight, float distance, float& offsetX,
                          float& offsetY) noexcept;
 // PrimedGun Echoes: the head-locked plane (AuroraSetStereoHeadLockedPlane, from
 // CInGameGuiManager::Draw): its tangents and its distance in the game camera's
-// units, before the head-locked scales, plus the calibration offset in the
-// same raw units (VrHeadLockedOffsets' output). Defaulted so existing callers
-// that never offset the plane don't need to change.
+// units, before the head-locked scales.
 void VrNoteHeadLockedPlane(float tanHalfWidth, float tanHalfHeight, float distance, float offsetX = 0.0f,
                            float offsetY = 0.0f) noexcept;
 // The noted plane's distance; 0 before one is noted.
