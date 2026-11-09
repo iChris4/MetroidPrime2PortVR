@@ -523,8 +523,7 @@ void AuroraFreeGeometrySet(u32 set);
  * The plane in front of the head that AURORA_STEREO_ROUTE_HEAD_LOCKED_2D lays orthographic draws on and takes EFB
  * copies through: the tangents of the half angles the mono viewport spans across and up (those of the HUD camera the
  * 2D draws should stay registered with) and the plane's distance along the view, in the game camera's units, before
- * the head-locked scales. Ordered with the draws through the FIFO; offsetX/offsetY shift the HUD; kept until set
- * again.
+ * the head-locked scales. Ordered with the draws through the FIFO; offsetX/offsetY shift the HUD; kept until set again.
  */
 void AuroraSetStereoHeadLockedPlane(f32 tanHalfWidth, f32 tanHalfHeight, f32 distance, f32 offsetX = 0.0f,
                                     f32 offsetY = 0.0f);
