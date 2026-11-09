@@ -288,6 +288,28 @@ TEST_F(GXDrawMergeTest, EquivalentFinalStateMergesAfterRegisterChanges) {
   EXPECT_EQ(aurora::gfx::g_testLastDraw.instanceCount, 2u);
 }
 
+TEST_F(GXDrawMergeTest, ScanIdsSplitDrawsSharingTheSamePipeline) {
+  g_gxState.pixelFmt = GX_PF_RGBA6_Z24;
+  g_gxState.alphaUpdate = true;
+  const auto drawId = [&](u32 id) {
+    g_gxState.dstAlpha = id;
+    g_gxState.dirty |= aurora::gx::DirtyPipeline;
+    Draw(GX_TRIANGLES, 3);
+  };
+  drawId(0);
+  drawId(24);
+  EXPECT_EQ(aurora::gfx::g_testDrawCount, 2u);
+  EXPECT_EQ(aurora::gfx::g_testLastDraw.dstAlpha, 24u);
+  drawId(24);
+  EXPECT_EQ(aurora::gfx::g_testDrawCount, 2u);
+  drawId(28);
+  EXPECT_EQ(aurora::gfx::g_testDrawCount, 3u);
+  EXPECT_EQ(aurora::gfx::g_testLastDraw.dstAlpha, 28u);
+  drawId(0);
+  EXPECT_EQ(aurora::gfx::g_testDrawCount, 4u);
+  EXPECT_EQ(aurora::gfx::g_testLastDraw.dstAlpha, 0u);
+}
+
 TEST_F(GXDrawMergeTest, ChangedSampledTextureStillSplits) {
   aurora::gx::testing::sampledTexture = true;
   const auto setTexture = [](uintptr_t view) {

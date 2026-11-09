@@ -171,6 +171,29 @@ TEST_F(GXGeometryCacheTest, AStateChangeStartsANewDraw) {
   EXPECT_EQ(staged_indices(aurora::gfx::g_testLastDraw), (std::vector<u32>{3, 4, 5}));
 }
 
+TEST_F(GXGeometryCacheTest, NativeSurfacesKeepTheirOwnScanIds) {
+  enable_native_input();
+  const auto list = display_list({0, 1, 2});
+  g_gxState.pixelFmt = GX_PF_RGBA6_Z24;
+  g_gxState.alphaUpdate = true;
+  const auto drawId = [&](u32 id) {
+    g_gxState.dstAlpha = id;
+    g_gxState.dirty |= aurora::gx::DirtyPipeline;
+    call(1, list);
+  };
+  drawId(0);
+  drawId(24);
+  EXPECT_EQ(aurora::gfx::g_testDrawCount, 2u);
+  EXPECT_EQ(aurora::gfx::g_testLastDraw.dstAlpha, 24u);
+  drawId(24);
+  EXPECT_EQ(aurora::gfx::g_testDrawCount, 2u);
+  drawId(28);
+  EXPECT_EQ(aurora::gfx::g_testDrawCount, 3u);
+  EXPECT_EQ(aurora::gfx::g_testLastDraw.dstAlpha, 28u);
+  drawId(0);
+  EXPECT_EQ(aurora::gfx::g_testDrawCount, 4u);
+}
+
 TEST_F(GXGeometryCacheTest, CachedAndPlainDrawsDoNotJoin) {
   const auto list = display_list({0, 1, 2});
   call(1, list);
