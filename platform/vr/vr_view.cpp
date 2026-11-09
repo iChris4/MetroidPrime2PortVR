@@ -575,7 +575,7 @@ void VrHeadLockedOffsets(float tanHalfWidth, float tanHalfHeight, float distance
                          float& offsetY) noexcept {
     const PortVrSettings& settings = GetVrSettings();
     // Each axis is a non-negative push each way (calibration_tab.cpp AddHudAxis);
-    // the net is the usual signed slider value, -1..1.
+    // the net is the usual signed slider value, -2..2.
     const float netX = settings.metroid_hud_offset_right - settings.metroid_hud_offset_left;
     const float netY = settings.metroid_hud_offset_up - settings.metroid_hud_offset_down;
     const float halfWidth = tanHalfWidth * distance;

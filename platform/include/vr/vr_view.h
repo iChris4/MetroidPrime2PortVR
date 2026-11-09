@@ -167,8 +167,10 @@ void VrHeadLockedScales(float& xy, float& depth) noexcept;
 // left/right): a constant shift of the HUD's center, in the same raw units as
 // tanHalfWidth/tanHalfHeight * distance (i.e. before VrHeadLockedScales' `xy`
 // applies), given the raw tangents/distance the caller is about to place the
-// plane at. Right/up positive. Net range is -1..1 on each axis; at 1 the HUD's
-// center lands where its own edge used to be.
+// plane at. Right/up positive, scaled to 15% of the plane's half-width/height
+// at the slider's net 1 (vr_settings.cpp's kHudOffsetNdcFullRange uses the
+// same 15% for its own, clip-space-fraction consumer). Net range is -2..2 on
+// each axis.
 void VrHeadLockedOffsets(float tanHalfWidth, float tanHalfHeight, float distance, float& offsetX,
                          float& offsetY) noexcept;
 // PrimedGun Echoes: the head-locked plane (AuroraSetStereoHeadLockedPlane, from
