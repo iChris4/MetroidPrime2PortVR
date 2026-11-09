@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-#include <cstdio>
-
 #include "vr/vr_view.h"
 
 #include "vr/openxr_controller_snapshot.h"
