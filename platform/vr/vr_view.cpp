@@ -569,16 +569,33 @@ void VrHeadLockedScales(float& xy, float& depth) noexcept {
     xy = settings.metroid_hud_size * settings.metroid_hud_distance;
 }
 
+void VrHeadLockedOffsets(float tanHalfWidth, float tanHalfHeight, float distance, float& offsetX,
+                         float& offsetY) noexcept {
+    const PortVrSettings& settings = GetVrSettings();
+    const float netX = settings.metroid_hud_offset_right - settings.metroid_hud_offset_left;
+    const float netY = settings.metroid_hud_offset_up - settings.metroid_hud_offset_down;
+    const float halfWidth = tanHalfWidth * distance;
+    const float halfHeight = tanHalfHeight * distance;
+    constexpr float kHudOffsetFullRange = 0.15f;
+    offsetX = netX * halfWidth * kHudOffsetFullRange;
+    offsetY = netY * halfHeight * kHudOffsetFullRange;
+}
+
 namespace {
 float s_headLockedPlaneTanHalfWidth = 0.f;
 float s_headLockedPlaneTanHalfHeight = 0.f;
 float s_headLockedPlaneDistance = 0.f;
+float s_headLockedPlaneOffsetX = 0.f;
+float s_headLockedPlaneOffsetY = 0.f;
 } // namespace
 
-void VrNoteHeadLockedPlane(float tanHalfWidth, float tanHalfHeight, float distance) noexcept {
+void VrNoteHeadLockedPlane(float tanHalfWidth, float tanHalfHeight, float distance, float offsetX,
+                           float offsetY) noexcept {
     s_headLockedPlaneTanHalfWidth = tanHalfWidth;
     s_headLockedPlaneTanHalfHeight = tanHalfHeight;
     s_headLockedPlaneDistance = distance;
+    s_headLockedPlaneOffsetX = offsetX;
+    s_headLockedPlaneOffsetY = offsetY;
 }
 
 float VrHeadLockedPlaneDistance() noexcept { return s_headLockedPlaneDistance; }
@@ -607,8 +624,11 @@ bool VrHeadLockedPlaneRay(const CTransform4f& cameraXf, float ndcX, float ndcY, 
     float depth = 1.f;
     VrHeadLockedScales(xy, depth);
     const float across = depth > 0.f ? xy / depth : 1.f;
-    direction = view.GetForward() + view.GetRight() * (ndcX * s_headLockedPlaneTanHalfWidth * across) +
-                view.GetUp() * (ndcY * s_headLockedPlaneTanHalfHeight * across);
+    const float offsetTanX = s_headLockedPlaneDistance > 0.f ? s_headLockedPlaneOffsetX / s_headLockedPlaneDistance : 0.f;
+    const float offsetTanY = s_headLockedPlaneDistance > 0.f ? s_headLockedPlaneOffsetY / s_headLockedPlaneDistance : 0.f;
+    direction = view.GetForward() +
+                view.GetRight() * ((ndcX * s_headLockedPlaneTanHalfWidth + offsetTanX) * across) +
+                view.GetUp() * ((ndcY * s_headLockedPlaneTanHalfHeight + offsetTanY) * across);
     return true;
 }
 

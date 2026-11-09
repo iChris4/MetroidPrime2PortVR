@@ -353,10 +353,16 @@ void CInGameGuiManager::Draw(const CStateManager& mgr) const {
       const CGuiCamera* vrHudCamera = vrHudFrame->GetFrameCamera();
       if (vrHudCamera != nullptr && vrHudCamera->GetDrawTanHalfWidth() > 0.f) {
         static const float kHudBodyDepth = 20.f;
+        float hudOffsetX = 0.f;
+        float hudOffsetY = 0.f;
+        PortVr::VrHeadLockedOffsets(vrHudCamera->GetDrawTanHalfWidth(), vrHudCamera->GetDrawTanHalfHeight(),
+                                    kHudBodyDepth, hudOffsetX, hudOffsetY);
         AuroraSetStereoHeadLockedPlane(vrHudCamera->GetDrawTanHalfWidth(),
-                                       vrHudCamera->GetDrawTanHalfHeight(), kHudBodyDepth);
+                                       vrHudCamera->GetDrawTanHalfHeight(), kHudBodyDepth, hudOffsetX,
+                                       hudOffsetY);
         PortVr::VrNoteHeadLockedPlane(vrHudCamera->GetDrawTanHalfWidth(),
-                                      vrHudCamera->GetDrawTanHalfHeight(), kHudBodyDepth);
+                                      vrHudCamera->GetDrawTanHalfHeight(), kHudBodyDepth, hudOffsetX,
+                                      hudOffsetY);
       }
     }
 #endif
