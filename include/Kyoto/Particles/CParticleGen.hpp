@@ -34,6 +34,10 @@ public:
   // scaling the particles themselves: HUD effects use it to cover a view wider than 4:3. `origin`
   // is the parent's translation: a child placed off it (SSPO/SEPO) has its offset spread too.
   virtual void PortSetSpawnSpread(const CVector3f& spread, const CVector3f& origin) {}
+  // PortVr: a visor effect's generator (CHUDBillboardEffect), placed in the game camera's space,
+  // drawn between PortVr::VrBeginVisorDraw and VrEndVisorDraw (vr/vr_view.h).
+  void PortSetVisor(bool visor) { mPortVisor = visor; }
+  bool PortIsVisor() const { return mPortVisor; }
 #endif
   // Names of the draw-flag methods are hypotheses based on the sDrawFlags/sDrawMask Wii exports.
   virtual void SetDrawFlags(uint flags) { mDrawFlags = flags; }
@@ -66,6 +70,9 @@ protected:
 
 private:
   uint mDrawFlags;
+#ifdef TARGET_PC
+  bool mPortVisor = false;
+#endif
 };
 
 inline CParticleGen::~CParticleGen() {}

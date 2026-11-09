@@ -13,6 +13,8 @@
 #include "Kyoto/Particles/CElementGen.hpp"
 #ifdef TARGET_PC
 #include "vr/vr_view.h"
+
+#include <cmath>
 #endif
 #include "Kyoto/Particles/CGenDescription.hpp"
 #include "Kyoto/Particles/CParticleElectric.hpp"
@@ -24,18 +26,31 @@ int CHUDBillboardEffect::g_IndirectTexturedBillboardCount = 0;
 
 #ifdef TARGET_PC
 // Port: the effects are authored to fill a 4:3 view (GetScaleForPOV). Wider screens keep the
-// vertical FOV and extend sideways, narrower ones extend vertically (Vert+), so spread where the
-// particles and bolts spawn along the extended axis. Scaling the system instead would stretch
-// every sprite and bolt with it.
+// vertical FOV and extend sideways, narrower ones extend vertically (Vert+), and the headset's
+// eyes see wider still, so spread where the particles and bolts spawn along the extended axes.
+// Scaling the system instead would stretch every sprite and bolt with it.
 void CHUDBillboardEffect::PortUpdateSpawnSpread(const CStateManager& mgr) {
   CVector3f spread(1.f, 1.f, 1.f);
   const float kMinAspect = 4.f / 3.f;
-  const float aspect =
-      mgr.GetCameraManager(mPlayerIndex)->GetCurrentCamera(mgr, true)->GetAspectRatio();
+  const CGameCamera& cam = *mgr.GetCameraManager(mPlayerIndex)->GetCurrentCamera(mgr, true);
+  const float aspect = cam.GetAspectRatio();
   if (aspect > kMinAspect) {
     spread.SetX(aspect / kMinAspect);
   } else if (aspect > 0.f) {
     spread.SetZ(kMinAspect / aspect);
+  }
+  // PortVr: the eyes see far more than the game camera, so in the headset the effect spreads over
+  // their whole view, as it covers the screen on the TV, instead of a box ahead. The authored
+  // frame's half height is this tangent from the eye (4:3 at the unwidened FOV).
+  float eyeTanWidth;
+  float eyeTanHeight;
+  if (mGenerator->PortIsVisor() && PortVr::VrEyeTangents(eyeTanWidth, eyeTanHeight)) {
+    const float frameTan = std::tan(cam.GetRenderFov() * (3.14159265f / 180.f) * 0.5f) *
+                           rstl::min_val(1.f, aspect / kMinAspect);
+    if (frameTan > 0.f) {
+      spread.SetX(rstl::max_val(spread.GetX(), eyeTanWidth / (kMinAspect * frameTan)));
+      spread.SetZ(rstl::max_val(spread.GetZ(), eyeTanHeight / frameTan));
+    }
   }
   if (spread == mPortSpawnSpread) {
     return;
@@ -76,7 +91,19 @@ void CHUDBillboardEffect::Render(const CStateManager& mgr) const {
       far = CGraphics::GetDepthFar();
       CGraphics::SetDepthRange(1.f / 256.f, 1.f / 64.f);
     }
+#ifdef TARGET_PC
+    // PortVr: a visor effect follows the head (vr/vr_view.h).
+    const bool portVisor = mGenerator->PortIsVisor();
+    if (portVisor) {
+      PortVr::VrBeginVisorDraw();
+    }
     mGenerator->Render();
+    if (portVisor) {
+      PortVr::VrEndVisorDraw();
+    }
+#else
+    mGenerator->Render();
+#endif
     if (mAdjustDepthRange) {
       CGraphics::SetDepthRange(near, far);
     }
@@ -90,15 +117,7 @@ void CHUDBillboardEffect::PreRender(CStateManager& mgr) {
   }
 
   if (mgr.GetCurrentRenderPlayer()->GetCameraState() == CPlayer::kCS_FirstPerson) {
-#ifdef TARGET_PC
-    // PortVr: the visor's effects (splashes, goo) stay ahead of the head, where the visor is.
     CTransform4f camXf = mgr.GetCurrentRenderCameraManager()->GetCurrentCameraTransform(mgr, true);
-    if (mPlayerIndex == 0) {
-      camXf = PortVr::VrHeadViewTransform(camXf);
-    }
-#else
-    CTransform4f camXf = mgr.GetCurrentRenderCameraManager()->GetCurrentCameraTransform(mgr, true);
-#endif
     mGenerator->SetGlobalTranslation(camXf * mTranslation);
     mGenerator->SetGlobalOrientation(camXf);
 #ifdef TARGET_PC
@@ -160,6 +179,16 @@ CHUDBillboardEffect::CHUDBillboardEffect(
   ++g_BillboardCount;
   mGenerator->SetModulationColor(color);
   mGenerator->SetLocalScale(mLocalScale);
+#ifdef TARGET_PC
+  // PortVr: the headset player's effect stays in the game camera's space, as on the TV, and is
+  // drawn on the visor route (vr/vr_view.h VrBeginVisorDraw: by Render below, or by the renderer's
+  // sorted list), which the eyes see head-locked: it follows the head exactly, roll included.
+  // Placed ahead of a CPU head pose instead, it lagged the eyes, dropped the head's roll and,
+  // 0.01 units past the near plane, was clipped by a few millimetres of head movement.
+  if (mPlayerIndex == 0) {
+    mGenerator->PortSetVisor(true);
+  }
+#endif
 }
 
 float CHUDBillboardEffect::GetNearClipDistance(const CStateManager& mgr, int playerIndex) {

@@ -581,8 +581,12 @@ void CParticleSwoosh::Render2SidedNoSplineNoGaps() {
           (CTransform4f::Translate(mGlobalTranslation) * mGlobalOrientation * mScaleXf)
               .GetInverse();
 #ifdef TARGET_PC
-      // PortVr: the two-sided ribbons turn to the head, not the body's camera.
-      const CTransform4f camera = inverse * PortVr::VrHeadViewTransform(CGraphics::GetViewMatrix());
+      // PortVr: the two-sided ribbons turn to the head, not the body's camera (unless a visor
+      // draw's camera space is already the head's).
+      const CTransform4f camera =
+          inverse * (PortVr::VrParticlesFaceHead()
+                         ? PortVr::VrHeadViewTransform(CGraphics::GetViewMatrix())
+                         : CGraphics::GetViewMatrix());
 #else
       const CTransform4f camera = inverse * CGraphics::GetViewMatrix();
 #endif

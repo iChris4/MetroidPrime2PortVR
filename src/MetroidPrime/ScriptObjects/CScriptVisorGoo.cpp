@@ -16,6 +16,9 @@
 #include "Kyoto/Particles/CGenDescription.hpp"
 
 #include "rstl/math.hpp"
+#ifdef TARGET_PC
+#include "vr/vr_view.h"
+#endif
 
 CScriptVisorGoo::CScriptVisorGoo(TUniqueId uid, const rstl::string& name, const CEntityInfo& info,
                                  const CTransform4f& xf, CAssetId particle, CAssetId electric,
@@ -106,10 +109,19 @@ void CScriptVisorGoo::Think(float, CStateManager& mgr) {
         const float eyeToGooDist = eyeToGoo.Magnitude();
         if (eyeToGooDist >= mMinRange && eyeToGooDist <= mMaxRange) {
           if (mViewCheck) {
+#ifdef TARGET_PC
+            // PortVr: goo lands on the headset player's visor when the head faces it, not the body.
+            CTransform4f portCamXf = player->GetCameraManager()->GetCurrentCameraTransform(mgr, true);
+            if (i == 0) {
+              portCamXf = PortVr::VrHeadViewTransform(portCamXf);
+            }
+            const CVector3f colNorm = portCamXf.GetColumn(kDY).AsNormalized();
+#else
             const CVector3f colNorm = player->GetCameraManager()
                                           ->GetCurrentCameraTransform(mgr, true)
                                           .GetColumn(kDY)
                                           .AsNormalized();
+#endif
             float angleThresh = 45.f;
             const float dot = CMath::Limit(CVector3f::Dot(eyeToGoo.AsNormalized(), colNorm), 1.f);
             const float angle = CMath::Rad2Rev(CMath::FastArcCosR(dot)) * 360.f;

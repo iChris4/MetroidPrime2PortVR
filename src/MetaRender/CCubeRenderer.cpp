@@ -861,8 +861,23 @@ void CCubeRenderer::RenderBucketItems(const CAreaListItem* area, bool alpha) {
       }
       switch (type) {
       case kDT_Particle:
+#ifdef TARGET_PC
+      {
+        CParticleGen* gen =
+            const_cast< CParticleGen* >(static_cast< const CParticleGen* >(drawable->GetData()));
+        // PortVr: a visor effect follows the head (vr/vr_view.h).
+        if (gen->PortIsVisor()) {
+          PortVr::VrBeginVisorDraw();
+          gen->Render();
+          PortVr::VrEndVisorDraw();
+        } else {
+          gen->Render();
+        }
+      }
+#else
         const_cast< CParticleGen* >(static_cast< const CParticleGen* >(drawable->GetData()))
             ->Render();
+#endif
         break;
       case kDT_WorldSurface: {
         if (lastType != type) {

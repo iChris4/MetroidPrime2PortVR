@@ -1,5 +1,27 @@
 # PrimedGun Echoes: engineering notes
 
+## Visor effects follow the head (2026-11-09)
+
+Ported from Prime 1 (MetroidPrimePortVR 344aabfc6, user-confirmed there). Water off the visor, rain
+splashes, goo and hits on the visor are `CHUDBillboardEffect` generators drawn 0.01 units past the
+first-person near plane (0.2). The billboard port placed the headset player's ahead of a CPU head
+pose (`VrHeadViewTransform`: upright, no roll) and drew them as world geometry, so they lagged the
+eyes' own pose, ignored head roll, were clipped by a few millimetres of head movement, sat some
+14 cm from the eyes (about 25 degrees of disparity, which cannot be fused), and the refracting
+(TIND) drops were culled by the body camera's near plane once the head turned away from the body.
+
+Now player 0's effect stays in the game camera's space as on the TV (retail `PreRender`), its
+generator is marked (`CParticleGen::PortSetVisor`), and `CHUDBillboardEffect::Render` (the
+render-last queues) or the renderer's sorted list draws it between `PortVr::VrBeginVisorDraw` and
+`VrEndVisorDraw` on the new aurora route `AURORA_STEREO_ROUTE_VISOR` (12): head-locked like the HUD
+but without its scales, the eye offset scaled by `aurora_set_stereo_visor` (0.21 / (20 units x
+`vr_metroid_hud_distance`), so the effects read at the HUD's distance while their depth stays the
+game's). Inside a visor draw `VrParticlesFaceHead()` is false, so `VrParticleBillboard` and the
+swoosh ribbons keep the TV's camera-facing quads. Spawns spread over the eyes' field of view
+(`VrEyeTangents`) instead of the game camera's 4:3 frame. The visor goo's view check uses the head
+for player 0. Regression: `port_vr_stereo` visor case. The user confirmed in the headset that the
+rain and the water on the visor look good.
+
 ## The Rezbit virus in the headset (2026-11-04)
 
 User report: a Rezbit's virus (`CPlayer::StartRezbitState`, held until the L + R + B reboot that
