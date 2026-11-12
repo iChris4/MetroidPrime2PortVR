@@ -1761,7 +1761,9 @@ static void draw_prim(u8 cmd, GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, Byte
   auto* lastDraw = cleanState ? gfx::get_last_draw_command<DrawData>() : nullptr;
   ByteBuffer* const verts = lastDraw != nullptr ? gfx::staging_verts() : nullptr;
   ByteBuffer* const indices = lastDraw != nullptr ? gfx::staging_indices() : nullptr;
-  const bool canMerge = lastDraw != nullptr && !lastDraw->cachedGeometry &&
+  // Destination alpha is a per-draw blend constant. Pipeline keys deliberately
+  // share enabled constants, but scan IDs must not share a draw's constant.
+  const bool canMerge = lastDraw != nullptr && lastDraw->dstAlpha == g_gxState.dstAlpha && !lastDraw->cachedGeometry &&
                         (lineMode != 0 || lastDraw->instanceCount == 1) &&
                         lastDraw->immediateData.currentPnMtx == g_gxState.currentPnMtx && verts != nullptr &&
                         indices != nullptr &&
@@ -1986,7 +1988,8 @@ static void draw_cached_geometry(GXVtxFmt fmt, const geometry_cache::Entry& entr
   const bool formatDiffers = fmt != sDrawCache.lastDrawFmt || sDrawCache.lineMode != 0;
   auto* lastDraw = drawDirty == 0 && !formatDiffers ? gfx::get_last_draw_command<DrawData>() : nullptr;
   ByteBuffer* const indices = gfx::staging_indices();
-  const bool canMerge = lastDraw != nullptr && lastDraw->cachedGeometry && lastDraw->instanceCount == 1 &&
+  const bool canMerge = lastDraw != nullptr && lastDraw->dstAlpha == g_gxState.dstAlpha &&
+                        lastDraw->cachedGeometry && lastDraw->instanceCount == 1 &&
                         lastDraw->immediateData.currentPnMtx == g_gxState.currentPnMtx && indices != nullptr &&
                         gfx::frame_buffer_sizes().base(gfx::StagingKind::Index) == 0 &&
                         lastDraw->idxRange.offset + lastDraw->idxRange.size == indices->size() &&

@@ -383,6 +383,7 @@ TEST(SceneHdrGx, PbrSourcesSkipTheEncodeOnlyInHdr) {
       // C is in pbr_out, before the tone, so pbr_lin carries it without a second scale.
       EXPECT_NE(hdr.find("let pbr_out = max(pbr_lo + pbr_glow, vec3f(0.0)) * inv_c;"), std::string::npos);
       EXPECT_EQ(hdr.find("*= inv_c"), std::string::npos);
+      EXPECT_NE(ldr.find("pbr_tm *= inv_c;"), std::string::npos);
     }
 
     // Every line HDR adds is about HDR; every LDR line it drops is an output it replaced.
@@ -396,12 +397,17 @@ TEST(SceneHdrGx, PbrSourcesSkipTheEncodeOnlyInHdr) {
       }
     }
     for (const auto& line : h) {
+      if (kind == 36 && line == "      let pbr_out = max(pbr_lo + pbr_glow, vec3f(0.0)) * inv_c;")
+        continue; // HDR applies coverage to linear light rather than the LDR tone result.
       if (!ls.contains(line) && !line.empty() && !hdr_line(line) && !output_line(line) && !screen.contains(line)) {
         // Lines of ToneWgsl itself.
         EXPECT_NE(std::string_view(gfx::hdr::ToneWgsl).find(line), std::string_view::npos) << line;
       }
     }
     for (const auto& line : l) {
+      if (kind == 36 && (line == "      let pbr_out = max(pbr_lo + pbr_glow, vec3f(0.0));" ||
+                         line == "      pbr_tm *= inv_c;"))
+        continue;
       if (!hs.contains(line)) {
         EXPECT_TRUE(output_line(line) || (raw_screen(line) != line && hs.contains(raw_screen(line)))) << line;
       }

@@ -137,7 +137,7 @@ TEST_F(GfxRecordingTest, MapBatchShaderExpandsOutlinesInEveryEyeMode) {
 TEST_F(GfxRecordingTest, MapBatchColoursAndWidthsDoNotSplitUniforms) {
   const auto config = MapBatchConfig().shaderConfig;
   const auto info = gx::build_shader_info(config);
-  EXPECT_FALSE(info.sampledKColors.any());
+  EXPECT_FALSE(info.usesTevKonst);
   EXPECT_FALSE(info.sampledTextures.any());
   EXPECT_EQ(info.lineMode, 0);
   detail::resources().limits.minUniformBufferOffsetAlignment = 256;

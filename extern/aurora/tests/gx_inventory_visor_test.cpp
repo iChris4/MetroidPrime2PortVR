@@ -198,22 +198,25 @@ TEST(GxInventoryVisor, Kind36Wiring) {
   EXPECT_LT(b, diff);
   EXPECT_NE(pos(src, "var pbr_base = inv_b;"), std::string::npos);
   EXPECT_NE(src.find("* inv_a * ubuf.pbr_light_scale.x", diff), std::string::npos);
-  // ICMC (rgb only) is added linearly before the tone curve, and C scales that light once, before the tone
-  // (source (lit + ICMC) * C); the composition precedes the encode. The generic model fade is gone.
+  // ICMC is added before the tone curve. In LDR, coverage scales the toned
+  // foreground once so zero coverage cannot introduce the curve's toe offset.
   const size_t icmc = pos(src, "pbr_glow += ubuf.pbr_model_incan.rgb;");
-  const size_t out = pos(src, "let pbr_out = max(pbr_lo + pbr_glow, vec3f(0.0)) * inv_c;");
+  const size_t out = pos(src, "let pbr_out = max(pbr_lo + pbr_glow, vec3f(0.0));");
   const size_t tone = pos(src, "pbr_tm = clamp(pbr_tm, vec3f(0.0), vec3f(1.0));");
+  const size_t coverage = pos(src, "pbr_tm *= inv_c;");
   const size_t comp = pos(src, "pbr_pass += pbr_sdst");
   const size_t enc = pos(src, "prev = vec4f(srgb_enc(pbr_tm + pbr_pass), pbr_alpha);");
   ASSERT_NE(icmc, std::string::npos);
   ASSERT_NE(out, std::string::npos);
+  ASSERT_NE(coverage, std::string::npos);
   EXPECT_LT(icmc, out);
   EXPECT_LT(out, tone);
-  EXPECT_LT(tone, comp);
+  EXPECT_LT(tone, coverage);
+  EXPECT_LT(coverage, comp);
   EXPECT_LT(comp, enc);
   // C is applied exactly once; ICMC alpha is not read.
   EXPECT_EQ(count(src, "inv_c;"), 1u);
-  EXPECT_EQ(src.find("*= inv_c"), std::string::npos);
+  EXPECT_EQ(count(src, "*= inv_c"), 1u);
   EXPECT_EQ(src.find("pbr_model_incan.w"), std::string::npos);
   EXPECT_EQ(src.find("pbr_model_incan.a"), std::string::npos);
   EXPECT_EQ(src.find("pbr_light_scale.w - 1.0"), std::string::npos);

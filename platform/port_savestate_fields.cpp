@@ -46,9 +46,13 @@
 
 // The version of a kTagFields block, written at its head. 1: engine references were saved in their
 // raw POD bytes, trusted as they were. 2: those references are stable identities (PutUid/GetUid).
-// 3: a body-state command's TUniqueId members are too. A reader takes any policy from 1 to this
-// one, so a block an older port wrote still reads (each rule asks for the level it needs).
-constexpr uint32_t kFieldPolicy = 3;
+// 3: a body-state command's TUniqueId members are too. 4: each class's block is fingerprinted with
+// the fields it saved (BlockFingerprint), so a block written with another field list is skipped;
+// read by position, it put each field's value in the next one's place (a CActor block from before
+// mNotInSortedLists left the list made the scan visor's targets combat-only). A reader takes any
+// policy from 1 to this one, so a block an older port wrote still reads (each rule asks for the level
+// it needs); blocks before 4 no longer match a class (their field list is unknown) and are skipped.
+constexpr uint32_t kFieldPolicy = 4;
 constexpr uint32_t kPolicyBodyCmdUids = 3;
 
 constexpr uint32_t kUidNone = 0xFFFFFFFFu;
@@ -1144,6 +1148,29 @@ bool GetField(CStateManager& mgr, CEntity& ent, const PortSchemaField& f, BlockR
   }
 }
 
+// A class's block fingerprint: the class's layout (the schema's fingerprint) and the names and kinds
+// of the fields SavedField keeps, in order. A block's fields are by position, so a block written
+// while the list differed (a field added or taken out of SavedField) must not be read with this one.
+uint64_t BlockFingerprint(const PortSchemaClass& cls) {
+  uint64_t h = cls.fingerprint ^ 0xcbf29ce484222325ull;
+  const auto mix = [&h](unsigned char c) {
+    h ^= c;
+    h *= 0x100000001b3ull;
+  };
+  for (int i = 0; i < cls.fieldCount; ++i) {
+    const PortSchemaField& f = cls.fields[i];
+    if (!SavedField(cls, f)) {
+      continue;
+    }
+    for (const char* c = f.name; *c != '\0'; ++c) {
+      mix(static_cast< unsigned char >(*c));
+    }
+    mix(static_cast< unsigned char >(f.kind));
+    mix(0xff); // between names
+  }
+  return h;
+}
+
 // One pass over the classes of a kTagFields block (GetField's `pass`).
 int ApplyClasses(CStateManager& mgr, CEntity& ent, const std::vector< const PortSchemaClass* >& chain,
                  int classes, BlockReader& r, int pass, uint32_t policy) {
@@ -1158,7 +1185,7 @@ int ApplyClasses(CStateManager& mgr, CEntity& ent, const std::vector< const Port
     }
     const PortSchemaClass* cls = nullptr;
     for (const PortSchemaClass* k : chain) {
-      if (k->fingerprint == fingerprint) {
+      if (BlockFingerprint(*k) == fingerprint) {
         cls = k;
       }
     }
@@ -1214,8 +1241,9 @@ bool CaptureEntityFields(const CStateManager& mgr, CEntity& ent, std::string& ou
         PutField(mgr, ent, cls->fields[i], body);
       }
     }
-    w.U32(static_cast< uint32_t >(cls->fingerprint));
-    w.U32(static_cast< uint32_t >(cls->fingerprint >> 32));
+    const uint64_t fingerprint = BlockFingerprint(*cls);
+    w.U32(static_cast< uint32_t >(fingerprint));
+    w.U32(static_cast< uint32_t >(fingerprint >> 32));
     w.U32(static_cast< uint32_t >(body.bytes.size()));
     w.bytes += body.bytes;
   }
@@ -1271,7 +1299,7 @@ bool EntityFieldsCover(CEntity& ent, const std::string& data) {
       return false;
     }
     for (const PortSchemaClass* k : chain) {
-      if (k->fingerprint == fingerprint) {
+      if (BlockFingerprint(*k) == fingerprint) {
         ++matched;
       }
     }

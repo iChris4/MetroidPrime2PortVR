@@ -533,8 +533,10 @@ def emit_doc(res):
           "generator made: `platform/port_savestate_fields.cpp` writes it for the objects",
           "`EntityFieldsSaved` names, and applies it in passes - the plain fields, the AI and body",
           "codecs, the animation, the path search, then the plain fields again over what entering the",
-          "saved states changed. A class whose fingerprint changed since the save is skipped, not",
-          "guessed. Plain kinds are written as values; `pointer`, `smart_ptr`, `container` and",
+          "saved states changed. A class block is fingerprinted with the class's layout and the",
+          "fields the save keeps of it (they are written by position): one whose fingerprint changed",
+          "since the save is skipped, not guessed. Plain kinds are written as values; `pointer`,",
+          "`smart_ptr`, `container` and",
           "`other` fields are never written; four kinds have a codec:", "",
           "- `state_machine`: the active state's name, time and delay, and what re-enters it - for an",
           "  FSM1 state its index, drawn randoms and code-trigger flag; for a `CGenericFSM2State` the",
@@ -577,7 +579,11 @@ def emit_doc(res):
           "scrubbed). Unnamed dynamic references retain only a valid rebuilt reference. Policy 1",
           "states remain readable, but their embedded raw IDs are replaced with rebuilt references.",
           "Field policy 3 stores a body-state command's `TUniqueId` member (the wall-hang waypoint)",
-          "the same way, in the command payload's own four bytes; older policies stay readable.", ""]
+          "the same way, in the command payload's own four bytes; older policies stay readable.",
+          "Field policy 4 fingerprints each class block with the fields it saved as well as the class's",
+          "layout: a block written while the saved-field list differed was read one field off (a",
+          "pre-#90 CActor block made scan targets combat-only). Blocks before policy 4 no longer match",
+          "a class and are skipped, as a changed class is.", ""]
     o.append(", ".join(f"`{t}` {n}" for t, n in pods.most_common()))
     o += ["", "## `smart_ptr` / `container` templates", ""]
     o.append(", ".join(f"`{t}` {n}" for t, n in smart.most_common()))

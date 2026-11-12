@@ -29,8 +29,10 @@ An enemy gets one `kTagFields` block in the room record, and so do the pickups a
 generator made: `platform/port_savestate_fields.cpp` writes it for the objects
 `EntityFieldsSaved` names, and applies it in passes - the plain fields, the AI and body
 codecs, the animation, the path search, then the plain fields again over what entering the
-saved states changed. A class whose fingerprint changed since the save is skipped, not
-guessed. Plain kinds are written as values; `pointer`, `smart_ptr`, `container` and
+saved states changed. A class block is fingerprinted with the class's layout and the
+fields the save keeps of it (they are written by position): one whose fingerprint changed
+since the save is skipped, not guessed. Plain kinds are written as values; `pointer`,
+`smart_ptr`, `container` and
 `other` fields are never written; four kinds have a codec:
 
 - `state_machine`: the active state's name, time and delay, and what re-enters it - for an
@@ -180,6 +182,10 @@ scrubbed). Unnamed dynamic references retain only a valid rebuilt reference. Pol
 states remain readable, but their embedded raw IDs are replaced with rebuilt references.
 Field policy 3 stores a body-state command's `TUniqueId` member (the wall-hang waypoint)
 the same way, in the command payload's own four bytes; older policies stay readable.
+Field policy 4 fingerprints each class block with the fields it saved as well as the class's
+layout: a block written while the saved-field list differed was read one field off (a
+pre-#90 CActor block made scan targets combat-only). Blocks before policy 4 no longer match
+a class and are skipped, as a changed class is.
 
 `CDamageInfo` 63, `CSegId` 63, `CColor` 43, `CHealthInfo` 24, `CLineOfSightTracker` 11, `SLdrAudioPlaybackParms` 8, `CCameraSpring` 7, `CSteeringBehaviors` 5, `CModelFlags` 4, `CMaterialList` 4, `int[4]` 4, `SLdrPlasmaBeamInfo` 4, `CBouncyGrenadeData` 3, `CChozoGhost::CBehaveChance` 3, `CShockWaveInfo` 3, `CIngSpotPathFindNavigation` 3, `CVector3f[3]` 3, `CAnimRes` 3, `TAreaId` 2, `TEditorId` 2, `CMaterialFilter` 2, `CRandom16` 2, `CVisualKnowledge` 2, `TUniqueId[2]` 2, `u16[4]` 2, `float[4]` 2, `SLdrDigitalGuardianHeadData` 2, `CAnimationParameters` 2, `CVector3f[4]` 2, `CGunDrawBlockSet` 2, `uchar[3]` 2, `CGrappleParameters` 2, `CRepeatState` 2, `CSafeZoneFog` 2, `CScriptMsg` 2, `bool[4]` 2, `SLdrAIMannedTurretData` 1, `SLdrDarkCommandoData` 1, `SLdrDarkCommandoEMPData` 1, `CDarkSamusData` 1, `uint[3]` 1, `CDarkSamusDash` 1, `CDarkSamus::SAttackWeights` 1, `CDarkSamusMeleeContact` 1, `CWeaponMode` 1, `ushort[18]` 1, `SLdrDSStageInfo` 1, `CDarkTrooper::CMeleeAttack` 1, `CSegId[4]` 1, `CDigitalGuardianData` 1, `CSegId[2]` 1, `CTransform4f[3]` 1, `SLdrAnimationSet` 1, `SLdrEmperorIngStage3Stage[4]` 1, `CFlyingPirate::CFlyingPirateData` 1, `CGameCamera::SFovInterpolation` 1, `CLight` 1, `CGrenchler::SBiteAttack` 1, `CGrenchler::SChargeAttack` 1, `CGrenchler::SVectorTriple` 1, `CVector3f[60]` 1, `SLdrIngPuddleData` 1, `SLdrIngSpaceJumpGuardianData` 1, `SLdrIngSpiderballGuardianData` 1, `CBeamInfo` 1, `CLumite::SSurfaceTarget` 1, `int[2]` 1, `SLdrMysteryFlyerData` 1, `CAdvancementDeltas` 1, `SLdrIngPossessionData` 1, `CAnimationState` 1, `CWaypointNavigation` 1, `CPathFindNavigation` 1, `CMotionState` 1, `CPlayer::CVisorSteam` 1, `short[5]` 1, `CVector2i` 1, `CPlayerBodyController::SJumpState` 1, `CPlayerBodyController::SGrappleState` 1, `CPlayerBodyController::SDashState` 1, `CPlayerBodyController::SKnockBackState` 1, `CPlayerBodyController::SAdditiveAimState` 1, `CPlayerBodyController::SAdditiveFlinchState` 1, `CPlayerBodyController::SAdditiveReactionState` 1, `CPlayerGun::CGunMorph` 1, `CPlayerGun::CMotionState` 1, `CFidget` 1, `SPuddleSporeData` 1, `SLdrRezbitData` 1, `CRezbitEffectOptions` 1, `SLdrSandBossData` 1, `CSegId[8]` 1, `int[8]` 1, `u8[15]` 1, `float[13]` 1, `float[12]` 1, `SSandwormCharge` 1, `SSandwormToss` 1, `SSandwormMelee` 1, `SSandwormBombPhase` 1, `CVector3i` 1, `CHUDMemoParms` 1, `TLayerId` 1, `SLdrRubiksPuzzleData` 1, `uchar[8]` 1, `CScriptTeamAiMgr::CTeamAiData` 1, `CSpacePirateData` 1, `CIkChain` 1, `uchar[48]` 1, `CSplinter::SJumpData` 1, `CSplinter::SSacData` 1, `SLdrSwampBossStage1Data` 1, `SLdrShockWaveInfo` 1, `SLdrSwampBossStage2Data` 1, `CCollisionSurface` 1
 
