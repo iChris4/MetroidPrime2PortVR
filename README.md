@@ -1,6 +1,6 @@
 # PrimedGun Echoes
 
-**Metroid Prime 2: Echoes in native VR, on Windows PC and standalone Meta Quest.**
+**Metroid Prime 2: Echoes in native VR, on Windows PC, standalone Meta Quest and Apple Vision Pro.**
 
 PrimedGun Echoes carries the VR layer of
 [PrimedGun v2](https://github.com/iChris4/MetroidPrimePortVR) (Metroid Prime in VR, by Nobbie and
@@ -17,6 +17,7 @@ package or release built from it.
 ## Features
 
 - Native OpenXR VR on PC (Direct3D 12, or Vulkan for SteamVR headsets such as PSVR2) and standalone Meta Quest (tested on Quest 3).
+- Apple Vision Pro (visionOS 26+, Metal) with PlayStation VR2 Sense controllers or a gamepad; see [docs/VISIONOS.md](docs/VISIONOS.md).
 - Room-scale movement with a modern VR control scheme, snap or smooth turning.
 - 6DOF arm cannon tracking for aiming, grapple, lock-on and left-handed play.
 - One-click height calibration and adjustable cannon position and rotation.
@@ -101,7 +102,12 @@ for the exact build commands of that release. The port itself builds as upstream
 `-DMP_ENABLE_OPENXR=ON` (on by default on Windows), the PC launcher `-DMP_BUILD_LAUNCHER=ON` and Qt
 6.5, and the Quest APK `quest/Build-Quest.ps1`.
 
-Branches: `OpenXR` holds the VR work; `master` tracks upstream's `port` branch.
+Apple Vision Pro: on a Mac with Apple silicon, Xcode with the visionOS platform, CMake 3.28+, Ninja,
+Homebrew's `llvm` and Rust nightly with `rust-src`, run `visionos/Build-VisionOS.sh --team <TEAMID>
+--install` (or `--simulator`). See [docs/VISIONOS.md](docs/VISIONOS.md).
+
+Branches: `OpenXR` holds the VR work; `VisionPro` adds Apple Vision Pro; `master` tracks upstream's
+`port` branch.
 
 ## Credits and licensing
 
@@ -127,6 +133,7 @@ Retro Studios, and ships no game data.
 | Document | What it covers |
 |---|---|
 | `docs/PRIMEDGUN.md` | The VR layer: what was ported, how, and what was checked |
+| `docs/VISIONOS.md` | Apple Vision Pro: building, installing, playing, how it works |
 | `launcher/README.md` | The PC launcher and the Quest launcher panel |
 | `docs/SETTINGS.md` | The port's settings and environment variables |
 | `docs/RUNNING.md` | Running the port: harness, console scripts, sweeps |

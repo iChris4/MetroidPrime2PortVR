@@ -43,6 +43,12 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #endif
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#include <thread>
+#endif
+#endif
 #if defined(__linux__) && !defined(__ANDROID__)
 #include <sys/prctl.h>
 #endif
@@ -197,6 +203,43 @@ int OpenTerminal(bool& socket) {
   }
   _exit(0);
 }
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+// The iOS family (iPhone, iPad, Apple Vision Pro) forbids fork(), which left the log file empty
+// there. The copier is a thread of the game's own instead: a crash can then lose what was still in
+// the pipe, which the separate process would have drained.
+void CopyInThread(int in, int terminal, bool terminalSocket, int file) {
+  long long written = 0;
+  bool truncated = false;
+  char buffer[8192];
+  for (;;) {
+    const ssize_t n = read(in, buffer, sizeof(buffer));
+    if (n < 0 && errno == EINTR) {
+      continue;
+    }
+    if (n <= 0) {
+      break;
+    }
+    if (terminal >= 0) {
+      WriteTerminal(terminal, buffer, n, terminalSocket);
+    }
+    if (written + n <= kMaxLogBytes) {
+      WriteAll(file, buffer, n);
+      written += n;
+    } else if (!truncated) {
+      truncated = true;
+      static const char kNote[] =
+          "port: the log reached 64 MiB and was truncated; the next run starts a fresh log\n";
+      WriteAll(file, kNote, sizeof(kNote) - 1);
+    }
+  }
+  close(in);
+  close(file);
+  if (terminal >= 0) {
+    close(terminal);
+  }
+}
+#endif
 #endif
 
 #if defined(_WIN32)
@@ -562,6 +605,10 @@ void Start(const std::string& userDirectory) {
     sEnabled = false;
     return;
   }
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+  std::thread([in = fds[0], terminal, terminalSocket, out] { CopyInThread(in, terminal, terminalSocket, out); })
+      .detach();
+#else
   const pid_t child = fork();
   if (child == 0) {
     close(fds[1]);
@@ -579,6 +626,7 @@ void Start(const std::string& userDirectory) {
     sEnabled = false;
     return;
   }
+#endif
   dup2(fds[1], STDOUT_FILENO);
   dup2(fds[1], STDERR_FILENO);
   close(fds[1]);

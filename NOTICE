@@ -95,3 +95,15 @@ material must be provided under the applicable GPL terms.
 (https://github.com/iChris4/MetroidPrimePortVR) and retain their GPL-3.0-or-later
 licence headers. The GPL text is included in
 `packaging/licenses/quest-updater-GPL-3.0.txt` and the APK notices.
+
+## Apple Vision Pro
+
+The visionOS layer (docs/VISIONOS.md) is adapted from Wiicompiled VR's Apple Vision Pro port
+(https://github.com/iChris4/Wiicompiled_VR, branch `vision-pro`) through PrimedGun
+(https://github.com/iChris4/MetroidPrimePortVR) and retains its GPL-3.0-or-later licence headers:
+`platform/vr/visionos/`, `platform/include/vr/visionos/`, `platform/vr/openxr_metal.mm`,
+`platform/include/vr/openxr_metal.h`, `platform/visionos/`, `platform/include/visionos/`,
+`extern/aurora/lib/webgpu/metal_interop.cpp`, `extern/aurora/include/aurora/metal_interop.h`,
+`visionos/` and `tools/Build-VisionOSDawn.sh`. An Apple Vision Pro build contains them, so its
+corresponding source is provided under the GPL's terms; the GPL text is
+`packaging/licenses/quest-updater-GPL-3.0.txt`.
