@@ -146,6 +146,18 @@ void BuildProfile(PortInput::Profile& out, int port = 0);
 // button or pushes a PAD axis from `family`, preferring one that applies in the current
 // context. False when none.
 bool PromptButtonInput(unsigned padButton, PortInput::Family family, PortInput::Input& out);
+// While alive on this thread, the prompts resolve as a scan/message box's button reads: under
+// the scan visor that is the scan text's context even before the scan completes (#127).
+class PromptBoxScope {
+public:
+  PromptBoxScope();
+  ~PromptBoxScope();
+  PromptBoxScope(const PromptBoxScope&) = delete;
+  PromptBoxScope& operator=(const PromptBoxScope&) = delete;
+
+private:
+  bool mPrev;
+};
 // The contexts PromptButtonInput resolves against now: the prompts re-resolve when they change.
 uint16_t PromptContexts();
 // For the console's `prompticon`: the contexts in play and the single-input rows of a pad button's action.

@@ -1355,6 +1355,23 @@ static void UpdatePromptBindings(const Profile& p) {
   sPromptBindings = std::move(singles);
 }
 
+// Set by PromptBoxScope: resolve as the scan box's own button reads.
+static thread_local bool sPromptAsBox = false;
+
+PromptBoxScope::PromptBoxScope() : mPrev(sPromptAsBox) { sPromptAsBox = true; }
+PromptBoxScope::~PromptBoxScope() { sPromptAsBox = mPrev; }
+
+// A box's button dismisses the box, which under the scan visor is the scan text's job, but a
+// rescanned object's box fades in while the scan is still running, before the scan text
+// context is up: read as gameplay there, its A showed Fire's button for a moment (#127).
+static uint16_t PromptGameContexts() {
+  const uint16_t contexts = GameContexts();
+  if (sPromptAsBox && (contexts & PortInput::kCtxScan) != 0) {
+    return contexts | PortInput::kCtxScanText;
+  }
+  return contexts;
+}
+
 // The first of `actions` with a single input from `family`: one that applies in
 // the current context, else one that applies anywhere outside the user layers;
 // never one blocked in the current context (its input does something else here).
@@ -1364,7 +1381,7 @@ static bool PromptInputFor(std::initializer_list<Action> actions, PortInput::Fam
   const auto face = [](const Input& in) {
     return in.device == Device::PadButton && in.code >= SDL_GAMEPAD_BUTTON_SOUTH && in.code <= SDL_GAMEPAD_BUTTON_NORTH;
   };
-  const uint16_t contexts = GameContexts();
+  const uint16_t contexts = PromptGameContexts();
   std::lock_guard lock(sPromptMutex);
   for (const uint16_t want : {contexts, static_cast<uint16_t>(~PortInput::kCtxLayers)}) {
     for (const Action a : actions) {
@@ -1399,7 +1416,7 @@ bool PromptButtonInput(unsigned padButton, PortInput::Family family, Input& out)
   // In Morph Ball a bound Morph Ball row comes first.
   const Action game = PadBitAction(padButton);
   const PortInput::BallRow* ball = PortInput::BallRowForGame(game);
-  if (ball != nullptr && (GameContexts() & PortInput::kCtxMorphBall) != 0 &&
+  if (ball != nullptr && (PromptGameContexts() & PortInput::kCtxMorphBall) != 0 &&
       PromptInputFor({ball->row}, family, out)) {
     return true;
   }

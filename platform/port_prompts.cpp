@@ -1217,11 +1217,16 @@ bool sDrawnRingStale = true;
 bool sDrawnRing = false;
 // Each action's stem as Poll last resolved it, by kActions index.
 std::string sActionStems[std::size(kActions)];
+// The same as a box's disc or ring reads it (PromptBoxScope): the scan text's button under the
+// scan visor, also while a rescanned object's box fades in before the scan completes (#127).
+std::string sBoxStems[std::size(kActions)];
 
-const std::string& ActionStem(uint32_t prompt) {
+bool IsBoxStyle(uint8_t style) { return style == kBoxDisc || style == kRing; }
+
+const std::string& StemFor(const BoundPrompt& bound) {
   for (size_t i = 0; i < std::size(kActions); ++i) {
-    if (kActions[i].prompt == prompt) {
-      return sActionStems[i];
+    if (kActions[i].prompt == bound.prompt) {
+      return IsBoxStyle(bound.style) ? sBoxStems[i] : sActionStems[i];
     }
   }
   static const std::string kNone;
@@ -1492,14 +1497,15 @@ void Poll() {
   if (ring != sLastRing) {
     sLastRing = ring;
     for (auto& [owner, bound] : sBound) {
-      if (bound.style == kRing || bound.style == kBoxDisc) {
-        ApplyBound(owner, bound, ActionStem(bound.prompt));
+      if (IsBoxStyle(bound.style)) {
+        ApplyBound(owner, bound, StemFor(bound));
       }
     }
   }
   // The bindings a prompt reads depend on the input contexts (the scan text takes the Menu A row,
   // the Morph Ball its own rows), so a change resolves at once: on the timer alone the scan box
-  // opened on the gameplay button's icon for up to a quarter second (#127).
+  // opened on the gameplay button's icon for up to a quarter second (#127). The boxes resolve in
+  // their own context (sBoxStems): a rescan's box is up before the scan text context is.
   static uint16_t sLastContexts = 0;
   const uint16_t contexts = PortInputDevices::PromptContexts();
   const bool changed = sLastDevice != device || sLastMap != map || sLastContexts != contexts;
@@ -1513,12 +1519,20 @@ void Poll() {
   for (size_t a = 0; a < std::size(kActions); ++a) {
     const PromptAction& action = kActions[a];
     const std::string stem = IconStemForPrompt(action.prompt, device);
+    std::string boxStem;
+    {
+      PortInputDevices::PromptBoxScope box;
+      boxStem = IconStemForPrompt(action.prompt, device);
+    }
     size_t applied = 0;
-    if (stem != sActionStems[a]) {
+    const bool stemChanged = stem != sActionStems[a];
+    const bool boxChanged = boxStem != sBoxStems[a];
+    if (stemChanged || boxChanged) {
       sActionStems[a] = stem;
+      sBoxStems[a] = boxStem;
       for (auto& [owner, bound] : sBound) {
-        if (bound.prompt == action.prompt) {
-          ApplyBound(owner, bound, stem);
+        if (bound.prompt == action.prompt && (IsBoxStyle(bound.style) ? boxChanged : stemChanged)) {
+          ApplyBound(owner, bound, StemFor(bound));
           ++applied;
         }
       }
@@ -1538,8 +1552,10 @@ void Poll() {
       ++applied;
     }
     if (applied != 0) {
-      std::fprintf(stderr, "[prompts] %s %s\n", action.label,
-                     stem.empty() ? "(back to the static icon)" : stem.c_str());
+      std::fprintf(stderr, "[prompts] %s %s%s%s\n", action.label,
+                     stem.empty() ? "(back to the static icon)" : stem.c_str(),
+                     boxStem == stem ? "" : ", boxes ",
+                     boxStem == stem ? "" : boxStem.empty() ? "static icon" : boxStem.c_str());
     }
   }
 }
@@ -1592,8 +1608,8 @@ bool BindTexture(const void* owner, uint32_t id, uint32_t width, uint32_t height
   sDrawnRingStale = true;
   if (sEnabled) {
     // Textures stream in after Poll ran: give this one the action's current icon.
-    const std::string& stem = ActionStem(prompt);
-    if (!stem.empty() || bound.style == kBoxDisc || bound.style == kRing) {
+    const std::string& stem = StemFor(bound);
+    if (!stem.empty() || IsBoxStyle(bound.style)) {
       ApplyBound(owner, bound, stem);
     }
   }
