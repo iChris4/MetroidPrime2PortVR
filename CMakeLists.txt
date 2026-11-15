@@ -183,7 +183,8 @@ if(MP_ENABLE_OPENXR)
             platform/vr/visionos/xr_visionos_compositor.mm
             platform/vr/visionos/xr_visionos_input.mm
             platform/vr/visionos/xr_visionos_hand_tracking.mm
-            platform/vr/visionos/xr_visionos_accessories.mm)
+            platform/vr/visionos/xr_visionos_accessories.mm
+            platform/vr/visionos/xr_visionos_hand_controllers.mm)
         target_include_directories(mp_openxr_visionos PUBLIC platform/include)
         target_link_libraries(mp_openxr_visionos PUBLIC mp_openxr_headers)
         target_compile_options(mp_openxr_visionos PRIVATE -fobjc-arc)
@@ -1222,7 +1223,7 @@ if(AURORA_SDL3_TARGET)
         mp_port_test(port_vr_${t}_tests SOURCES tests/port_vr_${t}.cpp
             INCLUDES platform/include extern/aurora/include extern/aurora/lib)
     endforeach()
-    foreach(t wrist_visor controller_layout smooth_turn)
+    foreach(t wrist_visor controller_layout smooth_turn hand_controller)
         mp_port_test(port_vr_${t}_tests SOURCES tests/port_vr_${t}.cpp INCLUDES platform/include)
     endforeach()
     mp_port_test(port_vr_policy_tests SOURCES tests/port_vr_policy.cpp platform/vr/prime_vr_policy.cpp
