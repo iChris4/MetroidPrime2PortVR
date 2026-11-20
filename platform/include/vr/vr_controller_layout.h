@@ -52,6 +52,11 @@ inline bool Pressed(const std::array<OpenXRControllerState, 2>& hands, int bindi
         control == 7 ? thresholds.touchpad : control >= 8 && control <= 11 ? thresholds.stick : 0.55f;
     return Value(hands, binding) > threshold;
 }
+inline bool MapWorldSwitchPressed(const std::array<OpenXRControllerState, 2>& hands,
+                                  const PortVrSettings& settings, bool mapOpen) noexcept {
+    return mapOpen && settings.custom_layout_enabled &&
+           Pressed(hands, settings.custom_map_swap, Thresholds(settings));
+}
 // Translate the overlay's toggle/select controls too. All physical buttons are
 // retained as release-gate input, except grips not explicitly bound to confirm.
 inline std::array<HandInputs, 2> PanelInputs(const std::array<OpenXRControllerState, 2>& hands,

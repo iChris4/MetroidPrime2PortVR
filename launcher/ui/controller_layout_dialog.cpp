@@ -188,6 +188,7 @@ void ShowControllerLayout(TabContext& ctx) {
     if (profile == 2 || profile == 6) {
       const int morphInput = profile == 2 ? 21 : 23;
       set("vr_custom_morph", morphInput); set("vr_custom_unmorph", morphInput);
+      set("vr_custom_map_swap", morphInput);
       set("vr_custom_pause", 6); set("vr_custom_menu_pause", 6); set("vr_custom_beam", 22);
       set("vr_custom_confirm", 19); set("vr_custom_back", 22); set("vr_custom_bomb", 19);
       set("vr_custom_boost", 20); set("vr_custom_power_bomb", 4);
@@ -196,6 +197,7 @@ void ShowControllerLayout(TabContext& ctx) {
     }
     if (profile == 4) {
       set("vr_custom_morph", 33); set("vr_custom_unmorph", 33); set("vr_custom_pause", 6); set("vr_custom_menu_pause", 6); set("vr_custom_map", 16); set("vr_custom_missile", 32);
+      set("vr_custom_map_swap", 33);
       set("vr_custom_visor_mode", 2);
     }
     return values;

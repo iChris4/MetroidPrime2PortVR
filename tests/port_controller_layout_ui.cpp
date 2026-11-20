@@ -34,6 +34,9 @@ int main(int argc, char** argv) {
     auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget()); Check(dialog != nullptr, "editor opens");
     auto* extra = dialog->findChild<QComboBox*>("vr_custom_jump_extra"); Check(extra != nullptr, "additional jump picker exists");
     extra->setCurrentIndex(extra->findData(17));
+    auto* mapSwap = dialog->findChild<QComboBox*>("vr_custom_map_swap");
+    Check(mapSwap != nullptr, "map world switch picker exists");
+    mapSwap->setCurrentIndex(mapSwap->findData(20));
     auto* menuLong = dialog->findChild<QCheckBox*>("vr_custom_menu_long_press");
     auto* menuTime = dialog->findChild<QWidget*>("vr_custom_menu_hold_seconds");
     Check(menuLong && menuTime && !menuTime->isEnabled(), "menu hold is optional by default");
@@ -75,6 +78,7 @@ int main(int argc, char** argv) {
   Check(model.Bool("vr_custom_menu_long_press") && model.Float("vr_custom_menu_hold_seconds") == 0.25f, "Apply persists menu hold settings");
   Check(model.Float("vr_custom_trigger_threshold") > 0.77f, "Apply persists threshold");
   Check(model.Bool("vr_custom_layout_enabled"), "Apply enables custom layout");
+  Check(model.Int("vr_custom_map_swap") == 20, "Apply persists independent map world switch binding");
   Check(model.Int("vr_custom_jump") == 24 && model.Int("vr_custom_jump_extra") == 17, "button jump does not replace stick jump");
   Check(model.Int("vr_custom_visor_mode") == 1 && model.Int("vr_custom_visor_hold") == 4, "hold-to-select settings applied");
   QTimer::singleShot(50, [&] {
@@ -97,13 +101,16 @@ int main(int argc, char** argv) {
     Check(morph->currentData().toInt() == 33, "Quest Morph Ball translates directly to Frame X");
     Check(dialog->findChild<QComboBox*>("vr_custom_jump_extra")->currentData().toInt() == 17,
           "changing controller type preserves custom assignments");
+    Check(dialog->findChild<QComboBox*>("vr_custom_map_swap")->currentData().toInt() == 20,
+          "changing controller type preserves custom map switch assignment");
     Check(dialog->findChild<QComboBox*>("vr_custom_missile")->currentData().toInt() == 32,
           "Steam Frame missiles use the right shoulder immediately");
     Check(dialog->findChild<QSlider*>("vr_custom_trigger_threshold")->value() == 78,
           "changing controller type preserves activation thresholds");
     std::map<QString, int> frameDefaults;
     for (auto* combo : dialog->findChildren<QComboBox*>()) {
-      if (combo->objectName().startsWith("vr_custom_") && combo->objectName() != "vr_custom_jump_extra")
+      if (combo->objectName().startsWith("vr_custom_") && combo->objectName() != "vr_custom_jump_extra" &&
+          combo->objectName() != "vr_custom_map_swap")
         frameDefaults[combo->objectName()] = combo->currentData().toInt();
     }
     dialog->findChild<QPushButton*>("loadControllerDefaults")->click();
@@ -122,6 +129,7 @@ int main(int argc, char** argv) {
   Check(model.Int("vr_custom_visor_mode") == 2 && model.Int("vr_custom_visor_left") == 14, "Frame preset selects real D-pad visors");
   Check(model.Int("vr_custom_morph") == 33 && model.Int("vr_custom_unmorph") == 33, "Frame D-pad is not also used to morph");
   Check(model.Int("vr_custom_menu_pause") == 6, "Frame D-pad does not also pause menus");
+  Check(model.Int("vr_custom_map_swap") == 33, "Frame default map switch uses right X");
   QTimer::singleShot(50, [&] {
     auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
     dialog->findChild<QComboBox*>("controllerFamily")->setCurrentIndex(2);

@@ -345,7 +345,7 @@ void UpdateWeaponWheel(const OpenXRControllerState& weapon, bool modifier, bool 
 // Classic: menus, the map, cutscenes, the morph ball. The plain GameCube
 // layout on the two controllers.
 void ApplyClassic(const OpenXRControllerState& left, const OpenXRControllerState& right, uint32_t weapon_hand,
-                  bool morph_ball, const PortVrSettings& settings,
+                  bool morph_ball, bool map_screen, const PortVrSettings& settings,
                   const std::array<std::string, 2>& profiles, PADStatus& pad) {
     const OpenXRControllerState& weapon = weapon_hand == 1 ? right : left;
     const OpenXRControllerState& off = weapon_hand == 1 ? left : right;
@@ -368,6 +368,7 @@ void ApplyClassic(const OpenXRControllerState& left, const OpenXRControllerState
         } else {
             if (bound(settings.custom_confirm)) pad.button |= PAD_BUTTON_A;
             if (bound(settings.custom_back)) pad.button |= PAD_BUTTON_B;
+            if (ControllerLayout::MapWorldSwitchPressed(hands, settings, map_screen)) pad.button |= PAD_BUTTON_X;
             if (bound(settings.custom_lock)) { pad.button |= PAD_TRIGGER_L; pad.triggerLeft = 255; }
             if (bound(settings.custom_shoot)) { pad.button |= PAD_TRIGGER_R; pad.triggerRight = 255; }
             if (bound(settings.custom_missile)) pad.button |= PAD_BUTTON_Y;
@@ -728,7 +729,8 @@ void VrPadUpdate(const CStateManager* mgr) noexcept {
         turnSpeedScale = ApplyGameplay(left, right, weapon_hand, orbit, grapple, grips_ready, settings,
                                        snapshot.interaction_profiles, pad);
     } else {
-        ApplyClassic(left, right, weapon_hand, morph_ball, settings, snapshot.interaction_profiles, pad);
+        ApplyClassic(left, right, weapon_hand, morph_ball, mgr != nullptr && mgr->GetInMapScreen(), settings,
+                     snapshot.interaction_profiles, pad);
         if (screw_attack) {
             ApplyScrewAttackJump(left, right, weapon_hand, settings, pad);
         }
