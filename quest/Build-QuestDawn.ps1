@@ -9,7 +9,7 @@ pass draws both eyes), cannot create its Vulkan device through OpenXR, which dir
 uses (the eyes are copied straight into the runtime's swapchain images), and has no fragment density
 maps, which foveated rendering attaches to the eye passes. This script downloads the
 Dawn source aurora pins
-(extern/aurora/cmake/AuroraDependencyVersions.cmake, AURORA_DAWN_REF on encounter/dawn), applies
+(extern/aurora/cmake/AuroraDependencyVersions.cmake, the Quest revision retained in Aurora's pin history, recovered through google/dawn), applies
 quest/dawn/apply.py, and builds it for Android arm64 with the NDK the way encounter/dawn's own
 release workflow does (.github/workflows/release.yml + dawn-ci.cmake). The result is a package in
 the stock layout (build/qd/dawn-android-aarch64-primedgun.tar.gz) that Build-Quest.ps1 hands to the
@@ -115,7 +115,7 @@ if (-not $Force -and (Test-Path $manifestPath)) {
 $archive = Join-Path $WorkDirectory 'dawn-src.tar.gz'
 if (-not (Test-Path -LiteralPath $archive)) {
     Write-Host "Downloading Dawn $revision"
-    Invoke-WebRequest "https://github.com/encounter/dawn/archive/$revision.tar.gz" -OutFile $archive -UseBasicParsing
+    Invoke-WebRequest "https://github.com/google/dawn/archive/$revision.tar.gz" -OutFile $archive -UseBasicParsing
 }
 if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $archiveHash) {
     throw 'The Dawn source archive does not match the pinned SHA-256.'

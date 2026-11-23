@@ -1,3 +1,20 @@
+## 2026-11-23: recover pinned Dawn downloads
+
+Ported Prime 1 commit 18f3712's dependency recovery to Echoes. Desktop Dawn now
+comes from google/dawn at the same pinned revision and SHA-256. Quest keeps its
+older, patched 1155e0ed revision and original SHA-256; only its download host changes.
+Automatic provider selection uses an explicitly supplied package, installed Dawn,
+or verified source. Explicit package builds without a URL report recovery steps.
+
+Windows x64 CI builds and caches our patched Vulkan/OpenXR Dawn package. macOS
+and Windows ARM64 build pinned source. Windows package builds accept a Microsoft
+DXIL DLL override and retain the shader-model fallback probes on older SDKs.
+The runtime rendering code and dependency versions are unchanged.
+
+Local validation: script syntax, workflow YAML, pinned source archive checksums,
+and Windows configuration with the existing patched package. Fresh hosted CI,
+macOS and a complete Dawn rebuild still require validation after pushing.
+
 # Metroid Prime 2: Echoes native port — how it works
 
 Notes for the native-PC port of **Metroid Prime 2: Echoes** (`G2ME01`, USA v1.00): the
