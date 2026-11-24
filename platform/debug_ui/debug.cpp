@@ -28,15 +28,9 @@ void DrawFreeCam() {
     return;
   }
   SameLineAfterHelp();
-  bool frozen = PortFreeCam::Frozen();
-  if (ImGui::Checkbox("Freeze the game", &frozen)) {
-    PortFreeCam::SetFrozen(frozen);
-  }
+  CheckboxFn("Freeze the game", PortFreeCam::Frozen, PortFreeCam::SetFrozen);
   ImGui::SameLine();
-  bool showPlayer = PortFreeCam::ShowPlayer();
-  if (ImGui::Checkbox("Show Samus", &showPlayer)) {
-    PortFreeCam::SetShowPlayer(showPlayer);
-  }
+  CheckboxFn("Show Samus", PortFreeCam::ShowPlayer, PortFreeCam::SetShowPlayer);
   float speed = PortFreeCam::Speed();
   if (ImGui::SliderFloat("Speed", &speed, 1.f, 100.f, "%.0f m/s")) {
     PortFreeCam::SetSpeed(speed);
@@ -93,10 +87,7 @@ void DrawFreeCam() {
   }
   ImGui::SetItemTooltip("Renders the photo at 2x or 4x the window's size; a size the GPU can't hold\n"
                         "steps down.");
-  bool showSamus = PortPhoto::ShowSamus();
-  if (ImGui::Checkbox("Show Samus in photos", &showSamus)) {
-    PortPhoto::SetShowSamus(showSamus);
-  }
+  CheckboxFn("Show Samus in photos", PortPhoto::ShowSamus, PortPhoto::SetShowSamus);
   ImGui::SetItemTooltip("Draws Samus's body where the player stands.");
   ImGui::BeginDisabled(PortPhoto::Capturing());
   if (ImGui::Button("Take photo")) {

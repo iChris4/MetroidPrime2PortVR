@@ -265,6 +265,12 @@ float CGameCamera::GetUnwidenedFov() const {
                                           static_cast< float >(viewport.mHeight));
 }
 
+void CGameCamera::PortRescaleFov(float fromSetting, float toSetting) {
+  mFovInterpolation.mCurrent = CCameraManager::PortRescaleFov(mFovInterpolation.mCurrent, fromSetting, toSetting);
+  mFovInterpolation.mTarget = CCameraManager::PortRescaleFov(mFovInterpolation.mTarget, fromSetting, toSetting);
+  mPerspDirty = true;
+}
+
 #endif
 void CGameCamera::SetFovAndTarget(float fov) {
   mFovInterpolation.mCurrent = fov;

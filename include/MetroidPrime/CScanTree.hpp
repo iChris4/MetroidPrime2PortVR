@@ -9,6 +9,11 @@
 #include "rstl/rc_ptr.hpp"
 #include "rstl/vector.hpp"
 
+#ifdef TARGET_PC
+// Complete types for the smart-pointer members (-Werror=delete-incomplete).
+#include "MetroidPrime/ScriptObjects/CScanTreeNode.hpp"
+#endif
+
 class CDvdRequest;
 class CScanTreeNode;
 class CScanTreeCategory;

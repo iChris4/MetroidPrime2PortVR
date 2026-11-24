@@ -133,6 +133,22 @@ void GXPortRetainResident(const void* data, u32 size) {
   GX_WRITE_U64(reinterpret_cast<u64>(copy));
 }
 
+void GXPortUpdateResident(const void* data) {
+  const auto found = sRetained.find(data);
+  if (found == sRetained.end()) {
+    return;
+  }
+  // Released and retained again on the processor, which drops the old copy and anything set to
+  // read it (a release clears an array's cached range), then takes the new one. The game's count
+  // stays as it is.
+  auto* copy = new std::vector<u8>(static_cast<const u8*>(data), static_cast<const u8*>(data) + found->second.size);
+  GX_WRITE_AURORA(GX_AURORA_RESIDENT_RELEASE);
+  GX_WRITE_U64(reinterpret_cast<u64>(data));
+  GX_WRITE_AURORA(GX_AURORA_RESIDENT_RETAIN);
+  GX_WRITE_U64(reinterpret_cast<u64>(data));
+  GX_WRITE_U64(reinterpret_cast<u64>(copy));
+}
+
 void GXPortReleaseResident(const void* data) {
   const auto found = sRetained.find(data);
   if (found == sRetained.end() || --found->second.count != 0) {

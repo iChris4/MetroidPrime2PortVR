@@ -6,7 +6,6 @@
 #include <cmath>
 #include <cstdio>
 #include <thread>
-#include "port_debug.h"
 
 #include <dolphin/ai.h>
 #include <dolphin/ar.h>
@@ -173,7 +172,6 @@ extern "C" void OSResetSystem(int reset, u32 resetCode, BOOL forceMenu) {
     (void)reset;
     (void)resetCode;
     (void)forceMenu;
-    PortDebug::RequestReset();
 }
 extern "C" BOOL OSRestoreInterrupts(BOOL level) {
     (void)level;
@@ -273,6 +271,8 @@ extern "C" void OSFatal(GXColor fg, GXColor bg, const char* msg) {
     if (msg != nullptr) {
         std::fprintf(stderr, "OSFatal: %s\n", msg);
     }
+    // Declared noreturn: returning would run off the end of the caller.
+    std::abort();
 }
 
 // --- OS context -------------------------------------------------------------

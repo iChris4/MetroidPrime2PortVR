@@ -1,0 +1,56 @@
+--- a/src/dawn/native/opengl/SwapChainEGL.cpp
++++ b/src/dawn/native/opengl/SwapChainEGL.cpp
+@@ -120,6 +120,13 @@
+                           "getting surface width"));
+         DAWN_TRY(CheckEGL(egl, egl.QuerySurface(display, mEGLSurface, EGL_HEIGHT, &surfaceHeight),
+                           "getting surface height"));
++#if DAWN_PLATFORM_IS(SWITCH)
++        // Mesa's Switch EGL reports 0x0 for an NWindow surface; the window is the configured size.
++        if (surfaceWidth <= 0 || surfaceHeight <= 0) {
++            surfaceWidth = static_cast<EGLint>(mTexture->GetWidth(Aspect::Color));
++            surfaceHeight = static_cast<EGLint>(mTexture->GetHeight(Aspect::Color));
++        }
++#endif  // DAWN_PLATFORM_IS(SWITCH)
+ 
+         const OpenGLFunctions& gl = device->GetGL(/*makeCurrent=*/false);
+ 
+@@ -245,6 +252,12 @@
+                     eglDisplay, config, uint32_t(surface->GetXWindow()), attribs.data());
+                 return {};
+ #endif  // defined(DAWN_USE_X11)
++#if DAWN_PLATFORM_IS(SWITCH)
++            case Surface::Type::SwitchNWindow:
++                mEGLSurface = egl.CreateWindowSurface(eglDisplay, config,
++                                                      surface->GetSwitchNWindow(), attribs.data());
++                return {};
++#endif  // DAWN_PLATFORM_IS(SWITCH)
+ 
+             // TODO(344814083): Add support for creating surfaces using EGL_KHR_platform_base and
+             // friends.
+--- a/src/dawn/native/opengl/BackendGL.cpp
++++ b/src/dawn/native/opengl/BackendGL.cpp
+@@ -97,9 +97,12 @@
+         Ref<DisplayEGL> display;
+         DAWN_TRY_ASSIGN(display, std::move(maybeDisplay));
+ 
++#if !DAWN_PLATFORM_IS(SWITCH)
++        // Mesa's Switch EGL lacks it; the context is then created without robust access.
+         if (!display->egl->HasExt(EGLExt::CreateContextRobustness)) {
+             return DAWN_VALIDATION_ERROR("EGL_EXT_create_context_robustness is required.");
+         }
++#endif
+         if (!display->egl->HasExt(EGLExt::FenceSync) &&
+             !display->egl->HasExt(EGLExt::ReusableSync)) {
+             return DAWN_INTERNAL_ERROR(
+--- a/src/dawn/native/opengl/PhysicalDeviceGL.cpp
++++ b/src/dawn/native/opengl/PhysicalDeviceGL.cpp
+@@ -652,6 +652,9 @@
+     }
+ 
+     bool useRobustness = !deviceToggles.IsEnabled(Toggle::DisableRobustness);
++#if DAWN_PLATFORM_IS(SWITCH)
++    useRobustness = useRobustness && mDisplay->egl->HasExt(EGLExt::CreateContextRobustness);
++#endif
+ 
+     // Workaround: Imagination EGL 1.5 drivers do not support the new robustness enum.
+     // Use the pre-1.5 extension enum instead.

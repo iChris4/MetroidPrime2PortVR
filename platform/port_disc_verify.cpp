@@ -175,21 +175,6 @@ std::string ImagePath() {
   return sImage;
 }
 
-std::string ReadDiscHeader(const std::string& path, uint8_t out[8]) {
-  std::FILE* file = std::fopen(path.c_str(), "rb");
-  if (file == nullptr) {
-    return "the disc image can't be opened";
-  }
-  const bool ok = ReadFull(file, out, 8) == 8;
-  std::fclose(file);
-  if (!ok) {
-    return "the disc image is too short";
-  }
-  const bool plain = std::memcmp(out, "G2ME01", 6) == 0 || std::memcmp(out, "G2MP01", 6) == 0 ||
-                     std::memcmp(out, "R3ME01", 6) == 0 || std::memcmp(out, "R3MP01", 6) == 0;
-  return plain ? std::string() : "this is not a plain GameCube disc image";
-}
-
 bool Start() {
   std::lock_guard< std::mutex > threadLock(sThreadMutex);
   std::string path;

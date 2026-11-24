@@ -54,6 +54,9 @@ public:
   // FOV before the Vert+ widening, for blending into cameras that get widened (MP1 227c7fdaa).
   float GetUnwidenedFov() const;
   void SetFovFitted(bool fitted) { mFovFitted = fitted; }
+  // Moves the FOV and the target of any FOV blend from one FOV setting to another
+  // (CCameraManager::PortRescaleFov), for a camera that follows the setting.
+  void PortRescaleFov(float fromSetting, float toSetting);
 #endif
   void SetFov(float fov);
   float GetTargetFov() const;

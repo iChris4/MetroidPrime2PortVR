@@ -3,16 +3,6 @@
 
 src/Kyoto/CARAMManager.cpp | 64-bit pointer cast to u32/uint in upstream source (needs TARGET_PC handling)
 src/Kyoto/Streams/CLZOSupport.cpp | needs the GPL LZO library (removed); src/Kyoto/Streams/CLZOSupportPort.cpp (MIT) stands in
-src/Kyoto/CFactoryFunctionsPort.cpp | port stub written against the old decomp; upstream header/layout differs (Kyoto/CFactoryFunctions.hpp: No such file or directory)
-src/MetroidPrime/Player/PortSPersistentOptionsValue.cpp | port stub written against the old decomp; upstream header/layout differs (MetroidPrime/Player/SPersistentOptionsValue.hpp: No such file or directory)
-src/MetroidPrime/PortBoot.cpp | port stub written against the old decomp; upstream header/layout differs (‘GetMaxSpeed’ was not declared in this scope; did you mean ‘SetMaxSpeed’?)
-src/MetroidPrime/PortCGMSinglePlayer.cpp | port stub written against the old decomp; upstream header/layout differs (class ‘CGMSinglePlayer’ does not have any field named ‘x4_’)
-src/MetroidPrime/PortCHintManager.cpp | port stub written against the old decomp; upstream header/layout differs (‘const class CHintManager’ has no member named ‘GetNumHints’; did you mean ‘GetHints’?)
-src/MetroidPrime/PortCPersistentOptionsMap.cpp | port stub written against the old decomp; upstream header/layout differs (MetroidPrime/Player/SPersistentOptionsValue.hpp: No such file or directory)
-src/MetroidPrime/PortCTweakPlayerControls.cpp | port stub written against the old decomp; upstream header/layout differs (‘const class CTweakPlayerControls’ has no member named ‘GetData’; did you mean ‘const SLdrTweakPlayerControls*)
-src/MetroidPrime/PortGlobals.cpp | port stub written against the old decomp; upstream header/layout differs (MetroidPrime/ScriptObjects/CUnknown90.hpp: No such file or directory)
-src/MetroidPrime/PortStreamNewGameState.cpp | port stub written against the old decomp; upstream header/layout differs (‘rstl::reserved_vector<rstl::vector<unsigned char>, 3> CGameState::mCompressedGameStates’ is private within th)
-src/MetroidPrime/PortTenthSyncStubs.cpp | port stubs for old-decomp gaps; upstream now defines CParticleGen::{SetGeneratorRate,SetDrawFlags,GetGeneratorRate,...} and TUniqueId has no default ctor
 src/MetroidPrime/Startup.cpp | upstream-incomplete: DefaultFontData.inc not in upstream
 src/Runtime/global_destructor_chain.c | MWCC runtime unit (PPC asm/static-ctor chain); not host-buildable
 src/REL/REL_Setup.cpp | per-module console glue (_prolog/_epilog/_ctors); platform/compiled_modules.cpp stands in on the host

@@ -233,6 +233,9 @@ bool PortPumpEvents();
 void PortPaceFrame();
 // Port: re-arms pad 0's input before each game tick's PADRead (platform/port_events.cpp).
 void PortRearmPad0();
+// Port: SDL's clock, and MP1's stall line for a loop iteration over 250 ms (platform/port_events.cpp).
+uint64_t PortNowNs();
+void PortLogFrameStall(uint64_t loopStartNs, uint64_t eventsDoneNs, uint64_t tickDoneNs, bool drawn);
 // Port: runs the registered AI DMA callback until the host stream is topped up
 // (platform/ai_dma.cpp).
 extern "C" void AIPortPoll(void);
@@ -247,6 +250,13 @@ extern "C" void AIPortPoll(void);
 // PortVr (PrimedGun Echoes): the headset paces the loop; the policy reads the game mode.
 #include "vr/openxr_integration.h"
 #include "vr/vr_host.h"
+#include "port_menu_hint.h"
+#include "port_resume_prompt.h"
+#include "port_shader_toast.h"
+#include "port_note_toast.h"
+#include "port_special_menu.h"
+#include "port_update_toast.h"
+#include "port_skip_prompt.h"
 
 #include "MetroidPrime/PortSkipFrontEnd.hpp"
 
@@ -256,8 +266,7 @@ void CMain::ShutdownSubsystems() {
   // rather than on disc), waits for the REL manager, shuts down `CDamageVulnerability` and
   // reports the main stack's usage. Those either duplicate work the port's own teardown does
   // (`platform/main.cpp` frees the REL modules and the graphics system) or are console-only
-  // (the stack walk reads Aurora's allocator rather than a stack; see
-  // `src/MetroidPrime/PortBoot.cpp`). The first call, the one that frees everything the game
+  // (the stack walk reads Aurora's allocator rather than a stack). The first call, the one that frees everything the game
   // deferred to the end of a frame, is written and meaningful on a host.
   CFrameDelayedKiller::ShutDown();
 }
@@ -809,10 +818,12 @@ int CMain::RsMain(int argc, const char* const* argv) {
       if (!IsMaxSpeed()) {
         PortPaceFrame();
       }
+      const uint64_t portLoopStartNs = PortNowNs();
       if (PortPumpEvents()) {
         mFinished = true;
         break;
       }
+      const uint64_t portEventsDoneNs = PortNowNs();
       // MP2_SKIP_FRONTEND=1: the boot's splash chain blocks the flow this loop is about to pump,
       // so it is dismissed here rather than from the skip's own hook (see PortSkipFrontEnd.cpp).
       PortSkipFrontEnd::DismissSplash();
@@ -828,6 +839,9 @@ int CMain::RsMain(int argc, const char* const* argv) {
       if (!architecture->UpdateTicks()) {
         mFinished = true;
       }
+#ifdef TARGET_PC
+      const uint64_t portTickDoneNs = PortNowNs();
+#endif
       const double tickTime = architecture->GetStopwatch2().GetElapsedTime();
       mTickTimes.AddValue(tickTime / (1.f / 60.f));
       mAverageTickTime = *mTickTimes.GetAverage();
@@ -909,6 +923,18 @@ int CMain::RsMain(int argc, const char* const* argv) {
 #endif
         architecture->GetIOWinManager().Draw();
 #ifdef TARGET_PC
+        // Port: the boot's resume Yes/No (port_resume_prompt.h), the startup shader compile's count
+        // (port_shader_toast.h), a newer release (port_update_toast.h), the special menu
+        // (port_special_menu.h), short notes (port_note_toast.h) and the launch hint "Press F1 for
+        // settings" (port_menu_hint.h) in the game's own boxes and text, over the boot screens, the
+        // title screen or the game.
+        PortResumePrompt::Draw();
+        PortSkipPrompt::DrawLate(); // the game loader's intro text has no CInGameGuiManager
+        PortShaderToast::Draw();
+        PortUpdateToast::Draw();
+        PortSpecialMenu::Draw();
+        PortNoteToast::Draw();
+        PortMenuHint::Draw();
         CCameraManager::SetPresentationInterpolation(-1.f);
         CGraphics::SetRenderTimePresentLag(0.f);
 #endif
@@ -954,6 +980,7 @@ int CMain::RsMain(int argc, const char* const* argv) {
 #ifdef TARGET_PC
       // Port: there is no AI interrupt; run the AI DMA callbacks (movie audio) on the main thread.
       AIPortPoll();
+      PortLogFrameStall(portLoopStartNs, portEventsDoneNs, portTickDoneNs, drawFrame);
 #endif
       if (CheckTerminate()) {
         gpGameState->AudioGroups().clear();

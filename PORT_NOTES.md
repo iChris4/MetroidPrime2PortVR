@@ -64,7 +64,7 @@ Examples: the port-only part of `CDvdFile` lives in `DolphinCDvdFile.cpp` behind
 adapter callback and pointer-width arguments), with the header back to the console's `u32`.
 `CGameState` and `CPersistentOptions` use upstream's layout on the host too (no opaque byte layout).
 The `gpTweak*` globals are `rstl::single_ptr<CTweakX>` and are defined in
-`src/MetroidPrime/PortGlobals.cpp`; `ScriptLoader/Tweaks.cpp` is generated upstream and defines every
+`src/MetroidPrime/Tweaks/TweakGlobals.cpp`; `ScriptLoader/Tweaks.cpp` is generated upstream and defines every
 `SLdrTweak*` constructor, so `SLdrStructMembers.cpp` must not (200+ duplicate symbols). Upstream
 selects versions with `-DVERSION=<n>` against `include/GameVersions.h`; `CMakeLists.txt` passes
 `VERSION=0 BUILD_VERSION=0` to `mp_game`.

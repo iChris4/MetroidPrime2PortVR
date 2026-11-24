@@ -1,0 +1,94 @@
+diff --git a/absl/base/internal/sysinfo.cc b/absl/base/internal/sysinfo.cc
+index b103f49..4d7e6f5 100644
+--- a/absl/base/internal/sysinfo.cc
++++ b/absl/base/internal/sysinfo.cc
+@@ -472,6 +472,13 @@ pid_t GetTID() {
+   return static_cast<pid_t>(zx_thread_self());
+ }
+ 
++#elif defined(__SWITCH__)
++
++pid_t GetTID() {
++  // libnx's pthread_t is a pointer; fold it into a pid_t.
++  return static_cast<pid_t>(reinterpret_cast<uintptr_t>(pthread_self()));
++}
++
+ #else
+ 
+ // Fallback implementation of `GetTID` using `pthread_self`.
+diff --git a/absl/base/internal/thread_identity.cc b/absl/base/internal/thread_identity.cc
+index 0471a25..5cd7eb1 100644
+--- a/absl/base/internal/thread_identity.cc
++++ b/absl/base/internal/thread_identity.cc
+@@ -99,6 +99,11 @@ void SetCurrentThreadIdentity(ThreadIdentity* identity,
+   //
+   // While not officially async-signal safe, getspecific within a signal handler
+   // is otherwise OK.
++#if defined(__SWITCH__)
++  // Horizon has no POSIX signals.
++  pthread_setspecific(thread_identity_pthread_key,
++                      reinterpret_cast<void*>(identity));
++#else
+   sigset_t all_signals;
+   sigset_t curr_signals;
+   sigfillset(&all_signals);
+@@ -106,6 +111,7 @@ void SetCurrentThreadIdentity(ThreadIdentity* identity,
+   pthread_setspecific(thread_identity_pthread_key,
+                       reinterpret_cast<void*>(identity));
+   pthread_sigmask(SIG_SETMASK, &curr_signals, nullptr);
++#endif  // __SWITCH__
+ #endif  // !__EMSCRIPTEN__ && !__MINGW32__
+ 
+ #elif ABSL_THREAD_IDENTITY_MODE == ABSL_THREAD_IDENTITY_MODE_USE_TLS
+diff --git a/absl/debugging/internal/elf_mem_image.h b/absl/debugging/internal/elf_mem_image.h
+index c8a1036..21e080c 100644
+--- a/absl/debugging/internal/elf_mem_image.h
++++ b/absl/debugging/internal/elf_mem_image.h
+@@ -35,7 +35,7 @@
+ #if defined(__ELF__) && !defined(__OpenBSD__) && !defined(__QNX__) &&    \
+     !defined(__asmjs__) && !defined(__wasm__) && !defined(__HAIKU__) &&  \
+     !defined(__sun) && !defined(__VXWORKS__) && !defined(__hexagon__) && \
+-    !defined(__XTENSA__)
++    !defined(__XTENSA__) && !defined(__SWITCH__)
+ #define ABSL_HAVE_ELF_MEM_IMAGE 1
+ #endif
+ 
+diff --git a/absl/time/internal/cctz/src/time_zone_info.cc b/absl/time/internal/cctz/src/time_zone_info.cc
+index f7ed379..9412fda 100644
+--- a/absl/time/internal/cctz/src/time_zone_info.cc
++++ b/absl/time/internal/cctz/src/time_zone_info.cc
+@@ -30,6 +30,10 @@
+ // Note that we assume the proleptic Gregorian calendar and 60-second
+ // minutes throughout.
+ 
++#if defined(__SWITCH__) && !defined(_GNU_SOURCE)
++#define _GNU_SOURCE 1  // newlib hides POSIX (fdopen, tzname) under strict -std
++#endif
++
+ #include "absl/time/internal/cctz/src/time_zone_info.h"
+ 
+ #include "absl/base/config.h"
+diff --git a/absl/time/internal/cctz/src/time_zone_libc.cc b/absl/time/internal/cctz/src/time_zone_libc.cc
+index 362da1a..cb3c411 100644
+--- a/absl/time/internal/cctz/src/time_zone_libc.cc
++++ b/absl/time/internal/cctz/src/time_zone_libc.cc
+@@ -16,6 +16,10 @@
+ #define _CRT_SECURE_NO_WARNINGS 1
+ #endif
+ 
++#if defined(__SWITCH__) && !defined(_GNU_SOURCE)
++#define _GNU_SOURCE 1  // newlib hides POSIX (fdopen, tzname) under strict -std
++#endif
++
+ #include "absl/time/internal/cctz/src/time_zone_libc.h"
+ 
+ #include <chrono>
+@@ -60,7 +64,7 @@ auto tm_zone(const std::tm& tm) -> decltype(tzname[0]) {
+   const bool is_dst = tm.tm_isdst > 0;
+   return tzname[is_dst];
+ }
+-#elif defined(__native_client__) || defined(__myriad2__) || \
++#elif defined(__native_client__) || defined(__myriad2__) || defined(__SWITCH__) || \
+     defined(__EMSCRIPTEN__)
+ // Uses the globals: '_timezone' and 'tzname'.
+ auto tm_gmtoff(const std::tm& tm) -> decltype(_timezone + 0) {

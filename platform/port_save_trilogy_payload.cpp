@@ -14,6 +14,11 @@
 // dropped and counted; what it adds starts cleared (layers: at the MLVL default).
 #include "port_save_trilogy.h"
 
+#include "port_bitstream.h"
+#include "port_bytes.h"
+#include "port_save_layout.h"
+#include "port_crc32.h"
+
 #include <algorithm>
 #include <cstring>
 
@@ -30,96 +35,18 @@ constexpr size_t kUserHeader = 8; // CRC and generation ahead of the save data
 constexpr size_t kUserDataSize = 0x1ff8;
 constexpr size_t kSysOffset = 15;
 constexpr size_t kSysBytes = 192;
-constexpr size_t kSlotsStart = 15 + 192 + 3 * 32 + 32;
-constexpr size_t kSlotStride = 0xa38;
+using PortSaveLayout::kSlotsStart;
+using PortSaveLayout::kSlotStride;
 constexpr int kSysBits = 29;       // CPersistentOptions' environment variables
 constexpr int kWiiPrefixBits = 20 * 8;
 constexpr uint32_t kSigUsa = 0xfe44ecc0u; // part A's leading word on the Trilogy's USA / PAL discs
 constexpr uint32_t kSigPal = 0xee42ffaeu;
 
-constexpr uint32_t Fourcc(char a, char b, char c, char d) {
-  return (uint32_t(uint8_t(a)) << 24) | (uint32_t(uint8_t(b)) << 16) | (uint32_t(uint8_t(c)) << 8) |
-         uint32_t(uint8_t(d));
-}
+using port::BitReader;
+using port::BitWriter;
 
-uint32_t Be32(const uint8_t* p) {
-  return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | uint32_t(p[3]);
-}
-uint32_t Le32(const uint8_t* p) {
-  return (uint32_t(p[3]) << 24) | (uint32_t(p[2]) << 16) | (uint32_t(p[1]) << 8) | uint32_t(p[0]);
-}
-void PutBe32(uint8_t* p, uint32_t v) {
-  p[0] = uint8_t(v >> 24);
-  p[1] = uint8_t(v >> 16);
-  p[2] = uint8_t(v >> 8);
-  p[3] = uint8_t(v);
-}
-void PutLe32(uint8_t* p, uint32_t v) {
-  p[3] = uint8_t(v >> 24);
-  p[2] = uint8_t(v >> 16);
-  p[1] = uint8_t(v >> 8);
-  p[0] = uint8_t(v);
-}
-
-// CCRC32::Calculate(data, size, 0xFFFFFFFF): the reflected CRC-32 without the final inversion.
-uint32_t CardCrc(const uint8_t* p, size_t n) {
-  uint32_t c = 0xFFFFFFFFu;
-  for (size_t i = 0; i < n; ++i) {
-    c ^= p[i];
-    for (int k = 0; k < 8; ++k) {
-      c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u)));
-    }
-  }
-  return c;
-}
-
-// MSB-first, as CBitStreamReader / CBitStreamWriter. Reading past the end sets `bad` and yields zeros.
-struct BitReader {
-  const uint8_t* data;
-  size_t bits;
-  size_t pos = 0;
-  bool bad = false;
-
-  BitReader(const uint8_t* d, size_t byteCount) : data(d), bits(byteCount * 8) {}
-  uint32_t Get(int n) {
-    uint32_t v = 0;
-    for (int i = 0; i < n; ++i) {
-      uint32_t bit = 0;
-      if (pos >= bits) {
-        bad = true;
-      } else {
-        bit = (data[pos >> 3] >> (7 - (pos & 7))) & 1;
-      }
-      v = (v << 1) | bit;
-      ++pos;
-    }
-    return v;
-  }
-  void Align() { pos = (pos + 7) & ~size_t(7); }
-};
-
-struct BitWriter {
-  std::vector<uint8_t> bytes;
-  size_t pos = 0;
-
-  void Put(uint32_t v, int n) {
-    for (int i = n - 1; i >= 0; --i) {
-      if ((pos >> 3) >= bytes.size()) {
-        bytes.push_back(0);
-      }
-      if ((v >> i) & 1) {
-        bytes[pos >> 3] |= uint8_t(0x80 >> (pos & 7));
-      }
-      ++pos;
-    }
-  }
-  void Align() {
-    pos = (pos + 7) & ~size_t(7);
-    if ((pos >> 3) > bytes.size()) {
-      bytes.resize(pos >> 3, 0);
-    }
-  }
-};
+// CCrc32::Calculate(data, size, 0xFFFFFFFF): the reflected CRC-32 without the final inversion.
+uint32_t CardCrc(const uint8_t* p, size_t n) { return port::Crc32Register(0xFFFFFFFFu, p, n); }
 
 using Bits = std::vector<uint8_t>; // one entry per bit (or per 2-bit value for scans)
 
@@ -195,7 +122,7 @@ std::string N(size_t v) { return std::to_string(v); }
 
 bool ReadHead(BitReader& r, const STriRelease& rel, Model& m, bool wii, std::string& error) {
   m.rel = &rel;
-  if (!Expect(r, Fourcc('G', 'M', 'S', 'T'), "GMST", error)) {
+  if (!Expect(r, port::FourCC('G', 'M', 'S', 'T'), "GMST", error)) {
     return false;
   }
   m.time = r.Get(32);
@@ -211,21 +138,21 @@ bool ReadHead(BitReader& r, const STriRelease& rel, Model& m, bool wii, std::str
   m.playHi = r.Get(32);
   m.playLo = r.Get(32);
   for (Player& p : m.players) {
-    if (!Expect(r, Fourcc('P', 'L', 'S', 'T'), "PLST", error)) {
+    if (!Expect(r, port::FourCC('P', 'L', 'S', 'T'), "PLST", error)) {
       return false;
     }
     ReadBits(r, p.a, 32 + 32 + 3 + 2 + 3 + 3 + 2);
-    if (!Expect(r, Fourcc('P', 'R', 'S', 'T'), "PRST", error)) {
+    if (!Expect(r, port::FourCC('P', 'R', 'S', 'T'), "PRST", error)) {
       return false;
     }
     ReadBits(r, p.b, 186);
-    if (!Expect(r, Fourcc('P', 'O', 'W', 'R'), "POWR", error)) {
+    if (!Expect(r, port::FourCC('P', 'O', 'W', 'R'), "POWR", error)) {
       return false;
     }
     ReadBits(r, p.fixed, 4 * 2);
     ReadBits(r, p.scans, size_t(rel.scanCount), 2);
     ReadBits(r, p.tail, 18);
-    if (!Expect(r, Fourcc('S', 'C', 'A', 'N'), "SCAN", error)) {
+    if (!Expect(r, port::FourCC('S', 'C', 'A', 'N'), "SCAN", error)) {
       return false;
     }
   }
@@ -234,7 +161,7 @@ bool ReadHead(BitReader& r, const STriRelease& rel, Model& m, bool wii, std::str
     h.state = r.Get(2);
     h.time = r.Get(32);
   }
-  if (!Expect(r, Fourcc('P', 'R', 'E', 'V'), "PREV", error)) {
+  if (!Expect(r, port::FourCC('P', 'R', 'E', 'V'), "PREV", error)) {
     return false;
   }
   ReadBits(r, m.prev, 32 + 1 + 8 + 3 + 4 * (2 + 16 + 16));
@@ -253,7 +180,7 @@ bool ReadHead(BitReader& r, const STriRelease& rel, Model& m, bool wii, std::str
 }
 
 void WriteHead(BitWriter& w, const Model& m, bool wii) {
-  w.Put(Fourcc('G', 'M', 'S', 'T'), 32);
+  w.Put(port::FourCC('G', 'M', 'S', 'T'), 32);
   w.Put(m.time, 32);
   w.Put(m.hard, 1);
   if (!wii) {
@@ -264,21 +191,21 @@ void WriteHead(BitWriter& w, const Model& m, bool wii) {
   w.Put(m.playHi, 32);
   w.Put(m.playLo, 32);
   for (const Player& p : m.players) {
-    w.Put(Fourcc('P', 'L', 'S', 'T'), 32);
+    w.Put(port::FourCC('P', 'L', 'S', 'T'), 32);
     WriteBits(w, p.a);
-    w.Put(Fourcc('P', 'R', 'S', 'T'), 32);
+    w.Put(port::FourCC('P', 'R', 'S', 'T'), 32);
     WriteBits(w, p.b);
-    w.Put(Fourcc('P', 'O', 'W', 'R'), 32);
+    w.Put(port::FourCC('P', 'O', 'W', 'R'), 32);
     WriteBits(w, p.fixed);
     WriteBits(w, p.scans, 2);
     WriteBits(w, p.tail);
-    w.Put(Fourcc('S', 'C', 'A', 'N'), 32);
+    w.Put(port::FourCC('S', 'C', 'A', 'N'), 32);
   }
   for (const Model::Hint& h : m.hints) {
     w.Put(h.state, 2);
     w.Put(h.time, 32);
   }
-  w.Put(Fourcc('P', 'R', 'E', 'V'), 32);
+  w.Put(port::FourCC('P', 'R', 'E', 'V'), 32);
   WriteBits(w, m.prev);
   w.Align();
   w.Put(m.escape, 32);
@@ -391,11 +318,11 @@ bool ParseWii(const uint8_t* partA, const uint8_t* partB, Model& m, std::string&
   const STriRelease& rel = kR3Release;
   BitReader a(partA, kPartSize);
   a.pos = kWiiPrefixBits;
-  if (!Expect(a, Fourcc('S', 'Y', 'S', 'T'), "part A's SYST", error)) {
+  if (!Expect(a, port::FourCC('S', 'Y', 'S', 'T'), "part A's SYST", error)) {
     return false;
   }
   ReadBits(a, m.sysBits, kSysBits);
-  if (!Expect(a, Fourcc('S', 'Y', 'N', 'D'), "part A's SYND", error)) {
+  if (!Expect(a, port::FourCC('S', 'Y', 'N', 'D'), "part A's SYND", error)) {
     return false;
   }
   // The 20-byte prefix leaves the Wii's 2000 bytes 5 short of the whole stream: the last world's record
@@ -420,9 +347,9 @@ bool BuildWii(const Model& m, uint32_t signature, uint8_t* partA, uint8_t* partB
   for (int i = 0; i < 4; ++i) {
     a.Put(0, 32);
   }
-  a.Put(Fourcc('S', 'Y', 'S', 'T'), 32);
+  a.Put(port::FourCC('S', 'Y', 'S', 'T'), 32);
   WriteBits(a, m.sysBits);
-  a.Put(Fourcc('S', 'Y', 'N', 'D'), 32);
+  a.Put(port::FourCC('S', 'Y', 'N', 'D'), 32);
   a.Align();
   BitWriter b;
   for (int i = 0; i < 5; ++i) {
@@ -453,7 +380,7 @@ bool ParseGcSlot(const uint8_t* slot, const STriRelease& rel, Model& m, std::str
   if (!ReadHead(r, rel, m, false, error) || !ReadWorlds(r, slot, kSlotStride, 0, rel, m, error)) {
     return false;
   }
-  if (!Expect(r, Fourcc('G', 'M', 'N', 'D'), "GMND", error) || r.bad) {
+  if (!Expect(r, port::FourCC('G', 'M', 'N', 'D'), "GMND", error) || r.bad) {
     if (error.empty()) {
       error = "the slot ends before its GMND marker";
     }
@@ -468,7 +395,7 @@ bool BuildGcSlot(const Model& m, std::vector<uint8_t>& out, std::string& error) 
   if (!WriteWorlds(w, m, error)) {
     return false;
   }
-  w.Put(Fourcc('G', 'M', 'N', 'D'), 32);
+  w.Put(port::FourCC('G', 'M', 'N', 'D'), 32);
   w.Align();
   if (w.bytes.size() > kSlotStride) {
     error = "the converted slot is " + N(w.bytes.size()) + " bytes, over " + N(kSlotStride);
@@ -482,13 +409,13 @@ bool BuildGcSlot(const Model& m, std::vector<uint8_t>& out, std::string& error) 
 // The 192-byte system block: SYST, the save index, one bit per cinematic, the system variables, SYND.
 bool ParseSysBlock(const uint8_t* sys, const STriRelease& rel, Model& m, std::string& error) {
   BitReader r(sys, kSysBytes);
-  if (!Expect(r, Fourcc('S', 'Y', 'S', 'T'), "SYST", error)) {
+  if (!Expect(r, port::FourCC('S', 'Y', 'S', 'T'), "SYST", error)) {
     return false;
   }
   m.saveIdx = r.Get(2);
   ReadBits(r, m.cines, size_t(rel.cinematicBits));
   ReadBits(r, m.sysBits, kSysBits);
-  if (!Expect(r, Fourcc('S', 'Y', 'N', 'D'), "SYND", error) || r.bad) {
+  if (!Expect(r, port::FourCC('S', 'Y', 'N', 'D'), "SYND", error) || r.bad) {
     if (error.empty()) {
       error = "the system block ends early";
     }
@@ -499,11 +426,11 @@ bool ParseSysBlock(const uint8_t* sys, const STriRelease& rel, Model& m, std::st
 
 void BuildSysBlock(const Model& m, uint8_t* sys) {
   BitWriter w;
-  w.Put(Fourcc('S', 'Y', 'S', 'T'), 32);
+  w.Put(port::FourCC('S', 'Y', 'S', 'T'), 32);
   w.Put(m.saveIdx, 2);
   WriteBits(w, m.cines);
   WriteBits(w, m.sysBits);
-  w.Put(Fourcc('S', 'Y', 'N', 'D'), 32);
+  w.Put(port::FourCC('S', 'Y', 'N', 'D'), 32);
   w.Align();
   // The other release's block may run longer: nothing of it stays past this one's SYND.
   std::memset(sys, 0, kSysBytes);
@@ -554,8 +481,8 @@ bool Locate(const std::vector<uint8_t>& gci, Gci& g, std::string& error) {
   for (int c = 0; c < 2; ++c) {
     const uint8_t* block = gci.data() + CopyOffset(g, c);
     const uint32_t crc = CardCrc(block + 4, g.copyBytes - 4);
-    const bool little = crc == Le32(block);
-    if (!little && crc != Be32(block)) {
+    const bool little = crc == port::ReadLE32(block);
+    if (!little && crc != port::ReadBE32(block)) {
       continue;
     }
     const uint8_t* user = block + kUserHeader;
@@ -564,9 +491,9 @@ bool Locate(const std::vector<uint8_t>& gci, Gci& g, std::string& error) {
     }
     uint32_t newest = 0;
     for (int s = 0; s < 3; ++s) {
-      const uint8_t* slot = user + kSlotsStart + size_t(s) * kSlotStride;
+      const uint8_t* slot = user + PortSaveLayout::SlotOffset(user, s);
       if (user[8 + s] != 0 && std::memcmp(slot, "GMST", 4) == 0) {
-        newest = std::max(newest, Be32(slot + 4));
+        newest = std::max(newest, port::ReadBE32(slot + 4));
       }
     }
     if (g.chosen < 0 || newest > best) {
@@ -760,7 +687,7 @@ bool PayloadFromGci(const std::vector<uint8_t>& gci, int slot, uint8_t partA[kPa
   if (!ParseSysBlock(user + kSysOffset, *g.rel, m, error)) {
     return false;
   }
-  if (!ParseGcSlot(user + kSlotsStart + size_t(slot) * kSlotStride, *g.rel, m, error)) {
+  if (!ParseGcSlot(user + PortSaveLayout::SlotOffset(user, slot), *g.rel, m, error)) {
     return false;
   }
   ConvertReport local;
@@ -813,14 +740,14 @@ bool GciFromPayload(const Payload& payload, std::vector<uint8_t>& gci, std::stri
   uint32_t newest = 0;
   bool present = false;
   for (int s = 0; s < 3; ++s) {
-    const uint8_t* p = user + kSlotsStart + size_t(s) * kSlotStride;
-    if (user[8 + s] != 0 && std::memcmp(p, "GMST", 4) == 0 && (!present || Be32(p + 4) >= newest)) {
+    const uint8_t* p = user + PortSaveLayout::SlotOffset(user, s);
+    if (user[8 + s] != 0 && std::memcmp(p, "GMST", 4) == 0 && (!present || port::ReadBE32(p + 4) >= newest)) {
       slot = s;
-      newest = Be32(p + 4);
+      newest = port::ReadBE32(p + 4);
       present = true;
     }
   }
-  uint8_t* slotBytes = user + kSlotsStart + size_t(slot) * kSlotStride;
+  uint8_t* slotBytes = user + PortSaveLayout::SlotOffset(user, slot);
 
   // What the Trilogy does not store keeps the card's value: the save index, the "initialise powerups
   // at first spawn" bit, and the cinematics the card has seen that the Trilogy file has not (the system
@@ -855,9 +782,9 @@ bool GciFromPayload(const Payload& payload, std::vector<uint8_t>& gci, std::stri
     uint8_t* block = gci.data() + CopyOffset(g, c);
     const uint32_t crc = CardCrc(block + 4, g.copyBytes - 4);
     if (g.little) {
-      PutLe32(block, crc);
+      port::WriteLE32(block, crc);
     } else {
-      PutBe32(block, crc);
+      port::WriteBE32(block, crc);
     }
   }
   return true;
@@ -912,13 +839,13 @@ bool ConvertGci(const std::vector<uint8_t>& in, const std::string& to, std::vect
   // card's, shared by its slots, and goes over with the first.
   bool converted = false;
   for (int s = 0; s < 3; ++s) {
-    uint8_t* slot = user + kSlotsStart + size_t(s) * kSlotStride;
+    uint8_t* slot = user + PortSaveLayout::SlotOffset(user, s);
     if (user[8 + s] == 0 || std::memcmp(slot, "GMST", 4) != 0) {
       continue;
     }
     Model m;
     if (!ParseSysBlock(src + kUserHeader + kSysOffset, *g.rel, m, error) ||
-        !ParseGcSlot(src + kUserHeader + kSlotsStart + size_t(s) * kSlotStride, *g.rel, m, error)) {
+        !ParseGcSlot(src + kUserHeader + PortSaveLayout::SlotOffset(src + kUserHeader, s), *g.rel, m, error)) {
       error = "slot " + N(size_t(s) + 1) + ": " + error;
       return false;
     }
@@ -950,7 +877,7 @@ bool ConvertGci(const std::vector<uint8_t>& in, const std::string& to, std::vect
     error = "the card file has no saved game";
     return false;
   }
-  PutBe32(user, CardSignature(to));
+  port::WriteBE32(user, CardSignature(to));
 
   // Both copies carry the converted data with the chosen copy's generation, each with its CRC in
   // the byte order the file used.
@@ -959,9 +886,9 @@ bool ConvertGci(const std::vector<uint8_t>& in, const std::string& to, std::vect
     uint8_t* block = out.data() + CopyOffset(g, c);
     const uint32_t crc = CardCrc(block + 4, g.copyBytes - 4);
     if (g.little) {
-      PutLe32(block, crc);
+      port::WriteLE32(block, crc);
     } else {
-      PutBe32(block, crc);
+      port::WriteBE32(block, crc);
     }
   }
   return true;

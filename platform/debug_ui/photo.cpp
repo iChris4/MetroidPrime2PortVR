@@ -283,10 +283,7 @@ void DrawPhotoUI() {
     if (ImGui::SliderFloat("Roll", &roll, -180.f, 180.f, "%.0f")) {
       PortPhoto::SetRoll(roll);
     }
-    bool samus = PortPhoto::ShowSamus();
-    if (ImGui::Checkbox("Show Samus", &samus)) {
-      PortPhoto::SetShowSamus(samus);
-    }
+    CheckboxFn("Show Samus", PortPhoto::ShowSamus, PortPhoto::SetShowSamus);
     float speed = PortPhoto::Speed();
     if (ImGui::SliderFloat("Speed", &speed, 1.f, 100.f, "%.0f m/s")) {
       PortPhoto::SetSpeed(speed);

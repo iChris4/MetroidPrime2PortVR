@@ -15,10 +15,12 @@ number mirrors:
 - per SAVW (CWorldSaveGameInfo): areaCount, cinematics, relays, layers, doors, scans, system and
   game variables, unmappable objects; and CalculateHash() over the big-endian (console) and
   little-endian (TARGET_PC host) in-memory images.
-- the save signature, 0x5553413e ^ hash of every world (GetSaveSignature in CMemoryCardDriver).
-  BE is the console value, which the port also writes since CalculateHash swaps its words; LE is
-  what older port builds wrote and still accept ("legacy port"). The G2ME01 values, 44bfc715 and
-  37d0412e, equal the two `[save] ... signature` lines the port logs.
+- the save signature, a region seed ^ hash of every world (GetSaveSignature in CMemoryCardDriver):
+  'USA>' 0x5553413e in G2ME01's DOL, 'EURP' 0x45555250 in G2MP01's. BE is the console value, which
+  the port also writes since CalculateHash swaps its words. Older port builds used the USA seed on
+  every disc, and the port still accepts what they wrote: BE words ("port before #95", differs only
+  on G2MP) and LE words ("legacy port"). The G2ME01 values, 44bfc715 and 37d0412e, equal the two
+  `[save] ... signature` lines the port logs; G2MP01's d13a209f is a real PAL console save's (#95).
 - per MLVL: the per-area layer counts (CWorldLayers::ReadWorldLayers), which size the
   CWorldLayerState bits.
 - the CWorldState record size in bits as CGameState::PutTo writes it, and the global lists
@@ -33,7 +35,8 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 import echoes_disc as ed  # noqa: E402
 
-SIGNATURE_SEED = 0x5553413E
+SIGNATURE_SEED = 0x5553413E  # 'USA>': G2ME01, and the port on every disc before #95
+SIGNATURE_SEED_PAL = 0x45555250  # 'EURP': G2MP01's GetSaveSignature
 # CGameStateEnvVarManager::LoadFields (system scope), added before the SAVW variables.
 SYSTEM_BUILTINS = [
     ("FreezeInstructionsFirstPerson", 0, 3), ("FreezeInstructionsMorphBall", 0, 3),
@@ -170,7 +173,7 @@ def hint_names(hb):
 
 
 def load_release(label, root):
-    d = Dir(root)
+    d = ed.Iso(root) if root.lower().endswith(".iso") else Dir(root)
     rel = {"label": label, "mlvl": {}, "savw": {}, "hint": None}
     for p in sorted(d.files):
         if not p.lower().endswith(".pak"):
@@ -201,7 +204,8 @@ def load_release(label, root):
             sysvars.setdefault(n, (lo, hi))
         for n, lo, hi, _ in s["gamevars"]:
             gamevars.setdefault(n, (lo, hi))
-    rel["sigBE"], rel["sigLE"] = sig_be, sig_le
+    seed = SIGNATURE_SEED_PAL if label.startswith("G2MP") else SIGNATURE_SEED
+    rel["sigBE"], rel["sigPort"], rel["sigLE"] = sig_be ^ SIGNATURE_SEED ^ seed, sig_be, sig_le
     rel["scanUnion"] = sorted(scans)
     rel["cinematicBits"] = cines
     rel["sysvars"], rel["gamevars"] = sysvars, gamevars
@@ -240,8 +244,8 @@ def dump(rel):
             print("      !! MLVL areas %d, layer table %d" % (len(m["areas"]), len(m["layerCounts"])))
         if s["trailingNonPad"]:
             print("      !! %d trailing SAVW bytes that are not 00/FF padding" % s["trailing"])
-    print("  signature console (BE words; port writes) %s   legacy port (LE words) %s" % (
-        h(rel["sigBE"]), h(rel["sigLE"])))
+    print("  signature console (BE words; port writes) %s   port before #95 (USA seed) %s   "
+          "legacy port (LE words) %s" % (h(rel["sigBE"]), h(rel["sigPort"]), h(rel["sigLE"])))
     print("  scan union %d entries (+4 fixed) -> POWR..SCAN scan bits %d" % (
         len(rel["scanUnion"]), 2 * (len(rel["scanUnion"]) + 4)))
     print("  cinematic bits %d; system vars %d (%d bits); game vars %d (%d bits)" % (
@@ -372,8 +376,9 @@ def emit_inc(src, dst, path):
         "",
         "struct SConvRelease {",
         "  const char* code;",
-        "  uint32_t signature;        // console order: what the port writes",
-        "  uint32_t legacySignature;  // host-order words: what older port builds wrote",
+        "  uint32_t signature;        // console order, region seed: what the console and the port write",
+        "  uint32_t portSignature;    // console order, USA seed: what port builds before #95 wrote",
+        "  uint32_t legacySignature;  // host-order words, USA seed: what older port builds wrote",
         "  int worldCount;",
         "  const SConvWorld* worlds;",
         "  int scanCount;             // the scan union, without the 4 fixed entries",
@@ -422,9 +427,9 @@ def emit_inc(src, dst, path):
         lines.append("")
     for name, rel in rels.items():
         code = "G2ME" if name == "ME" else "G2MP"
-        lines.append("static const SConvRelease k%sRelease = {\"%s\", 0x%08x, 0x%08x, %d, k%sWorlds, "
-                     "%d, k%sScans, %d, k%sHints, %d, %d};" % (
-                         name, code, rel["sigBE"], rel["sigLE"], len(rel["worlds"]), name,
+        lines.append("static const SConvRelease k%sRelease = {\"%s\", 0x%08x, 0x%08x, 0x%08x, %d, "
+                     "k%sWorlds, %d, k%sScans, %d, k%sHints, %d, %d};" % (
+                         name, code, rel["sigBE"], rel["sigPort"], rel["sigLE"], len(rel["worlds"]), name,
                          len(rel["scanUnion"]), name, len(rel["hint"]["names"]), name,
                          envbits(rel["gamevars"]), envbits(rel["sysvars"])))
     lines.append("")

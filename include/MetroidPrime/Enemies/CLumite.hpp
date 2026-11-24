@@ -13,6 +13,11 @@
 #include "rstl/optional_object.hpp"
 #include "rstl/reserved_vector.hpp"
 
+#ifdef TARGET_PC
+// Complete types for the smart-pointer members (-Werror=delete-incomplete).
+#include "Kyoto/Particles/CElementGen.hpp"
+#endif
+
 class CElementGen;
 class CGenDescription;
 class CScriptSafeZone;

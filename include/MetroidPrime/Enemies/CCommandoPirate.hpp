@@ -19,6 +19,11 @@
 #include "MetroidPrime/Weapons/CProjectileInfo.hpp"
 #include "rstl/single_ptr.hpp"
 
+#ifdef TARGET_PC
+// Complete types for the smart-pointer members (-Werror=delete-incomplete).
+#include "MetroidPrime/Enemies/CPirateRagDoll.hpp"
+#endif
+
 class CPirateRagDoll;
 
 // The E-grenade half of the REL's parameter block (guest data+0x68, 0x70 bytes). The guest block

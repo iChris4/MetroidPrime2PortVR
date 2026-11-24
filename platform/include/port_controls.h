@@ -11,9 +11,6 @@ struct PADAxisMapping;
 
 namespace PortControls {
 
-// Binds the port's default keyboard layout (WASD move, IJKL look, X/Z/C/V face
-// buttons) to the port and turns its keyboard on. Doesn't save.
-void ApplyDefaultKeyBindings(unsigned port);
 // The Controls page's keyboard preset button: "classic" or "mouse" (Mouse &
 // keyboard). Saves. False for any other name.
 // `port` 0 only (the one keyboard port): false for any other port.

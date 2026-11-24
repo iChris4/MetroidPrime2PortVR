@@ -1,4 +1,5 @@
 #include "port_discord.h"
+#include "port_worker.h"
 
 #include <atomic>
 #include <chrono>
@@ -426,24 +427,7 @@ struct Runtime {
   }
 
   void Stop() {
-    {
-      std::lock_guard< std::mutex > lock(mutex);
-      stop = true;
-    }
-    wake.notify_all();
-    if (!worker.joinable()) {
-      return;
-    }
-    bool done;
-    {
-      std::unique_lock< std::mutex > lock(mutex);
-      done = wake.wait_for(lock, std::chrono::seconds(2), [this] { return workerDone; });
-    }
-    if (done) {
-      worker.join();
-    } else {
-      worker.detach();
-    }
+    PortWorker::Stop(*this);
   }
 
   void Want(const Presence& presence) {

@@ -9,9 +9,8 @@
 // defines them, so without this file the two destructors add `lbl_803B1750` to
 // `tools/link_gap.py`'s MISSING set and `tools/gate.sh` fails on `link-gap` ("gap grew:
 // lbl_803B1750 is not in port_link_gap_list.md" - measured). This is the `Port*.cpp`
-// arrangement the repo already uses for exactly this case: `PortAudio.cpp`,
-// `PortCTweakBall.cpp`, `PortCTweakPlayerControls.cpp` - all of them listed in `files.cmake`,
-// the port-only list, and none of them in `configure.py`.
+// arrangement the repo uses for exactly this case: listed in `files.cmake`'s port-only list,
+// not in `configure.py`.
 //
 // The three objects, from `config/G2ME01/symbols.txt:17971` and `:18099-18000`, measured with
 // `python3 tools/dol_read.py`:

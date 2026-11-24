@@ -2150,7 +2150,18 @@ void CBallCamera::SetState(EBallCameraState state, CStateManager& mgr) {
     TeleportCamera(xf.GetTranslation(), mgr);
 #endif
     const CFirstPersonCamera* fpCam = GetCameraManager(mgr).GetFirstPersonCamera();
+#ifdef TARGET_PC
+    // Port (MP1 #268): with Fast Morph the FOV blends over the morph's own duration, as
+    // retail's does over its second, so the zoom doesn't run on after the short pull-back.
+    const float portMorphDuration = GetPlayer(mgr).GetMorphDuration();
+    InterpolateFOV(fpCam->GetFov(),
+                   PortOverlay::FastMorph() && portMorphDuration > 0.f && portMorphDuration < 1.f
+                       ? portMorphDuration
+                       : 1.f,
+                   0.f, GetUniqueId(), mgr);
+#else
     InterpolateFOV(fpCam->GetFov(), 1.f, 0.f, GetUniqueId(), mgr);
+#endif
     InvalidateSpline();
 #ifdef TARGET_PC
     // Each morph starts from the game's own framing.
@@ -2454,7 +2465,11 @@ void CBallCamera::OverrideCameraInfo(CStateManager& mgr) {
     mClampAzimuth = false;
   }
   if (info.GetOverrideFlags() & 0x10) {
+#ifdef TARGET_PC
+    InterpolateFOV(CCameraManager::PortFollowFovSetting(info.GetFov()), 1.f, 0.f);
+#else
     InterpolateFOV(info.GetFov(), 1.f, 0.f);
+#endif
   }
   if (info.GetOverrideFlags() & 0x80) {
     mTargetAnglePerSecond = info.GetAnglePerSecond();

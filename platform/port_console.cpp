@@ -29,6 +29,7 @@
 #include "port_input_bindings.h"
 #include "input/port_input_devices.h"
 #include "port_logfile.h"
+#include "port_game_ui.h"
 #include "port_overlay.h"
 #include "port_map_pickups.h"
 #include "port_rando_world.h"
@@ -36,9 +37,11 @@
 #include "port_pointer.h"
 #include "port_save.h"
 #include "port_savestate.h"
+#include "port_special_menu.h"
 #include "port_statedump.h"
 #include "port_env.h"
 #include "port_overlay_internal.h"
+#include "port_prompts.h"
 #include "port_video.h"
 #include "port_warp.h"
 #ifdef MP_PORT_COVERAGE
@@ -46,7 +49,6 @@
 #endif
 
 #include "MetroidPrime/CStateManager.hpp"
-#include "MetroidPrime/CRezbitEffect.hpp"
 #include "MetroidPrime/HUD/CSamusHud.hpp"
 #include "MetroidPrime/HUD/CHUDMemoParms.hpp"
 #include "Kyoto/Math/CRelAngle.hpp"
@@ -71,6 +73,7 @@ extern bool gPortForceMultiplayer; // CStateManager.cpp, console `mpforce`
 #include "MetroidPrime/Weapons/CGameProjectile.hpp"
 #include "Weapons/CWeaponDescription.hpp"
 #include "MetroidPrime/Player/CPlayerState.hpp"
+#include "MetroidPrime/CRezbitEffect.hpp"
 #include "MetroidPrime/CActor.hpp"
 #include "MetroidPrime/CPhysicsActor.hpp"
 #include "MetroidPrime/Factories/CScannableObjectInfo.hpp"
@@ -357,6 +360,11 @@ Args Split(const std::string& line) {
 }
 
 std::string Str(std::string_view text) { return std::string(text); }
+// An argument as atof/atoi read it: 0 when it is not a number.
+float ArgFloat(std::string_view text) {
+  return static_cast< float >(std::atof(Str(text).c_str()));
+}
+int ArgInt(std::string_view text) { return std::atoi(Str(text).c_str()); }
 
 int ArgToInt(std::string_view text, int fallback) {
   const std::string copy(text);
@@ -394,6 +402,36 @@ std::string Lower(std::string_view text) {
 std::string sFailure;
 
 void Fail(const std::string& why) { sFailure = why; }
+
+// The running command's `help` text in kCommands (Execute sets it), so a handler given arguments
+// it cannot take answers with that row: Usage() fails with "usage: <synopses> - <description>".
+const char* sUsage = "";
+
+void Usage() {
+  std::string synopses;
+  std::string description;
+  std::string_view help(sUsage);
+  bool newRow = false; // the next description text starts this row's
+  while (!help.empty()) {
+    const size_t eol = help.find('\n');
+    std::string_view line = help.substr(0, eol);
+    help = eol == std::string_view::npos ? std::string_view() : help.substr(eol + 1);
+    // A row is a synopsis at column 0 and a description after two or more spaces; a line that
+    // starts with spaces is more description.
+    const size_t gap = line.find("  ");
+    if (line.empty() || line[0] != ' ') {
+      newRow = true;
+      synopses += (synopses.empty() ? "" : " | ") + std::string(line.substr(0, gap));
+    }
+    const size_t text = line.find_first_not_of(' ', gap);
+    if (gap != std::string_view::npos && text != std::string_view::npos) {
+      description += description.empty() ? "" : newRow ? "; " : " ";
+      description += line.substr(text);
+      newRow = false;
+    }
+  }
+  Fail("usage: " + synopses + (description.empty() ? "" : " - " + description));
+}
 
 // The name tables are generated from the upstream enums by tools/gen_console_names.py.
 struct SEnumName {
@@ -668,7 +706,7 @@ void CmdStatus(CStateManager& mgr, const Args& args, std::string& out) {
   }
   // What the renderer will walk: CStateManager::GatherVisibleAreas only takes areas whose occlusion
   // state is kOS_Visible, so a current area that is not visible is a blank world with a normal HUD.
-  if (CWorld* world = mgr.World()) {
+  if (world != nullptr) {
     int alive = 0;
     std::string visibleList;
     for (CGameArea::CConstChainIterator it = world->GetChainHead(CWorld::kC_Alive);
@@ -712,10 +750,18 @@ void CmdStatus(CStateManager& mgr, const Args& args, std::string& out) {
                   vp.mHeight);
     out += line;
     const AuroraStats* stats = aurora_get_stats();
-    std::snprintf(line, sizeof(line), "frame %.1f fps, %u draw calls, %u verts%s\n",
+    std::snprintf(line, sizeof(line),
+                  "frame %.1f fps, %u draw calls, %u KiB vertices, %u KiB indices, resident %llu KiB of %u MiB%s\n",
                   aurora_get_fps(), stats != nullptr ? stats->drawCallCount : 0u,
-                  stats != nullptr ? stats->lastVertSize : 0u,
+                  stats != nullptr ? stats->lastVertSize / 1024 : 0u,
+                  stats != nullptr ? stats->lastIndexSize / 1024 : 0u,
+                  static_cast< unsigned long long >(aurora_get_resident_geometry_used() >> 10),
+                  aurora_get_resident_geometry_mib(),
                   stats != nullptr && stats->drawCallCount < 40 ? "  <- almost nothing drawn" : "");
+    out += line;
+    const PortOverlay::FrameWorkStats work = PortOverlay::LastFrameWork();
+    std::snprintf(line, sizeof(line), "work last second: %d frames, %.2f ms mean, %.2f ms worst, %d over 16.7 ms\n",
+                  work.frames, static_cast< double >(work.avgMs), static_cast< double >(work.maxMs), work.slow);
     out += line;
     AuroraPipelineStats pipes{};
     aurora_get_pipeline_stats(&pipes);
@@ -752,13 +798,14 @@ void CmdStatus(CStateManager& mgr, const Args& args, std::string& out) {
       std::snprintf(line, sizeof(line),
                     "perf breaks copy %u depthsnap %u encoder %u offscreen %u resolve %u | copytex %u"
                     " | tex hit %u miss %u hash %u upload %u init %u initdata %u | dstalphadup %u"
-                    " bindinval %u\n",
+                    " bindinval %u | arrays %u (%u KiB) reused %u\n",
                     b[AURORA_PERF_BREAK_COPY], b[AURORA_PERF_BREAK_DEPTH_SNAPSHOT],
                     b[AURORA_PERF_BREAK_ENCODER_TASK], b[AURORA_PERF_BREAK_OFFSCREEN],
                     b[AURORA_PERF_BREAK_RESOLVE], c[AURORA_PERF_COPY_TEX], c[AURORA_PERF_TEX_OBJ_HIT],
                     c[AURORA_PERF_TEX_OBJ_MISS], c[AURORA_PERF_TEX_HASH], c[AURORA_PERF_TEX_UPLOAD],
                     c[AURORA_PERF_TEX_INIT], c[AURORA_PERF_TEX_INIT_DATA], c[AURORA_PERF_DST_ALPHA_DUP],
-                    c[AURORA_PERF_BIND_INVALIDATE]);
+                    c[AURORA_PERF_BIND_INVALIDATE], c[AURORA_PERF_ARRAY_UPLOAD],
+                    c[AURORA_PERF_ARRAY_UPLOAD_BYTES] / 1024, c[AURORA_PERF_ARRAY_REUSE]);
       out += line;
       if (perf->copySiteCount != 0) {
         out += "copy sites";
@@ -834,7 +881,7 @@ void CmdAreas(CStateManager& mgr, const Args&, std::string& out) {
 
 void CmdWarp(CStateManager&, const Args& args, std::string& out) {
   if (args.size() < 2) {
-    Fail("usage: warp <slot|id|name>");
+    Usage();
     return;
   }
   const std::string area = Str(args[1]);
@@ -856,7 +903,7 @@ const CEntity* ResolveObject(CStateManager& mgr, std::string_view text);
 // chassis) can still be killed.
 void CmdKill(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() > 2) {
-    Fail("usage: kill [id | target]   (no id: the player; target: the locked-on actor)");
+    Usage();
     return;
   }
   if (args.size() == 1) {
@@ -894,7 +941,7 @@ void CmdKill(CStateManager& mgr, const Args& args, std::string& out) {
 // without a source of the freeze.
 void CmdFreeze(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() < 2 || args.size() > 3) {
-    Fail("usage: freeze <id>|target [seconds]");
+    Usage();
     return;
   }
   CEntity* ent = nullptr;
@@ -915,7 +962,7 @@ void CmdFreeze(CStateManager& mgr, const Args& args, std::string& out) {
   }
   float duration = 10.f;
   if (args.size() > 2) {
-    duration = static_cast< float >(std::atof(Str(args[2]).c_str()));
+    duration = ArgFloat(args[2]);
   }
   CVector3f dir = CVector3f::Zero();
   if (const CPlayer* player = mgr.GetPlayer(0)) {
@@ -935,7 +982,7 @@ void CmdFreeze(CStateManager& mgr, const Args& args, std::string& out) {
 void CmdRefill(CStateManager& mgr, const Args& args, std::string& out) {
   const std::string what = args.size() > 1 ? Lower(args[1]) : std::string("all");
   if (args.size() > 2 || (what != "all" && what != "energy" && what != "ammo")) {
-    Fail("usage: refill [energy | ammo]");
+    Usage();
     return;
   }
   CPlayerState* state = mgr.PlayerState(0);
@@ -959,12 +1006,12 @@ void CmdRefill(CStateManager& mgr, const Args& args, std::string& out) {
 
 void CmdLayer(CStateManager&, const Args& args, std::string&) {
   if (args.size() < 2) {
-    Fail("usage: layer <n> | layer off <n>");
+    Usage();
     return;
   }
   if (Str(args[1]) == "off") {
     if (args.size() < 3) {
-      Fail("usage: layer off <n>");
+      Usage();
       return;
     }
     PortWarp::LayerOff(ArgToInt(args[2], 0));
@@ -988,7 +1035,7 @@ void CmdSettled(CStateManager& mgr, const Args&, std::string& out) {
 // are resolved where the resource names live (PortWarpToWorld), so nothing here needs a table.
 void CmdWorld(CStateManager&, const Args& args, std::string& out) {
   if (args.size() < 2) {
-    Fail("usage: world <world name or hex> [area name or hex]");
+    Usage();
     return;
   }
   const std::string world = Str(args[1]);
@@ -1033,7 +1080,7 @@ CAssetId sTableId = kInvalidAssetId;
 // load is asynchronous, so a second call is what reads it when the first only locked it.
 void CmdStrg(CStateManager&, const Args& args, std::string& out) {
   if (args.size() < 2) {
-    Fail("usage: strg <asset id or STRG_... name> [index|name]");
+    Usage();
     return;
   }
   CAssetId id = kInvalidAssetId;
@@ -1076,7 +1123,19 @@ void CmdStrg(CStateManager&, const Args& args, std::string& out) {
     }
     std::snprintf(line, sizeof(line), "STRG %u [%d]: ", id, index);
     out += line;
-    out += Narrow(table->GetString(index));
+    if (args.size() > 3 && Str(args[3]) == "raw") {
+      // The text with its &image= / &font= tags, which Narrow strips (ASCII; others as \uXXXX).
+      for (const wchar_t* c = table->GetString(index); *c != 0; ++c) {
+        if (*c >= 0x20 && *c < 0x7f) {
+          out += static_cast< char >(*c);
+        } else {
+          std::snprintf(line, sizeof(line), "\\u%04X", static_cast< unsigned >(*c));
+          out += line;
+        }
+      }
+    } else {
+      out += Narrow(table->GetString(index));
+    }
     out += '\n';
     return;
   }
@@ -1092,33 +1151,6 @@ void CmdStrg(CStateManager&, const Args& args, std::string& out) {
   if (count > 40) {
     out += "  ...\n";
   }
-}
-
-// PrimedGun Echoes: rezbit [0|1]: the Rezbit virus as its attack starts it (CRezbit.cpp: 3 s, the
-// interference from 1.5 s to 2.5 s, held until the reboot), without its particles or sounds; 0
-// clears it the way the scripts' RemoveRezbitVirus does, and no argument prints the player's
-// state (CPlayer::ERezbitState). For desk checks of the reboot memo, the interference and the
-// L + R + B chord.
-void CmdRezbit(CStateManager& mgr, const Args& args, std::string& out) {
-  CPlayer* player = mgr.GetPlayer(0);
-  if (player == nullptr) {
-    Fail("there is no player");
-    return;
-  }
-  static const char* const kStates[] = {"none", "infected", "recovering", "recovered"};
-  const int state = int(player->GetRezbitState());
-  if (args.size() < 2) {
-    out += std::string("rezbit state: ") + (state >= 0 && state < 4 ? kStates[state] : "?") + "\n";
-    return;
-  }
-  if (ArgToInt(args[1], 1) == 0) {
-    player->StopRezbitState(mgr);
-    out += "rezbit virus cleared\n";
-    return;
-  }
-  player->StartRezbitState(mgr, CRezbitEffectOptions(kInvalidAssetId, 0xffff, 0xffff, 3.f, 1.5f,
-                                                     2.5f, true));
-  out += "rezbit virus started\n";
 }
 
 void CmdGod(CStateManager&, const Args& args, std::string& out) {
@@ -1149,13 +1181,13 @@ bool ParseSwitch(const std::string& arg, bool& value) {
 
 void CmdMoonJump(CStateManager&, const Args& args, std::string& out) {
   if (args.size() > 2) {
-    Fail("usage: moonjump [0|1]");
+    Usage();
     return;
   }
   if (args.size() == 2) {
     bool on = false;
     if (!ParseSwitch(std::string(args[1]), on)) {
-      Fail("usage: moonjump [0|1]");
+      Usage();
       return;
     }
     PortOverlay::SetMoonJump(on);
@@ -1167,13 +1199,12 @@ void CmdMoonJump(CStateManager&, const Args& args, std::string& out) {
 
 // `boost <key> <value>...` (CmdBoost without arguments releases a boost).
 void CmdBoostCheats(const Args& args, std::string& out) {
-  static const char* const usage = "usage: boost [speed <1..10>] [time <1..10>] [air 0|1] [steer 0|1]";
   float speed = PortOverlay::BoostSpeedScaleSet();
   float duration = PortOverlay::BoostDurationScaleSet();
   bool air = PortOverlay::BoostAnywhereSet();
   bool steer = PortOverlay::BoostSteerSet();
   if (args.size() % 2 == 0) {
-    Fail(usage);
+    Usage();
     return;
   }
   for (size_t i = 1; i + 1 < args.size(); i += 2) {
@@ -1181,19 +1212,19 @@ void CmdBoostCheats(const Args& args, std::string& out) {
     const std::string value(args[i + 1]);
     if (key == "air" || key == "steer") {
       if (!ParseSwitch(value, key == "air" ? air : steer)) {
-        Fail(usage);
+        Usage();
         return;
       }
     } else if (key == "speed" || key == "time") {
       char* end = nullptr;
       const float number = std::strtof(value.c_str(), &end);
       if (end == value.c_str() || *end != '\0') {
-        Fail(usage);
+        Usage();
         return;
       }
       (key == "speed" ? speed : duration) = number;
     } else {
-      Fail(usage);
+      Usage();
       return;
     }
   }
@@ -1209,6 +1240,25 @@ void CmdBoostCheats(const Args& args, std::string& out) {
                 PortOverlay::BoostSpeedScaleSet(), PortOverlay::BoostDurationScaleSet(), air ? 1 : 0,
                 steer ? 1 : 0, CheatRefused(set, applied));
   out += line;
+}
+
+// phazon [0|1]: the F1 Cheats "Phazon shot anywhere" box.
+void CmdPhazon(CStateManager&, const Args& args, std::string& out) {
+  if (args.size() > 2) {
+    Usage();
+    return;
+  }
+  if (args.size() == 2) {
+    bool on = false;
+    if (!ParseSwitch(std::string(args[1]), on)) {
+      Usage();
+      return;
+    }
+    PortOverlay::SetPhazonShot(on);
+  }
+  out += PortOverlay::PhazonShotSet() ? "phazon 1" : "phazon 0";
+  out += CheatRefused(PortOverlay::PhazonShotSet(), PortOverlay::PhazonShot());
+  out += '\n';
 }
 
 // infammo [all|missile|powerbomb|dark|light] [0|1]: the F1 Cheats "Infinite" boxes; no 0|1 flips.
@@ -1391,7 +1441,7 @@ void CmdPadPort(CStateManager&, const Args& args, std::string& out) {
   if (args.size() == 3 && args[1] == "clear") {
     const int port = ArgToInt(args[2], -1);
     if (port < 0 || port > 3) {
-      Fail("usage: padport <index> <port 0-3> | padport clear <port>");
+      Usage();
       return;
     }
     PADClearPort(static_cast<u32>(port));
@@ -1399,13 +1449,13 @@ void CmdPadPort(CStateManager&, const Args& args, std::string& out) {
   } else if (args.size() == 3) {
     const int port = ArgToInt(args[2], -1);
     if (port < 0 || port > 3 || ArgToInt(args[1], -1) < 0) {
-      Fail("usage: padport <index> <port 0-3> | padport clear <port>");
+      Usage();
       return;
     }
     PADSetPortForIndex(static_cast<u32>(ArgToInt(args[1], 0)), static_cast<u32>(port));
     out += "set\n";
   } else {
-    Fail("usage: padport <index> <port 0-3> | padport clear <port>");
+    Usage();
   }
 }
 
@@ -1416,7 +1466,7 @@ void CmdPadPort(CStateManager&, const Args& args, std::string& out) {
 void CmdPadPreset(CStateManager&, const Args& args, std::string& out) {
   const int port = args.size() >= 3 ? ArgToInt(args[2], -1) : 0;
   if (args.size() < 2 || args.size() > 3 || port < 0 || port > 3) {
-    Fail("usage: padpreset <preset name> [port 0-3]");
+    Usage();
     return;
   }
   const PortControls::SPadPortInfo info = PortControls::PadPortInfo(static_cast<unsigned>(port));
@@ -1438,13 +1488,42 @@ void CmdPadPreset(CStateManager&, const Args& args, std::string& out) {
   out += "port " + std::to_string(port) + " (" + info.name + "): preset " + Str(args[1]) + " applied\n";
 }
 
+// `prompticon <hexid...>`: what each prompt image (an &image= id in a string) stands for and the
+// icon it is drawn with now, on the device in use.
+void CmdPromptIcon(CStateManager&, const Args& args, std::string& out) {
+  if (args.size() < 2) {
+    Usage();
+    return;
+  }
+  for (size_t i = 1; i < args.size(); ++i) {
+    const std::string text = Str(args[i]);
+    const uint32_t id = static_cast< uint32_t >(std::strtoul(text.c_str(), nullptr, 16));
+    out += text + ": " + PortPrompts::DescribeAsset(id) + "\n";
+  }
+}
+
+// `keypreset <classic|mouse>`: the keyboard's preset, as the F1 remap page's Presets buttons apply it.
+void CmdKeyPreset(CStateManager&, const Args& args, std::string& out) {
+  if (args.size() != 2) {
+    Usage();
+    return;
+  }
+  const std::string name = Str(args[1]);
+  if (name != "classic" && name != "mouse") {
+    Fail("unknown keyboard preset");
+    return;
+  }
+  PortInputRemap::ApplyPreset(PortInput::Family::Keyboard, name);
+  out += "keyboard: preset " + name + " applied\n";
+}
+
 // `remapport [port]`: the player the F1 remap page's Presets buttons change (its Player selector);
 // no argument prints it.
 void CmdRemapPort(CStateManager&, const Args& args, std::string& out) {
   if (args.size() > 1) {
     const int port = ArgToInt(args[1], -1);
     if (port < 0 || port > 3) {
-      Fail("usage: remapport [port 0-3]");
+      Usage();
       return;
     }
     PortControls::SetRemapPort(port);
@@ -1458,7 +1537,7 @@ void CmdRemapPort(CStateManager&, const Args& args, std::string& out) {
 void CmdPadMap(CStateManager&, const Args& args, std::string& out) {
   const int port = args.size() > 1 ? ArgToInt(args[1], -1) : -1;
   if (port < 0 || port > 3 || (args.size() != 2 && args.size() != 4)) {
-    Fail("usage: padmap <port 0-3> [<a|b|x|y|l|r|z|start|up|down|left|right> <native>]");
+    Usage();
     return;
   }
   if (args.size() == 4) {
@@ -1522,7 +1601,7 @@ void CmdTouchCtl(CStateManager&, const Args& args, std::string& out) {
   PortInput::Input in;
   if (args.size() != 3 || !PortInput::InputFromText("touch:" + Str(args[1]), in) ||
       in.device != PortInput::Device::Touch) {
-    Fail("usage: touchctl <touch name|code> 0|1");
+    Usage();
     return;
   }
   const bool down = ArgToInt(args[2], 0) != 0;
@@ -1555,17 +1634,17 @@ void CmdFreeCam(CStateManager& mgr, const Args& args, std::string& out) {
   }
   if (args.size() >= 5 && args[1] == "pos") {
     PortFreeCam::Pose pose = PortFreeCam::GetPose();
-    pose.x = static_cast< float >(std::atof(std::string(args[2]).c_str()));
-    pose.y = static_cast< float >(std::atof(std::string(args[3]).c_str()));
-    pose.z = static_cast< float >(std::atof(std::string(args[4]).c_str()));
+    pose.x = ArgFloat(args[2]);
+    pose.y = ArgFloat(args[3]);
+    pose.z = ArgFloat(args[4]);
     PortFreeCam::SetPose(pose);
     out += "pose set\n";
     return;
   }
   if (args.size() >= 4 && args[1] == "look") {
     PortFreeCam::Pose pose = PortFreeCam::GetPose();
-    pose.yaw = static_cast< float >(std::atof(std::string(args[2]).c_str()));
-    pose.pitch = static_cast< float >(std::atof(std::string(args[3]).c_str()));
+    pose.yaw = ArgFloat(args[2]);
+    pose.pitch = ArgFloat(args[3]);
     PortFreeCam::SetPose(pose);
     out += "pose set\n";
     return;
@@ -1593,7 +1672,7 @@ void CmdThirdPerson(CStateManager&, const Args& args, std::string& out) {
       char* end = nullptr;
       const float number = std::strtof(value.c_str(), &end);
       if (end == value.c_str()) {
-        Fail("usage: thirdperson [on|off] [distance <m>] [shoulder <m>] [height <m>]");
+        Usage();
         return;
       }
       if (arg == "distance") {
@@ -1604,7 +1683,7 @@ void CmdThirdPerson(CStateManager&, const Args& args, std::string& out) {
         PortThirdPerson::SetHeight(number);
       }
     } else {
-      Fail("usage: thirdperson [on|off] [distance <m>] [shoulder <m>] [height <m>]");
+      Usage();
       return;
     }
   }
@@ -1751,6 +1830,124 @@ void CmdHintShow(CStateManager&, const Args&, std::string& out) {
 // memo <0|1> <text...>: a HUD memo; 1 makes it a hint memo (the framed box with the button ring).
 // `{` and `}` in the text stand for `&` and `;`, so a tag (`{image=SI,1,1,F1FA8D68}`) gets past the
 // `;` that splits console commands.
+// gameui <message|hint|scan|plain|frame|bar|label> [nofill] [nobutton] [scale=<f>] [anchor] [x y] <text...> | gameui text
+// [scale=<f>] [anchor] [x y] <text...> | gameui question [scale=<f>] [anchor] [x y] <title...> |
+// gameui select <0|1> | gameui off | gameui dump <FRME_name>: a box, text or Yes/No question from
+// the port's game UI kit (port_game_ui.h), to try a style, size, text and placement, or a frame's
+// parts listed. `\n` in a question's title breaks its line. The anchor is one of topleft top topright left centre right bottomleft bottom
+// bottomright (default centre); x and y, when given, are its offsets in screen heights. `{` and `}` stand for `&` and `;`, as for memo.
+void CmdGameUi(CStateManager& mgr, const Args& args, std::string& out) {
+  (void)mgr;
+  const char* usage =
+      "usage: gameui <message|hint|scan|plain|frame|bar|label> [nofill] [nobutton] [scale=<f>] [anchor] [x y] <text...> | gameui text "
+      "[scale=<f>] [anchor] [x y] <text...> | gameui question [scale=<f>] [anchor] [x y] <title...> | "
+      "gameui select <0|1> | gameui off | gameui dump <FRME_name>";
+  if (args.size() == 2 && args[1] == "off") {
+    PortGameUi::Dev::Hide();
+    out += "hidden\n";
+    return;
+  }
+  if (args.size() == 3 && args[1] == "dump") {
+    PortGameUi::Dev::DumpFrame(Str(args[2]));
+    out += "dumping " + Str(args[2]) + " (logged as [gameui] lines once it is loaded)\n";
+    return;
+  }
+  if (args.size() < 3) {
+    Fail(usage);
+    return;
+  }
+  if (args.size() == 3 && args[1] == "select") {
+    PortGameUi::Dev::Select(args[2] == "1" ? 1 : 0);
+    out += "selected\n";
+    return;
+  }
+  const bool question = args[1] == "question";
+  const bool textOnly = args[1] == "text" || question;
+  PortGameUi::BoxSpec spec;
+  if (args[1] == "message") {
+    spec.style = PortGameUi::Style::Message;
+  } else if (args[1] == "hint") {
+    spec.style = PortGameUi::Style::Hint;
+  } else if (args[1] == "scan") {
+    spec.style = PortGameUi::Style::Scan;
+  } else if (args[1] == "plain") {
+    spec.style = PortGameUi::Style::Plain;
+  } else if (args[1] == "frame") {
+    spec.style = PortGameUi::Style::Frame;
+  } else if (args[1] == "bar") {
+    spec.style = PortGameUi::Style::Bar;
+  } else if (args[1] == "label") {
+    spec.style = PortGameUi::Style::Label;
+  } else if (!textOnly) {
+    Fail(usage);
+    return;
+  }
+  size_t at = 2;
+  for (; at < args.size(); ++at) {
+    const std::string option(args[at]);
+    if (!textOnly && option == "nofill") {
+      spec.fill = PortGameUi::Fill::None;
+    } else if (!textOnly && option == "nobutton") {
+      spec.button = false;
+    } else if (option.rfind("scale=", 0) == 0) {
+      char* end = nullptr;
+      const float scale = std::strtof(option.c_str() + 6, &end);
+      if (end == option.c_str() + 6 || *end != '\0' || !(scale > 0.f)) {
+        Fail(usage);
+        return;
+      }
+      spec.scale = scale;
+    } else {
+      break;
+    }
+  }
+  static const std::pair< const char*, PortGameUi::Anchor > kAnchors[] = {
+      {"topleft", PortGameUi::Anchor::TopLeft},     {"top", PortGameUi::Anchor::Top},
+      {"topright", PortGameUi::Anchor::TopRight},   {"left", PortGameUi::Anchor::Left},
+      {"centre", PortGameUi::Anchor::Centre},       {"center", PortGameUi::Anchor::Centre},
+      {"right", PortGameUi::Anchor::Right},         {"bottomleft", PortGameUi::Anchor::BottomLeft},
+      {"bottom", PortGameUi::Anchor::Bottom},       {"bottomright", PortGameUi::Anchor::BottomRight}};
+  for (const auto& [name, anchor] : kAnchors) {
+    if (at < args.size() && args[at] == name) {
+      spec.placement.anchor = anchor;
+      ++at;
+      break;
+    }
+  }
+  if (at + 2 < args.size()) {
+    char* endX = nullptr;
+    char* endY = nullptr;
+    const std::string sx(args[at]), sy(args[at + 1]);
+    const float x = std::strtof(sx.c_str(), &endX);
+    const float y = std::strtof(sy.c_str(), &endY);
+    if (endX != sx.c_str() && *endX == '\0' && endY != sy.c_str() && *endY == '\0') {
+      spec.placement.x = x;
+      spec.placement.y = y;
+      at += 2;
+    }
+  }
+  std::string text;
+  for (; at < args.size(); ++at) {
+    text += (text.empty() ? "" : " ") + Str(args[at]);
+  }
+  for (char& c : text) {
+    c = c == '{' ? '&' : c == '}' ? ';' : c;
+  }
+  if (question) {
+    // `\n` in the title breaks its line.
+    for (size_t nl = text.find("\\n"); nl != std::string::npos; nl = text.find("\\n", nl + 1)) {
+      text.replace(nl, 2, "\n");
+    }
+    PortGameUi::Dev::ShowQuestion({.title = text, .scale = spec.scale, .placement = spec.placement});
+  } else if (textOnly) {
+    PortGameUi::Dev::ShowText({.text = text, .scale = spec.scale, .placement = spec.placement});
+  } else {
+    spec.text = text;
+    PortGameUi::Dev::ShowBox(spec);
+  }
+  out += "shown (its size is logged as a [gameui] line once it is loaded)\n";
+}
+
 // memo pause <strg>: the boxed memo a paused HUDMemo opens (CMessageScreen), as for "Map data acquired".
 void CmdMemo(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() == 3 && args[1] == "pause") {
@@ -1775,7 +1972,7 @@ void CmdMemo(CStateManager& mgr, const Args& args, std::string& out) {
     return;
   }
   if (args.size() < 3) {
-    Fail("usage: memo <0|1> <text...> | memo pause <strg>");
+    Usage();
     return;
   }
   const bool hint = ArgToInt(args[1], 0) != 0;
@@ -1803,7 +2000,7 @@ void CmdWalkSpeed(CStateManager&, const Args& args, std::string& out) {
     } else {
       const int value = ArgToInt(args[1], -1);
       if (value < PortOverlay::kWalkSpeedMin || value > PortOverlay::kWalkSpeedMax) {
-        Fail("usage: walkspeed [50..200|on|off]");
+        Usage();
         return;
       }
       PortOverlay::SetWalkSpeed(value);
@@ -1818,7 +2015,7 @@ void CmdScanSpeed(CStateManager&, const Args& args, std::string& out) {
   if (args.size() > 1) {
     const int value = ArgToInt(args[1], -1);
     if (value < PortOverlay::kScanSpeedMin || value > PortOverlay::kScanSpeedMax) {
-      Fail("usage: scanspeed [50..400]");
+      Usage();
       return;
     }
     PortOverlay::SetScanSpeed(value);
@@ -1831,7 +2028,7 @@ void CmdBeamSwitch(CStateManager&, const Args& args, std::string& out) {
   if (args.size() > 1) {
     const int value = ArgToInt(args[1], -1);
     if (value < PortOverlay::kBeamSwitchSpeedMin || value > PortOverlay::kBeamSwitchSpeedMax) {
-      Fail("usage: beamswitch [100..400]");
+      Usage();
       return;
     }
     PortOverlay::SetBeamSwitchSpeed(value);
@@ -1839,8 +2036,9 @@ void CmdBeamSwitch(CStateManager&, const Args& args, std::string& out) {
   out += "beamswitch " + std::to_string(PortOverlay::BeamSwitchSpeed()) + "\n";
 }
 
-// fov [30..120|retail] | gun [0|1] | cannon [45..120]: the first-person FOV (fov), whether the arm
-// cannon follows it (gun_follows_fov), the cannon's own FOV (gun_fov); no value prints it.
+// fov [30..120|retail] | gun [0|1] | ball [0|1] | cannon [45..120]: the first-person FOV (fov),
+// whether the arm cannon follows it (gun_follows_fov), whether the morph ball's cameras do
+// (ball_follows_fov), the cannon's own FOV (gun_fov); no value prints it.
 void CmdFov(CStateManager&, const Args& args, std::string& out) {
   char line[96];
   if (args.size() > 1 && args[1] == "gun") {
@@ -1850,11 +2048,18 @@ void CmdFov(CStateManager&, const Args& args, std::string& out) {
     out += PortOverlay::GunFollowsFov() ? "gun follows fov\n" : "gun own fov\n";
     return;
   }
+  if (args.size() > 1 && args[1] == "ball") {
+    if (args.size() > 2) {
+      PortOverlay::SetBallFollowsFov(args[2] != "0");
+    }
+    out += PortOverlay::BallFollowsFov() ? "ball follows fov\n" : "ball retail fov\n";
+    return;
+  }
   if (args.size() > 1 && args[1] == "cannon") {
     if (args.size() > 2) {
       float fov = 0.f;
       if (!ParseFloat(args[2], fov) || !(fov >= PortOverlay::kGunFovMin && fov <= PortOverlay::kGunFovMax)) {
-        Fail("usage: fov cannon [45..120]");
+        Usage();
         return;
       }
       PortOverlay::SetGunFov(fov);
@@ -1868,7 +2073,7 @@ void CmdFov(CStateManager&, const Args& args, std::string& out) {
     float fov = 0.f;
     if (args[1] != "retail" &&
         (!ParseFloat(args[1], fov) || !(fov >= 30.f && fov <= 120.f))) {
-      Fail("usage: fov [30..120|retail] | fov gun [0|1] | fov cannon [45..120]");
+      Usage();
       return;
     }
     PortOverlay::SetFirstPersonFov(fov);
@@ -1883,7 +2088,7 @@ void CmdLanguage(CStateManager&, const Args& args, std::string& out) {
   if (args.size() > 1) {
     const int value = ArgToInt(args[1], -1);
     if (value < 0 || value > PortOverlay::kLanguageMax) {
-      Fail("usage: language [0..6]");
+      Usage();
       return;
     }
     PortOverlay::SetLanguage(value);
@@ -1902,7 +2107,7 @@ void CmdElevator(CStateManager&, const Args& args, std::string& out) {
       }
     }
     if (mode < 0) {
-      Fail("usage: elevator [original|fast|skip]");
+      Usage();
       return;
     }
     PortOverlay::SetElevatorRide(mode);
@@ -1943,12 +2148,32 @@ void CmdRooms(CStateManager&, const Args& args, std::string& out) {
       }
     }
     if (mode < 0) {
-      Fail("usage: rooms [original|fast]");
+      Usage();
       return;
     }
     PortOverlay::SetRotatingRooms(mode);
   }
   out += std::string("rooms ") + kNames[PortOverlay::RotatingRooms()] + "\n";
+}
+
+// travel [original|fast]: the elevators' and light beam teleporters' cutscenes (travel_cutscenes);
+// no argument prints it.
+void CmdTravel(CStateManager&, const Args& args, std::string& out) {
+  static const char* const kNames[] = {"original", "fast"};
+  if (args.size() > 1) {
+    int mode = -1;
+    for (int i = 0; i < 2; ++i) {
+      if (args[1] == kNames[i]) {
+        mode = i;
+      }
+    }
+    if (mode < 0) {
+      Usage();
+      return;
+    }
+    PortOverlay::SetTravelCutscenes(mode);
+  }
+  out += std::string("travel ") + kNames[PortOverlay::TravelCutscenes()] + "\n";
 }
 
 void CmdPortal(CStateManager&, const Args& args, std::string& out) {
@@ -1961,7 +2186,7 @@ void CmdPortal(CStateManager&, const Args& args, std::string& out) {
       }
     }
     if (mode < 0) {
-      Fail("usage: portal [original|fast|skip]");
+      Usage();
       return;
     }
     PortOverlay::SetPortalTransition(mode);
@@ -2013,9 +2238,7 @@ bool PushFinger(Uint32 type, SDL_FingerID id, float x, float y) {
 }
 
 void CmdFinger(CStateManager&, const Args& args, std::string&) {
-  const auto num = [&](size_t i) { return static_cast< float >(std::atof(std::string(args[i]).c_str())); };
-  const char* usage =
-      "usage: finger down|move|up <id> <x> <y> | tap <x> <y> | drag <x0> <y0> <x1> <y1> [steps]";
+  const auto num = [&](size_t i) { return ArgFloat(args[i]); };
   bool ok = true;
   if (args.size() == 5 && (args[1] == "down" || args[1] == "move" || args[1] == "up")) {
     const Uint32 type = args[1] == "down" ? SDL_EVENT_FINGER_DOWN
@@ -2026,7 +2249,7 @@ void CmdFinger(CStateManager&, const Args& args, std::string&) {
     ok = PushFinger(SDL_EVENT_FINGER_DOWN, 1, num(2), num(3)) &&
          PushFinger(SDL_EVENT_FINGER_UP, 1, num(2), num(3));
   } else if ((args.size() == 6 || args.size() == 7) && args[1] == "drag") {
-    const int steps = args.size() == 7 ? std::max(1, std::atoi(std::string(args[6]).c_str())) : 10;
+    const int steps = args.size() == 7 ? std::max(1, ArgInt(args[6])) : 10;
     const float x0 = num(2), y0 = num(3), x1 = num(4), y1 = num(5);
     ok = PushFinger(SDL_EVENT_FINGER_DOWN, 1, x0, y0);
     for (int i = 1; ok && i <= steps; ++i) {
@@ -2037,7 +2260,7 @@ void CmdFinger(CStateManager&, const Args& args, std::string&) {
       PushFinger(SDL_EVENT_FINGER_UP, 1, x1, y1);
     }
   } else {
-    Fail(usage);
+    Usage();
     return;
   }
   if (!ok) {
@@ -2046,9 +2269,6 @@ void CmdFinger(CStateManager&, const Args& args, std::string&) {
 }
 
 void CmdPointer(CStateManager&, const Args& args, std::string& out) {
-  static const char* const kUsage =
-      "usage: pointer <x> <y> move|click|dclick|tap|dtap|down|up [l|r|touch]|drag <x1> <y1> "
-      "[l|r|touch]|wheel <n>|pinch <ratio> | pointer back | pointer where | pointer hits";
   const std::string verb = args.size() > 1 ? Lower(args[1]) : std::string();
   if (verb == "back") {
     PortPointer::ScriptBack();
@@ -2073,11 +2293,11 @@ void CmdPointer(CStateManager&, const Args& args, std::string& out) {
     return;
   }
   if (args.size() < 4) {
-    Fail(kUsage);
+    Usage();
     return;
   }
-  const float x = static_cast< float >(std::atof(std::string(args[1]).c_str()));
-  const float y = static_cast< float >(std::atof(std::string(args[2]).c_str()));
+  const float x = ArgFloat(args[1]);
+  const float y = ArgFloat(args[2]);
   const std::string action = Lower(args[3]);
   if (action == "move") {
     PortPointer::ScriptMove(x, y);
@@ -2092,17 +2312,16 @@ void CmdPointer(CStateManager&, const Args& args, std::string& out) {
                              how == "touch");
   } else if (action == "drag" && args.size() >= 6) {
     const std::string how = args.size() > 6 ? Lower(args[6]) : std::string("l");
-    PortPointer::ScriptDrag(x, y, static_cast< float >(std::atof(std::string(args[4]).c_str())),
-                            static_cast< float >(std::atof(std::string(args[5]).c_str())),
+    PortPointer::ScriptDrag(x, y, ArgFloat(args[4]), ArgFloat(args[5]),
                             how == "r" ? PortPointer::kButtonRight : PortPointer::kButtonLeft,
                             how == "touch");
   } else if (action == "wheel" && args.size() >= 5) {
     PortPointer::ScriptMove(x, y);
-    PortPointer::ScriptWheel(static_cast< float >(std::atof(std::string(args[4]).c_str())));
+    PortPointer::ScriptWheel(ArgFloat(args[4]));
   } else if (action == "pinch" && args.size() >= 5) {
-    PortPointer::ScriptPinch(x, y, static_cast< float >(std::atof(std::string(args[4]).c_str())));
+    PortPointer::ScriptPinch(x, y, ArgFloat(args[4]));
   } else {
-    Fail(kUsage);
+    Usage();
   }
 }
 
@@ -2129,8 +2348,7 @@ void CmdBoost(CStateManager& mgr, const Args& args, std::string& out) {
 void CmdNoise(CStateManager& mgr, const Args& args, std::string& out) {
   const int type = args.size() < 2 ? -1 : ArgToInt(args[1], -1);
   if (type < 0) {
-    Fail("usage: noise <type 0..6> [<x> <y> <z>] (0 fire, 1 bomb, 2 projectile, 3 scream, "
-         "4 path, 6 safe zone)");
+    Usage();
     return;
   }
   CVector3f pos;
@@ -2173,10 +2391,8 @@ void CmdGameEvent(CStateManager& mgr, const Args& args, std::string& out) {
       {"damage", CGMMultiplayer::kGE_Damage},   {"stop", CGMMultiplayer::kGE_Stop},
       {"spawn", CGMMultiplayer::kGE_Spawn},
   };
-  const char* usage = "usage: gameevent <score|kill|generic|scan|damage|stop|spawn> [src] [tgt] "
-                      "[value] [as <proxyType 0..10, not 1>]";
   if (args.size() < 2) {
-    Fail(usage);
+    Usage();
     return;
   }
   uint event = 0;
@@ -2186,7 +2402,7 @@ void CmdGameEvent(CStateManager& mgr, const Args& args, std::string& out) {
     }
   }
   if (event == 0) {
-    Fail(usage);
+    Usage();
     return;
   }
   int asType = -1;
@@ -2199,7 +2415,7 @@ void CmdGameEvent(CStateManager& mgr, const Args& args, std::string& out) {
     }
   }
   if (asType == 1 || asType > 10) {
-    Fail(usage);
+    Usage();
     return;
   }
   const uint src = pos.size() > 0 ? uint(ArgToInt(pos[0], 0)) : 0;
@@ -2241,7 +2457,7 @@ void CmdDodge(CStateManager&, const Args&, std::string& out) {
 void CmdTarget(CStateManager&, const Args& args, std::string& out) {
   const std::string_view dir = args.size() < 2 ? std::string_view() : args[1];
   if (dir != "next" && dir != "prev") {
-    Fail("usage: target next|prev");
+    Usage();
     return;
   }
   PortTouch::RequestTargetCycle(dir == "next" ? 1 : -1);
@@ -2265,6 +2481,15 @@ void CmdSpiderToggle(CStateManager&, const Args& args, std::string& out) {
   const bool enabled = args.size() < 2 ? !PortOverlay::SpiderToggle() : ArgToInt(args[1], 1) != 0;
   PortOverlay::SetSpiderToggle(enabled);
   out += enabled ? "toggle spider ball on\n" : "toggle spider ball off\n";
+}
+
+// specialmenu: the special menu (port_special_menu.h), driven as a pad would.
+void CmdSpecialMenu(CStateManager&, const Args& args, std::string& out) {
+  if (args.size() >= 2 && !PortSpecialMenu::Press(std::string(args[1]))) {
+    Usage();
+    return;
+  }
+  out += PortSpecialMenu::Describe() + "\n";
 }
 
 void CmdAimLockOn(CStateManager&, const Args& args, std::string& out) {
@@ -2329,8 +2554,8 @@ void CmdPointerAim(CStateManager&, const Args& args, std::string& out) {
   if (args.size() == 2 && (args[1] == "on" || args[1] == "off")) {
     PortOverlay::SetPointerAim(args[1] == "on");
   } else if (args.size() == 3) {
-    const float px = static_cast< float >(std::atof(std::string(args[1]).c_str()));
-    const float py = static_cast< float >(std::atof(std::string(args[2]).c_str()));
+    const float px = ArgFloat(args[1]);
+    const float py = ArgFloat(args[2]);
     PortMouse::SetPointerAimPosition(px, py);
     PortMouse::SetPointerAimHold(px != 0.f || py != 0.f);
   } else if (args.size() != 1) {
@@ -2482,7 +2707,7 @@ void CmdSettings(CStateManager&, const Args& args, std::string& out) {
     return;
   }
   if (args.size() != 3) {
-    Fail("usage: settings [<key> <value> | self-test]");
+    Usage();
     return;
   }
   if (!PortOverlaySettings::ApplySetting(std::string(args[1]), std::string(args[2]))) {
@@ -2515,7 +2740,7 @@ void CmdGunOffset(CStateManager&, const Args& args, std::string& out) {
     PortOverlay::SetGunOffset(parsed);
     PortOverlay::GunOffset(offset);
   } else if (args.size() != 1) {
-    Fail("usage: gunoffset [<right> <forward> <up>]");
+    Usage();
     return;
   }
   char line[128];
@@ -2536,7 +2761,7 @@ void CmdMsaaAniso(CStateManager&, const Args& args, std::string& out) {
   const bool isMsaa = args[0] == "msaa";
   const bool isAniso = args[0] == "aniso";
   if (!isMsaa && !isAniso) {
-    Fail("usage: msaa <1|4> | aniso <1..16>");
+    Usage();
     return;
   }
   const int value = ArgToInt(args[1], -1);
@@ -2607,7 +2832,7 @@ void CmdHudOpacity(CStateManager&, const Args& args, std::string& out) {
   if (part < 0 || value.empty() ||
       (percent != PortOverlay::kHudOpacityVisor &&
        (percent < PortOverlay::kHudOpacityMin || percent > PortOverlay::kHudOpacityMax))) {
-    Fail("usage: hudopacity <echo|dark|scan> <visor|0..100>");
+    Usage();
     return;
   }
   PortOverlay::SetHudOpacity(static_cast< PortOverlay::HudOpacityPart >(part), percent);
@@ -2641,9 +2866,9 @@ void CmdCrosshair(CStateManager&, const Args& args, std::string& out) {
       PortOverlay::SetCrosshairOpacity(percent);
     } else if (what == "color") {
       if (args.size() >= 5) {
-        const float r = static_cast< float >(std::atof(std::string(args[2]).c_str()));
-        const float g = static_cast< float >(std::atof(std::string(args[3]).c_str()));
-        const float b = static_cast< float >(std::atof(std::string(args[4]).c_str()));
+        const float r = ArgFloat(args[2]);
+        const float g = ArgFloat(args[3]);
+        const float b = ArgFloat(args[4]);
         PortOverlay::SetCrosshairColor(r, g, b);
       } else {
         PortOverlay::ClearCrosshairColor();
@@ -2653,8 +2878,7 @@ void CmdCrosshair(CStateManager&, const Args& args, std::string& out) {
     } else {
       const int percent = ArgToInt(args[1], -1);
       if (percent < PortOverlay::kCrosshairSizeMin || percent > PortOverlay::kCrosshairSizeMax) {
-        Fail("usage: crosshair [<25..100> | style classic|remastered|gamecube | opacity <0..500> | color "
-             "<r> <g> <b> | color clear | aim <0|1>]");
+        Usage();
         return;
       }
       PortOverlay::SetCrosshairSize(percent);
@@ -2721,7 +2945,7 @@ void CmdPresent(CStateManager&, const Args& args, std::string& out) {
   } else if (arg == "tick") {
     PortOverlay::SetPresentOverride(PortOverlay::kPresentTick);
   } else if (args.size() > 1 && !(ParseFloat(arg, t) && t >= 0.f && t <= 1.f)) {
-    Fail("usage: present <0..1|cycle|tick|off>");
+    Usage();
     return;
   } else if (args.size() > 1) {
     PortOverlay::SetPresentOverride(t);
@@ -2744,7 +2968,7 @@ void CmdPresent(CStateManager&, const Args& args, std::string& out) {
 void CmdHold(CStateManager&, const Args& args, std::string& out) {
   const std::string arg = args.size() > 1 ? Lower(args[1]) : std::string();
   if (args.size() > 1 && arg != "0" && arg != "1") {
-    Fail("usage: hold <0|1>");
+    Usage();
     return;
   }
   if (args.size() > 1) {
@@ -2760,7 +2984,7 @@ void CmdStep(CStateManager&, const Args& args, std::string& out) {
   }
   const int count = args.size() > 1 ? ArgToInt(args[1], -1) : 1;
   if (count < 1 || count > 600) {
-    Fail("usage: step [1..600]");
+    Usage();
     return;
   }
   PortOverlay::StepTicks(static_cast< unsigned >(count));
@@ -2776,7 +3000,7 @@ void CmdAspect(CStateManager&, const Args& args, std::string& out) {
     }
     int mode = 0;
     if (!PortOverlay::ParseAspect(name.c_str(), mode)) {
-      Fail("usage: aspect <4:3|16:9|window>");
+      Usage();
       return;
     }
     PortOverlay::SetAspectMode(mode);
@@ -2790,7 +3014,7 @@ void CmdHudSpread(CStateManager&, const Args& args, std::string& out) {
   if (args.size() >= 2) {
     int mode = 0;
     if (!PortOverlay::ParseHudSpreadMax(std::string(args[1]).c_str(), mode)) {
-      Fail("usage: hudspread <16:9|21:9|full>");
+      Usage();
       return;
     }
     PortOverlay::SetHudSpreadMax(mode);
@@ -2990,7 +3214,7 @@ void CmdOrbit(CStateManager& mgr, const Args& args, std::string& out) {
 
 void CmdScanInfo(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() != 2) {
-    Fail("usage: scaninfo <id>");
+    Usage();
     return;
   }
   const CEntity* ent = ResolveObject(mgr, args[1]);
@@ -3011,7 +3235,7 @@ void CmdScanInfo(CStateManager& mgr, const Args& args, std::string& out) {
 
 void CmdObj(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() < 2) {
-    Fail("usage: obj <id>");
+    Usage();
     return;
   }
   const CEntity* ent = ResolveObject(mgr, args[1]);
@@ -3097,9 +3321,7 @@ void CmdDamage(CStateManager& mgr, const Args& args, std::string& out) {
   float amount = 0.f;
   float knockback = 0.f;
   if (args.size() < 3 || !ParseFloat(args[2], amount)) {
-    Fail("usage: damage <id> <amount> [knockback-power] [power|missile|cannonball|dark|light|"
-         "annihilator|powerbomb|bomb|boostball|screwattack|darkburst|sunburst|sonicboom|"
-         "supermissile]");
+    Usage();
     return;
   }
   // The weapon mode is what a damageable trigger's vulnerability is looked up by, so a wall that
@@ -3226,7 +3448,7 @@ void CmdFrame(CStateManager&, const Args&, std::string& out) {
 void CmdAt(CStateManager&, const Args& args, std::string& out) {
   const int update = args.size() < 3 ? -1 : ArgToInt(args[1], -1);
   if (update < 0) {
-    Fail("usage: at <update> <command>");
+    Usage();
     return;
   }
   const char* begin = args[2].data();
@@ -3359,7 +3581,7 @@ void DropUnplayableBodyCmds(CStateManager& mgr, std::string* out) {
 // so instead of reading as an unknown name.
 void CmdFsm(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() != 3) {
-    Fail("usage: fsm <id> <state name>");
+    Usage();
     return;
   }
   CEntity* ent = const_cast< CEntity* >(ResolveObject(mgr, args[1]));
@@ -3440,7 +3662,7 @@ void CmdFsm(CStateManager& mgr, const Args& args, std::string& out) {
 // without a touch).
 void CmdTouch(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() != 3) {
-    Fail("usage: touch <mover id> <other id>");
+    Usage();
     return;
   }
   CEntity* moverEnt = const_cast< CEntity* >(ResolveObject(mgr, args[1]));
@@ -3469,7 +3691,7 @@ void CmdTouch(CStateManager& mgr, const Args& args, std::string& out) {
 // code makes when two actors with SetCallTouch overlap (a patterned actor touching a trigger).
 void CmdTouchAct(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() != 3) {
-    Fail("usage: touchact <actor id> <other id>");
+    Usage();
     return;
   }
   CEntity* actorEnt = const_cast< CEntity* >(ResolveObject(mgr, args[1]));
@@ -3488,7 +3710,7 @@ void CmdTouchAct(CStateManager& mgr, const Args& args, std::string& out) {
 // detach entries through its table (SSpacePirate_FuncPtrs); the port's CMetroid only detaches.
 void CmdPirateAttach(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() != 3) {
-    Fail("usage: pirateattach <pirate id> <actor id>|-");
+    Usage();
     return;
   }
   CEntity* ent = const_cast< CEntity* >(ResolveObject(mgr, args[1]));
@@ -3541,7 +3763,7 @@ void CmdStateCall(CStateManager& mgr, const Args& args, std::string& out) {
   float dt = 1.f / 60.f;
   if (args.size() < 4 || args.size() > 5 || !ParseFloat(args[3], msgArg) ||
       (args.size() == 5 && !ParseFloat(args[4], dt))) {
-    Fail("usage: statecall <id> <state name> <msg 0..2> [dt]");
+    Usage();
     return;
   }
   CEntity* ent = const_cast< CEntity* >(ResolveObject(mgr, args[1]));
@@ -3568,7 +3790,7 @@ void CmdStateCall(CStateManager& mgr, const Args& args, std::string& out) {
 void CmdTrigCall(CStateManager& mgr, const Args& args, std::string& out) {
   float arg = 0.f;
   if (args.size() < 3 || args.size() > 4 || (args.size() == 4 && !ParseFloat(args[3], arg))) {
-    Fail("usage: trigcall <id> <trigger name> [arg]");
+    Usage();
     return;
   }
   CEntity* ent = const_cast< CEntity* >(ResolveObject(mgr, args[1]));
@@ -3593,7 +3815,7 @@ void CmdTrigCall(CStateManager& mgr, const Args& args, std::string& out) {
 void CmdCodeCall(CStateManager& mgr, const Args& args, std::string& out) {
   float dt = 1.f / 60.f;
   if (args.size() < 3 || args.size() > 4 || (args.size() == 4 && !ParseFloat(args[3], dt))) {
-    Fail("usage: codecall <id> <code name> [dt]");
+    Usage();
     return;
   }
   CEntity* ent = const_cast< CEntity* >(ResolveObject(mgr, args[1]));
@@ -3631,7 +3853,7 @@ void CmdPathFail(CStateManager& mgr, const Args& args, std::string& out) {
   CEntity* ent = args.size() == 3 ? const_cast< CEntity* >(ResolveObject(mgr, args[1])) : nullptr;
   CPatterned* patterned = ent != nullptr ? TCastToPtr< CPatterned >(ent) : nullptr;
   if (patterned == nullptr || (args[2] != "on" && args[2] != "off")) {
-    Fail("usage: pathfail <id> on|off   (id must be a patterned actor)");
+    Usage();
     return;
   }
   const CPathFindSearch* search = patterned->GetSearchPath();
@@ -3654,7 +3876,7 @@ void CmdSetArea(CStateManager& mgr, const Args& args, std::string& out) {
   CEntity* ent = args.size() == 3 ? const_cast< CEntity* >(ResolveObject(mgr, args[1])) : nullptr;
   float area = 0.f;
   if (ent == nullptr || !ParseFloat(args[2], area)) {
-    Fail("usage: setarea <id> <area index>");
+    Usage();
     return;
   }
   // An actor's UpdatePortalSystemState reads the area's post-constructed portal data whenever
@@ -3693,7 +3915,7 @@ std::vector< VarHandler >& VarHandlers() {
 void CmdVar(CStateManager& mgr, const Args& args, std::string& out) {
   float number = 0.f;
   if (args.size() < 3 || args.size() > 4 || (args.size() == 4 && !ParseFloat(args[3], number))) {
-    Fail("usage: var <id>|player <name> [value]");
+    Usage();
     return;
   }
   const int value = static_cast< int >(number);
@@ -3751,7 +3973,7 @@ void CmdHint(CStateManager& mgr, const Args& args, std::string& out) {
     }
   }
   if (!ok) {
-    Fail("usage: hint <id> [type] [area <n>] [radius <r>]");
+    Usage();
     return;
   }
   CEntity* ent = const_cast< CEntity* >(ResolveObject(mgr, args[1]));
@@ -3787,7 +4009,7 @@ void CmdUEvent(CStateManager& mgr, const Args& args, std::string& out) {
   CActor* actor = ent != nullptr ? TCastToPtr< CActor >(ent) : nullptr;
   if (actor == nullptr || !ParseFloat(args[2], type) ||
       (args.size() >= 4 && !ParseFloat(args[3], dt))) {
-    Fail("usage: uevent <id> <type> [dt] [locator]   (id must be an actor)");
+    Usage();
     return;
   }
   const rstl::string locator = rstl::string_l(args.size() >= 5 ? Str(args[4]).c_str() : "root");
@@ -3813,7 +4035,7 @@ void CmdShoot(CStateManager& mgr, const Args& args, std::string& out) {
   CActor* actor = ent != nullptr ? TCastToPtr< CActor >(ent) : nullptr;
   CPlayer* player = mgr.GetPlayer(0);
   if (actor == nullptr) {
-    Fail("usage: shoot <id> [charged|missile] [dist]   (id must be an actor that still exists)");
+    Usage();
     return;
   }
   if (player == nullptr) {
@@ -3902,7 +4124,7 @@ void CmdStruggle(CStateManager& mgr, const Args& args, std::string& out) {
   float value = -1.f;
   if (args.size() < 2 ||
       (args[1] != "off" && (!ParseFloat(args[1], value) || value < 0.f || value > 1.f))) {
-    Fail("usage: struggle <0..1>|off   (held every update; `off` clears it)");
+    Usage();
     return;
   }
   player->PortSetStruggleOverride(value);
@@ -3924,7 +4146,7 @@ void CmdPlace(CStateManager& mgr, const Args& args, std::string& out) {
   CEntity* ent = args.size() >= 3 ? const_cast< CEntity* >(ResolveObject(mgr, args[1])) : nullptr;
   CActor* actor = ent != nullptr ? TCastToPtr< CActor >(ent) : nullptr;
   if (actor == nullptr) {
-    Fail("usage: place <id> <x> <y> <z> | place <id> player [dist]   (id must be an actor)");
+    Usage();
     return;
   }
   CVector3f pos;
@@ -3943,7 +4165,7 @@ void CmdPlace(CStateManager& mgr, const Args& args, std::string& out) {
     float x = 0.f, y = 0.f, z = 0.f;
     if (args.size() < 5 || !ParseFloat(args[2], x) || !ParseFloat(args[3], y) ||
         !ParseFloat(args[4], z)) {
-      Fail("usage: place <id> <x> <y> <z> | place <id> player [dist]");
+      Usage();
       return;
     }
     pos = CVector3f(x, y, z);
@@ -3953,9 +4175,9 @@ void CmdPlace(CStateManager& mgr, const Args& args, std::string& out) {
   // about the world's up (z), the pitch about the right one (x) and the roll about the forward
   // one (y), applied in that order.  Without it the actor keeps its rotation.
   if (args.size() >= 6) {
-    const float yaw = std::atof(Str(args[5]).c_str());
-    const float pitch = args.size() >= 7 ? std::atof(Str(args[6]).c_str()) : 0.f;
-    const float roll = args.size() >= 8 ? std::atof(Str(args[7]).c_str()) : 0.f;
+    const float yaw = ArgFloat(args[5]);
+    const float pitch = args.size() >= 7 ? ArgFloat(args[6]) : 0.f;
+    const float roll = args.size() >= 8 ? ArgFloat(args[7]) : 0.f;
     const CQuaternion rot = CQuaternion::YRotation(CRelAngle::FromDegrees(roll)) *
                              CQuaternion::XRotation(CRelAngle::FromDegrees(pitch)) *
                              CQuaternion::ZRotation(CRelAngle::FromDegrees(yaw));
@@ -4013,9 +4235,7 @@ struct SSpawnBlob {
 void CmdSpawn(CStateManager& mgr, const Args& args, std::string& out) {
   CPlayer* player = mgr.GetPlayer(0);
   if (args.size() < 2 || args[1].size() != 4 || player == nullptr) {
-    Fail("usage: spawn <fourcc> [count] [d <dist>] [ancs <id>|u<id> [char [anim]]] [fsm <id>] "
-         "[rules <id>] [wpsc <id>] [conn <state> <msg> <id>] [model <id>|u<id>] [inactive] [prop <propid> <value>]... "
-         "(needs a player)");
+    Usage();
     return;
   }
   FourCC type = 0;
@@ -4480,7 +4700,7 @@ void CmdMaterial(CStateManager& mgr, const Args& args, std::string& out) {
   CEntity* ent = args.size() >= 2 ? const_cast< CEntity* >(ResolveObject(mgr, args[1])) : nullptr;
   CActor* actor = ent != nullptr ? TCastToPtr< CActor >(ent) : nullptr;
   if (actor == nullptr) {
-    Fail("usage: material <id> [+|-]<name|bit> ...   (id must be an actor)");
+    Usage();
     return;
   }
   for (size_t i = 2; i < args.size(); ++i) {
@@ -4516,7 +4736,7 @@ void CmdMaterial(CStateManager& mgr, const Args& args, std::string& out) {
 // runs need the others; the index is the pas::EAnimationState value.
 void CmdBodyState(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() < 3) {
-    Fail("usage: bodystate <id> <animation state index>");
+    Usage();
     return;
   }
   CEntity* ent = const_cast< CEntity* >(ResolveObject(mgr, args[1]));
@@ -4530,7 +4750,7 @@ void CmdBodyState(CStateManager& mgr, const Args& args, std::string& out) {
     Fail("the actor has no body controller");
     return;
   }
-  const int value = std::atoi(Str(args[2]).c_str());
+  const int value = ArgInt(args[2]);
   if (value < 0 || value > 28) { // 28 = kAS_AdditiveLoopReaction, the last one
     Fail("the animation state index must be 0..28");
     return;
@@ -4543,7 +4763,7 @@ void CmdBodyState(CStateManager& mgr, const Args& args, std::string& out) {
 
 void CmdSend(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() != 3 && !(args.size() == 5 && args[3] == "from")) {
-    Fail("usage: send <id> <msg> [from <id>]");
+    Usage();
     return;
   }
   const CEntity* target = ResolveObject(mgr, args[1]);
@@ -4583,6 +4803,30 @@ void CmdSend(CStateManager& mgr, const Args& args, std::string& out) {
   out += line;
 }
 
+// rezbit [start|stop]: player 0's Rezbit virus state (0 none, 1 infected, 2 recovering, 3 recovered);
+// `start` infects the suit as a Rezbit's virus attack does (CRezbit::StartVirusAttack, without its
+// morph-ball effect and sounds; L+R+B recovers), `stop` clears it.
+void CmdRezbit(CStateManager& mgr, const Args& args, std::string& out) {
+  CPlayer* player = mgr.GetPlayer(0);
+  if (player == nullptr) {
+    Fail("there is no player");
+    return;
+  }
+  const std::string what = args.size() > 1 ? Lower(Str(args[1])) : std::string();
+  if (what == "start") {
+    player->StartRezbitState(mgr, CRezbitEffectOptions(kInvalidAssetId, 0xffff, 0xffff, 3.f, 1.5f,
+                                                       2.5f, true));
+  } else if (what == "stop") {
+    player->StopRezbitState(mgr);
+  } else if (!what.empty()) {
+    Usage();
+    return;
+  }
+  char line[160];
+  std::snprintf(line, sizeof(line), "rezbit state %d\n", static_cast< int >(player->GetRezbitState()));
+  out += line;
+}
+
 // hurt <id> <amount> [weaponType]: put a CDamageInfo on an object through the same path a shot takes,
 // so an enemy's FSM reacts to it (a state change, a flinch, a death). The weapon type is the raw
 // EWeaponType the vulnerability tables use; 0 is the power beam. No damager object, so the damage
@@ -4590,14 +4834,14 @@ void CmdSend(CStateManager& mgr, const Args& args, std::string& out) {
 // the weapon mode only to reject kWT_None).
 void CmdHurt(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() < 3) {
-    Fail("usage: hurt <id> <amount> [weaponType]");
+    Usage();
     return;
   }
   const CEntity* ent = ResolveObject(mgr, args[1]);
   if (ent == nullptr) {
     return;
   }
-  const float amount = static_cast< float >(std::atof(Str(args[2]).c_str()));
+  const float amount = ArgFloat(args[2]);
   if (!(amount > 0.f)) {
     Fail("amount must be > 0");
     return;
@@ -4795,7 +5039,7 @@ void CmdRay(CStateManager& mgr, const Args& args, std::string& out) {
       !ParseFloat(args[3], z) || (args.size() > 4 && !ParseFloat(args[4], len)) ||
       (args.size() > 5 && (args.size() < 8 || !ParseFloat(args[5], dx) ||
                            !ParseFloat(args[6], dy) || !ParseFloat(args[7], dz)))) {
-    Fail("usage: ray <x> <y> <z> [len] [dx dy dz]");
+    Usage();
     return;
   }
   const CVector3f origin(x, y, z);
@@ -4865,7 +5109,7 @@ void CmdTp(CStateManager& mgr, const Args& args, std::string& out) {
   float z = 0.f;
   if (args.size() < 4 || !ParseFloat(args[1], x) || !ParseFloat(args[2], y) ||
       !ParseFloat(args[3], z)) {
-    Fail("usage: tp <x> <y> <z>");
+    Usage();
     return;
   }
   CPlayer* player = mgr.GetPlayer(0);
@@ -4894,7 +5138,7 @@ void CmdTp(CStateManager& mgr, const Args& args, std::string& out) {
 void CmdFace(CStateManager& mgr, const Args& args, std::string& out) {
   float yaw = 0.f;
   if (args.size() < 2 || !ParseFloat(args[1], yaw)) {
-    Fail("usage: face <yaw deg>");
+    Usage();
     return;
   }
   CPlayer* player = mgr.GetPlayer(0);
@@ -4920,7 +5164,7 @@ void CmdAim(CStateManager&, const Args& args, std::string& out) {
   float yaw = 0.f;
   float pitch = 0.f;
   if (args.size() != 3 || !ParseFloat(args[1], yaw) || !ParseFloat(args[2], pitch)) {
-    Fail("usage: aim <yaw_deg> <pitch_deg>   (0 = +y, 90 = +x; negative pitch looks down)");
+    Usage();
     return;
   }
   PortMouse::SetAimAngles(yaw, pitch);
@@ -4934,7 +5178,7 @@ void CmdAim(CStateManager&, const Args& args, std::string& out) {
 // suit upgrade is lost). This is CScriptPickup's own path (CScriptPickup.cpp:342-349).
 void CmdGive(CStateManager& mgr, const Args& args, bool take, std::string& out) {
   if (args.size() < 2) {
-    Fail(take ? "usage: take <item> [n]" : "usage: give <item> [n]");
+    Usage();
     return;
   }
   CPlayerState* state = mgr.PlayerState(0);
@@ -4985,7 +5229,7 @@ void CmdGiveTake(CStateManager& mgr, const Args& args, std::string& out) {
 void CmdPress(CStateManager& mgr, const Args& args, std::string& out) {
   (void)mgr;
   if (args.size() < 2) {
-    Fail("usage: press <a+b+...> [updates]   (0 holds until the next press/stick)");
+    Usage();
     return;
   }
   u16 mask = 0;
@@ -5031,7 +5275,7 @@ void CmdGrapple(CStateManager& mgr, const Args& args, std::string& out) {
       ent != nullptr ? TCastToConstPtr< CScriptGrapplePoint >(ent) : nullptr;
   float dist = 8.f;
   if (point == nullptr || (args.size() > 2 && (!ParseFloat(args[2], dist) || !(dist > 2.f)))) {
-    Fail("usage: grapple <grapple point id> [dist > 2]   (`objs grapple` lists them)");
+    Usage();
     return;
   }
   CPlayer* player = mgr.GetPlayer(0);
@@ -5077,7 +5321,7 @@ void CmdLock(CStateManager& mgr, const Args& args, std::string& out) {
   const CActor* actor = ent != nullptr ? TCastToConstPtr< CActor >(ent) : nullptr;
   float dist = 10.f;
   if (actor == nullptr || (args.size() > 2 && (!ParseFloat(args[2], dist) || !(dist > 2.f)))) {
-    Fail("usage: lock <actor id> [dist > 2] [updates]");
+    Usage();
     return;
   }
   CPlayer* player = mgr.GetPlayer(0);
@@ -5154,7 +5398,7 @@ void CmdScan(CStateManager& mgr, const Args& args, std::string& out) {
   const CActor* actor = ent != nullptr ? TCastToConstPtr< CActor >(ent) : nullptr;
   float dist = 40.f;
   if (actor == nullptr || (args.size() > 2 && (!ParseFloat(args[2], dist) || !(dist > 1.f)))) {
-    Fail("usage: scan <actor id> [dist > 1] [updates]   (`scan` alone: progress)");
+    Usage();
     return;
   }
   if (!state->HasVisor(CPlayerState::kPV_Scan)) {
@@ -5214,7 +5458,7 @@ void CmdCovdump(CStateManager&, const Args&, std::string& out) {
 void CmdStick(CStateManager& mgr, const Args& args, std::string& out) {
   (void)mgr;
   if (args.size() < 3) {
-    Fail("usage: stick <x> <y> [updates]   (-127..127; 0 updates holds until the next press/stick)");
+    Usage();
     return;
   }
   const int x = ArgToInt(args[1], 1000);
@@ -5235,7 +5479,7 @@ void CmdStick(CStateManager& mgr, const Args& args, std::string& out) {
 void CmdCstick(CStateManager& mgr, const Args& args, std::string& out) {
   (void)mgr;
   if (args.size() < 3) {
-    Fail("usage: cstick <x> <y> [updates]   (-127..127; 0 updates holds until the next press/stick)");
+    Usage();
     return;
   }
   const int x = ArgToInt(args[1], 1000);
@@ -5267,7 +5511,7 @@ std::string RestOf(const Args& args, size_t first) {
 // index, lists them; with one, copies that release's newest save onto the card, converted.
 void CmdGci(CStateManager&, const Args& args, std::string& out) {
   if (args.size() < 2 || Lower(args[1]) != "restore" || args.size() > 3) {
-    Fail("usage: gci restore [n]");
+    Usage();
     return;
   }
   const std::vector< PortSave::OtherRelease > others = PortSave::OtherReleaseSaves();
@@ -5356,7 +5600,7 @@ void CmdSave(CStateManager&, const Args& args, std::string& out) {
   }
   if (sub == "import") {
     if (args.size() < 3) {
-      Fail("usage: save import <path|latest>");
+      Usage();
       return;
     }
     std::string message;
@@ -5395,7 +5639,7 @@ void CmdSave(CStateManager&, const Args& args, std::string& out) {
   Fail("save <info|export|import|backup|backups> ...");
 }
 
-// screenshot: the F12 capture. Aurora writes it under the working directory and logs the exact path.
+// screenshot: a BMP of the frame (F12 and F1 > Game save a PNG through PortPhoto). Aurora writes it under the working directory and logs the exact path.
 void CmdScreenshot(CStateManager&, const Args&, std::string& out) {
   aurora::request_screenshot();
   out +=
@@ -5406,7 +5650,7 @@ void CmdScreenshot(CStateManager&, const Args&, std::string& out) {
 // overlay <page|off>: open the F1 window on a page (a name prefix: `overlay save`), for screenshots.
 void CmdOverlay(CStateManager&, const Args& args, std::string& out) {
   if (args.size() < 2 || !PortOverlay::ShowPage(std::string(args[1]))) {
-    Fail("usage: overlay <page name prefix>[/<sub-tab prefix>] | off");
+    Usage();
     return;
   }
   out += args[1] == "off" ? std::string("overlay closed\n") : "overlay open on " + std::string(args[1]) + "\n";
@@ -5420,7 +5664,7 @@ void CmdState(CStateManager&, const Args& args, std::string& out) {
   const bool load = args.size() >= 2 && args[1] == "load";
   if ((!save && !load) || slot < (save ? 1 : PortSaveState::kUndoSlot) ||
       slot > PortSaveState::kSlotCount) {
-    Fail("usage: state save <1..8> | state load <0..8> [hold]");
+    Usage();
     return;
   }
   if (save) {
@@ -5438,7 +5682,7 @@ void CmdState(CStateManager&, const Args& args, std::string& out) {
 // statedump <file>: every live object's state as JSON lines (tools/statecheck.py).
 void CmdStateDump(CStateManager& mgr, const Args& args, std::string& out) {
   if (args.size() < 2) {
-    Fail("usage: statedump <file>");
+    Usage();
     return;
   }
   std::string error;
@@ -5478,7 +5722,7 @@ void CmdResume(CStateManager&, const Args& args, std::string& out) {
     PortSaveState::ResumeClear();
     out += "resume state deleted\n";
   } else {
-    Fail("usage: resume [status|save|load|clear]");
+    Usage();
   }
 }
 
@@ -5543,7 +5787,7 @@ void CmdWindow(CStateManager&, const Args& args, std::string& out) {
     const int w = ArgToInt(args[1], 0);
     const int h = ArgToInt(args[2], 0);
     if (w < 64 || h < 64) {
-      Fail("usage: window [<width> <height>]");
+      Usage();
       return;
     }
     SDL_SetWindowFullscreen(window, false);
@@ -5599,8 +5843,6 @@ const CommandSpec kCommands[] = {
       "settled                     busy 0|1 (a warp/layer request in flight), free_ids, frame\n"},
     {"god", CmdGod,
       "god <0|1>                   god mode (the F1 cheat)\n"},
-    {"rezbit", CmdRezbit,
-      "rezbit [0|1]                start (1) or clear (0) the Rezbit virus; no argument: its state\n"},
     {"nodarkair", CmdNoDarkAether,
       "nodarkair <0|1>             no Dark Aether air damage (the F1 cheat)\n"},
     {"infammo", CmdInfiniteAmmo,
@@ -5622,6 +5864,10 @@ const CommandSpec kCommands[] = {
       "padport <index> <port>      give controller <index> (see `pads`) pad port 0-3; `padport clear <port>` frees it\n"},
     {"padpreset", CmdPadPreset,
       "padpreset <name> [port]     apply a pad preset (gamecube, remastered, modern, southpaw) to a port's controller (default 0)\n"},
+    {"prompticon", CmdPromptIcon,
+      "prompticon <hexid...>       the icon a prompt image (&image= id) is drawn with now\n"},
+    {"keypreset", CmdKeyPreset,
+      "keypreset <classic|mouse>   apply a keyboard preset (the F1 remap page's Presets)\n"},
     {"remapport", CmdRemapPort,
       "remapport [port]            the player (port 0-3) the F1 remap page's Presets change; no argument prints it\n"},
     {"padmap", CmdPadMap,
@@ -5717,6 +5963,11 @@ const CommandSpec kCommands[] = {
     {"maptap", CmdMapTap, "maptap                      tap the minimap: opens the map screen\n"},
     {"hintshow", CmdHintShow,
       "hintshow                    show the hint the game would show next (F1 Show current hint)\n"},
+    {"gameui", CmdGameUi,
+      "gameui <message|hint|scan|plain|frame|bar|label> [nofill] [nobutton] [scale=<f>] [anchor] [x y] <text...>  a test box from the game UI kit\n"
+      "gameui text [scale=<f>] [anchor] [x y] <text...>  a test text; gameui off hides either\n"
+      "gameui question [scale=<f>] [anchor] [x y] <title...>  a test Yes/No; gameui select <0|1>\n"
+      "gameui dump <FRME_name>     log a frame's widgets, model extents and kit zones\n"},
     {"memo", CmdMemo, "memo <0|1> <text...>        show a HUD memo; 1 = hint memo (framed, button ring)\n"
       "memo pause <strg>           show a string table as the boxed memo a paused HUDMemo opens\n"},
     {"walkspeed", CmdWalkSpeed,
@@ -5724,8 +5975,9 @@ const CommandSpec kCommands[] = {
     {"scanspeed", CmdScanSpeed,
       "scanspeed [50..400]         scan speed in percent (scan_speed); no argument prints it\n"},
     {"fov", CmdFov,
-      "fov [30..120|retail]|gun [0|1]|cannon [45..120]  first-person FOV (fov); gun 1: the arm cannon\n"
-      "                            follows it (gun_follows_fov); cannon: its own FOV (gun_fov)\n"},
+      "fov [30..120|retail]|gun [0|1]|ball [0|1]|cannon [45..120]  first-person FOV (fov); gun 1: the\n"
+      "                            arm cannon follows it (gun_follows_fov); ball 1: the morph ball's\n"
+      "                            cameras do (ball_follows_fov); cannon: its own FOV (gun_fov)\n"},
     {"beamswitch", CmdBeamSwitch,
       "beamswitch [100..400]       beam switch speed in percent (beam_switch_speed); no argument prints it\n"},
     {"language", CmdLanguage,
@@ -5738,6 +5990,8 @@ const CommandSpec kCommands[] = {
       "beamammo [50..100]          Dark/Light ammo per capacity pickup (beam_ammo_per_expansion); no argument prints it\n"},
     {"rooms", CmdRooms,
       "rooms [original|fast]      the energy controller rooms' turning-room cutscene (rotating_rooms); no argument prints it\n"},
+    {"travel", CmdTravel,
+      "travel [original|fast]     elevator and light beam teleporter cutscenes (travel_cutscenes); no argument prints it\n"},
     {"portal", CmdPortal,
       "portal [original|fast|skip] the light/dark world portal ride (portal_transition); no argument prints it\n"},
     {"elevator", CmdElevator,
@@ -5756,6 +6010,8 @@ const CommandSpec kCommands[] = {
       "target next|prev           a Next/Previous target press (moves the lock while locked on)\n"},
     {"spidertoggle", CmdSpiderToggle,
       "spidertoggle [0|1]         an R press holds the spider ball on its track until the next (spider_toggle)\n"},
+    {"specialmenu", CmdSpecialMenu,
+      "specialmenu [open|close|up|down|left|right|a|b|x|y|start]  drive the special menu; no argument: what it shows\n"},
     {"aimlockon", CmdAimLockOn,
       "aimlockon [0|1]            lock-on picks the target nearest the crosshair (aim_lock_on)\n"},
     {"scanshoot", CmdScanShoot,
@@ -5782,6 +6038,8 @@ const CommandSpec kCommands[] = {
       "send <id> <msg> [from <id>] deliver a script message to an object (name or number), from a sender\n"},
     {"covdump", CmdCovdump,
       "covdump                     coverage build: write the gcov counters now (and zero them)\n"},
+    {"rezbit", CmdRezbit,
+      "rezbit [start|stop]         player 0's Rezbit virus state; start infects the suit, stop clears it\n"},
     {"hurt", CmdHurt,
       "hurt <id> <amount> [weapon] damage an object as a shot would (weapon 0 = power beam)\n"},
     {"frame", CmdFrame,
@@ -5855,7 +6113,7 @@ const CommandSpec kCommands[] = {
     {"worlds", CmdWorlds,
       "worlds                      the memory card's world ids, areas and name tables\n"},
     {"strg", CmdStrg,
-      "strg <id|name> [index]      a string table as the game loads it\n"},
+      "strg <id|name> [index [raw]] a string table as the game loads it; raw keeps tags\n"},
     {"give", CmdGiveAdd,
       "give <item> [n] | take      add an item (capacity and amount), or remove capacity\n"},
     {"take", CmdGiveTake, ""},
@@ -5872,7 +6130,7 @@ const CommandSpec kCommands[] = {
     {"cstick", CmdCstick,
       "cstick <x> <y> [updates]    hold the C-stick (Spring Ball in Morph Ball), -127..127\n"},
     {"screenshot", CmdScreenshot,
-      "screenshot                  the F12 capture; the log names the file it wrote\n"},
+      "screenshot                  a BMP of the frame (F12 saves a PNG); the log names the file\n"},
     {"at", CmdAt,
       "at <update> <command>       run one command on that game update (`frame`), not on arrival,\n"
       "                            so runs at different speeds act on the same tick\n"},
@@ -5885,6 +6143,9 @@ const CommandSpec kCommands[] = {
       "                            to it and turns it off\n"},
     {"moonjump", CmdMoonJump,
       "moonjump [0|1]              cheat: holding jump in the air keeps rising; no argument prints it\n"},
+    {"phazon", CmdPhazon,
+      "phazon [0|1]                cheat: a full charge fires the final fight's Phazon shot, anywhere;\n"
+      "                            no argument prints it\n"},
     {"thirdperson", CmdThirdPerson,
       "thirdperson [on|off] [distance <m>] [shoulder <m>] [height <m>]\n"
       "                            third-person camera (single player; F1 Video, third_person* settings)\n"},
@@ -5907,7 +6168,7 @@ const CommandSpec kCommands[] = {
     {"", nullptr,
       "save export [<path>]        write the card's save file out (default: save-backups/)\n"},
     {"", nullptr,
-      "save import <path|latest>   put a .gci back on the card; the file it replaces is kept\n"},
+      "save import <path|latest>   put a .gci or a Trilogy save.bin on the card; the file it replaces is kept\n"},
     {"", nullptr,
       "save backup | backups       copy the card now, or list the copies in save-backups\n"},
     {"", nullptr,
@@ -5931,6 +6192,12 @@ void Execute(CStateManager& mgr, const std::string& line, std::string& out) {
         std::memcmp(command.name.data(), args[0].data(), args[0].size()) != 0) {
       continue;
     }
+    // A row with no help text shares the help of the row above it.
+    const CommandSpec* help = &command;
+    while (help->help[0] == '\0' && help != kCommands) {
+      --help;
+    }
+    sUsage = help->help;
     std::string body;
     sFailure.clear();
     command.run(mgr, args, body);

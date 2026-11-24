@@ -506,33 +506,6 @@ bool Enabled() {
   }
 }
 
-bool DumpEnabled() {
-  EnsureLoaded();
-  try {
-    return GetState().dump;
-  } catch (...) {
-    return false;
-  }
-}
-
-const char* SeedName() {
-  EnsureLoaded();
-  try {
-    return GetState().seedName.c_str();
-  } catch (...) {
-    return "";
-  }
-}
-
-int CheckCount() {
-  EnsureLoaded();
-  try {
-    return GetState().checkCount;
-  } catch (...) {
-    return 0;
-  }
-}
-
 const char* StatusText() {
   EnsureLoaded();
   static char status[48];

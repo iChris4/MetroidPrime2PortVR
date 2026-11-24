@@ -69,6 +69,9 @@ void PaceFrame(long periodUs) {
   sDeadline += period;
   if (sDeadline > now) {
     std::this_thread::sleep_until(sDeadline);
+    // Not work: the frame-time stats leave it out (PortOverlay::NoteFrameWork).
+    PortOverlay::NotePacingWait(static_cast< uint64_t >(
+        std::chrono::duration_cast< std::chrono::nanoseconds >(clock::now() - now).count()));
   } else if (now - sDeadline > period) {
     // Too far behind (a load stall): resync rather than run fast to catch up.
     sDeadline = now;

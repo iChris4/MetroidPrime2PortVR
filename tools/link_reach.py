@@ -160,19 +160,3 @@ with (ROOT / 'docs' / 'research' / 'boot_path_stubbable.tsv').open('w') as f:
         for mang in spell(dem):
             f.write(f'{mang}\t{dem}\t{",".join(sorted(refs[dem]))}\n')
 print(f'wrote docs/research/boot_path_stubbable.tsv')
-
-# The REACHABLE set, with the same shape. This is the list the boot probe cannot get
-# past, and `tools/gen_link_stubs.py --reachable` turns it into logging stubs so a
-# diagnostic build can run to the point where the port genuinely needs real code.
-reach_refs = collections.defaultdict(set)
-for p_, syms in undef_of.items():
-    if p_ in reach:
-        for sym_ in syms:
-            if sym_ in on_path:
-                reach_refs[sym_].add(p_.name)
-with (ROOT / 'docs' / 'research' / 'boot_path_reachable.tsv').open('w') as f:
-    f.write('# mangled\tdemangled\treferencing objects\n')
-    for dem in sorted(on_path & ld_undef):
-        for mang in spell(dem):
-            f.write(f'{mang}\t{dem}\t{",".join(sorted(reach_refs[dem]))}\n')
-print(f'wrote docs/research/boot_path_reachable.tsv ({len(on_path & ld_undef)} symbols)')

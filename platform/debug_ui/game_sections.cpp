@@ -5,6 +5,7 @@
 #include "port_utf8_path.h"
 #include "port_mobile.h"
 #include "debug_ui_internal.h"
+#include "port_play_options.h"
 
 #include "port_config_reset.h"
 #include "port_disc_replace.h"
@@ -50,10 +51,6 @@
 #include <SDL3/SDL_system.h>
 #endif
 
-namespace aurora {
-void request_screenshot() noexcept;
-}
-
 namespace PortDebug {
 
 // Screenshot, photo mode and exit; the top of the Game page (settings are on System).
@@ -64,7 +61,7 @@ void DrawGameSection() {
   const std::string shotLabel =
       (shotKeys.empty() ? std::string("Screenshot") : "Screenshot (" + shotKeys + ")") + "###screenshot";
   if (ImGui::Button(shotLabel.c_str())) {
-    aurora::request_screenshot();
+    PortPhoto::RequestScreenshot();
   }
   ImGui::SameLine();
   const std::string photoKeys = PortInputRemap::BindingsText(PortInput::Action::PhotoMode, " / ");
@@ -145,7 +142,14 @@ static void DrawUnlocksSection() {
   if (ImGui::Checkbox("Image galleries", &galleries)) {
     PortOverlay::SetUnlockGalleries(galleries);
   }
+  bool beamDoors = sBeamDoorsStayUnlocked;
+  if (ImGui::Checkbox("Unlock beam doors once opened", &beamDoors)) {
+    PortOverlay::SetBeamDoorsStayUnlocked(beamDoors);
+  }
   ImGui::EndDisabled();
+  ItemHelp("A Dark, Light or Annihilator door you have opened stays a blue door, on both sides and "
+           "on the map, when its room loads again. Kept in the save's opened doors, so it also "
+           "covers doors opened before this was on.");
 }
 
 void DrawCutscenesSection() {
@@ -230,7 +234,7 @@ void DrawGameAudio() {
 
 void DrawSpeedrunSection() {
   ImGui::SeparatorText("Speedrun");
-  Changed(ImGui::Checkbox("On-screen in-game time", &sIgtTimer));
+  EntryCheckbox(PortPlayOptions::Get(PortPlayOptions::Option::IgtTimer));
 }
 
 // The texture pack import's progress: set from the Java copy thread on Android, from the zip

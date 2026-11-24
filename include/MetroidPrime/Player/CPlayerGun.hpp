@@ -180,6 +180,8 @@ public:
   float PortChargeAnimStart(float retail) const;
   float PortChargeFxStart(float retail) const;
   float PortChargeRate(float retail) const;
+  // Phazon shot cheat: a full charge holds the Phazon shot the final fight's absorbed shots give.
+  void PortCheatPhazonCharge(CStateManager& mgr);
 #endif
   void ResetSeeker(CStateManager& mgr);
   void UpdateSeeker(float dt, CStateManager& mgr);

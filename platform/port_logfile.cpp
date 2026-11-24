@@ -1,4 +1,5 @@
 #include "port_logfile.h"
+#include "port_utf8_path.h"
 #include "port_settings.h"
 
 #include <cstdio>
@@ -300,10 +301,6 @@ struct Terminal {
   }
 };
 
-// UTF-8 to a wide path, as the rest of the port keeps paths.
-std::filesystem::path Utf8Path(const std::string& text) {
-  return std::filesystem::path(std::u8string(text.begin(), text.end()));
-}
 #endif
 
 // The log's path in a folder, which may or may not end in a slash already.
@@ -454,7 +451,7 @@ void Start(const std::string& userDirectory) {
   PreparePath(sPath);
   // A process of its own copies a pipe into the file and the terminal (RunCopy).
   SECURITY_ATTRIBUTES inherit{sizeof(inherit), nullptr, TRUE};
-  const HANDLE file = CreateFileW(Utf8Path(sPath).c_str(), GENERIC_WRITE,
+  const HANDLE file = CreateFileW(PortUtf8::FromUtf8(sPath).c_str(), GENERIC_WRITE,
                                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &inherit,
                                   CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
   const auto fail = [](const char* what) {

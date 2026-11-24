@@ -108,6 +108,13 @@ public:
   uint PortAssetId() const { return mPortAssetId; }
   // A material that draws nothing: big-endian zeros except a flag bit DrawSurface always skips.
   static const uchar* PortNeutralMaterial();
+  // Whether a model made from now on keeps its vertex arrays (and its display lists) on the GPU
+  // (GXPortRetainResident) while it exists; main.cpp sets it once Aurora has the room for them.
+  static void PortSetResident(bool arrays, bool displayLists);
+  // After writing into this model's arrays or display lists (the drawn button ring moves a box's
+  // frame line and empties its quad): the GPU's copies of what it retained are taken again, so the
+  // next draw sees the writes (GXPortUpdateResident). Nothing when it retained nothing.
+  void PortUpdateResidentData() const;
 #endif
 
   static void SetRenderModelBlack(bool v);
@@ -199,6 +206,11 @@ private:
   int mPortAreaId;
   int mPortModelIndex;
   mutable bool mPortMaterialRefused;
+  // Retains (or releases) every non-empty array and display list; see PortSetResident.
+  void PortSetResidentData(bool retain);
+  enum { kPortResidentArrays = 1, kPortResidentDisplayLists = 2 };
+  uchar mPortResident; // what this model retained (kPortResident*), released by its destructor
+  rstl::vector< const void* > mPortResidentLists; // the display lists it retained
 #endif
 
   static bool sUsingPackedLightmaps;

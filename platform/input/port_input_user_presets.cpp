@@ -1,4 +1,5 @@
 #include "port_input_user_presets.h"
+#include "port_strings.h"
 
 #include <algorithm>
 #include <cctype>
@@ -54,12 +55,6 @@ bool Ints(std::string_view text, int* out, int min, int max) {
   return n >= min && n <= max;
 }
 
-std::string_view Trim(std::string_view s) {
-  while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r')) s.remove_prefix(1);
-  while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r')) s.remove_suffix(1);
-  return s;
-}
-
 const PortInput::CustomActionDef* FindDef(const PortInput::UserBindings& b, uint16_t id) {
   for (const auto& def : b.customActions)
     if (def.id == id) return &def;
@@ -72,7 +67,7 @@ std::string CleanName(std::string_view name) {
   std::string clean;
   for (char c : name)
     if (static_cast<unsigned char>(c) >= 0x20 && c != 0x7f) clean += c;
-  const std::string_view t = Trim(clean);
+  const std::string_view t = port::TrimView(clean);
   size_t n = std::min(t.size(), kMaxName);
   // Don't cut through a UTF-8 sequence.
   while (n > 0 && n < t.size() && (static_cast<unsigned char>(t[n]) & 0xc0) == 0x80) --n;
@@ -136,18 +131,18 @@ bool Parse(std::string_view text, Preset& out, std::string* error) {
   while (pos <= text.size()) {
     size_t eol = text.find('\n', pos);
     if (eol == std::string_view::npos) eol = text.size();
-    const std::string_view line = Trim(text.substr(pos, eol - pos));
+    const std::string_view line = port::TrimView(text.substr(pos, eol - pos));
     pos = eol + 1;
     if (line.substr(0, 2) != "#!") continue;
     if (line == kMagic) {
       magic = true;
       continue;
     }
-    const std::string_view body = Trim(line.substr(2));
+    const std::string_view body = port::TrimView(line.substr(2));
     const size_t eq = body.find('=');
     if (eq == std::string_view::npos) continue;
-    const std::string_view key = Trim(body.substr(0, eq));
-    const std::string_view value = Trim(body.substr(eq + 1));
+    const std::string_view key = port::TrimView(body.substr(0, eq));
+    const std::string_view value = port::TrimView(body.substr(eq + 1));
     int v[4] = {0, 0, 0, 0};
     Layout& l = p.layout;
     if (key == "family") {

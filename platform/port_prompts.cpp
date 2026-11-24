@@ -7,8 +7,10 @@
 #include "port_env.h"
 #include "port_harness.h"
 #include "port_overlay.h"
+#include "port_prompt_ring_math.h"
 
 #include "input/port_input_devices.h"
+#include "port_input_bindings.h"
 #include "port_textures.h"
 #if defined(MP_ENABLE_OPENXR)
 #include "vr/vr_pad.h"
@@ -25,6 +27,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -77,12 +80,31 @@ struct PromptKey {
 // texels of each kKeys entry against G2ME01's paks, and by logging the ids the
 // Trilogy disc loads (its Wii-only art is the last few of each action). The few
 // textures with no id (kKeys below) are still matched by hash.
+// How an asset's icon is served.
+// Port: kBoxDisc and kRing are the scan, message and logbook boxes' A, which the game draws
+// additively (black is clear) as two textures: a lit teal disc with the letter, and a white ring it
+// tints, which closes the box's frame line. Both are drawn (DiscVariant) at 4x, not scaled: an HD
+// pack's upscaled ring was ragged on its inner edge. A whole icon in place of either left a gap in
+// the frame with a dim icon floating in it, as a dark icon added onto the screen barely shows.
+// With Render button prompt rings on (PortOverlay::PromptRing, port_prompt_ring.cpp) the disc is
+// served as the game's teal with the icon's symbol, centred (kTealDisc), and the ring texture,
+// which carries the game's own letter, as a clean white ring the drawn ring samples through the
+// game's material (kRingDrawn; the game's own quad is emptied). Off, the disc is a grey one with
+// the symbol (kDisc) and the ring a clean ring the size of the game's (kRing); with the game's own
+// art (no icon) both are left to the game and the texture pack.
+// kOrb is the main menu's selection orb, which the game alpha-blends inside its ring and glow: the
+// same disc and symbol, smaller (the size of the game's own button there) and clear around it
+// rather than on black. It replaced a recolour that took the icon's brightest texels for its body:
+// right for a light keycap with a dark letter, but a dark button with a light label (the Steam
+// Deck's R2) came out a white blob.
+enum PromptStyle : uint8_t {
+  kIcon, kDisc, kRing, kBoxDisc, kTealDisc, kRingDrawn, kOrb
+};
 struct PromptAsset {
   uint32_t id;
   uint32_t prompt;
-  bool glow = false; // drawn inside a glow: served GlowVariant's recolouring
+  uint8_t style = kIcon;
 };
-constexpr bool kGlow = true;
 // Ids marked "Trilogy only" are Wii art that the GameCube disc draws with other
 // ids; each was paired with its GameCube counterpart by aligning the two discs'
 // STRGs string by string.
@@ -109,11 +131,12 @@ constexpr PromptAsset kAssets[] = {
     {0x617D3700, PROMPT_STICK}, // Trilogy only: Nunchuk stick frame (Dash)
     {0x61E49F68, PROMPT_STICK},
     {0x637BA080, PROMPT_STICK}, // Trilogy only: Nunchuk stick frame (Dash)
-    {0x6D482337, PAD_BUTTON_A, kGlow}, // the main menu's selection orb
+    {0x6D482337, PAD_BUTTON_A, kOrb}, // the main menu's selection orb
     {0x71AA55E3, PAD_BUTTON_B}, // Trilogy only: Wii B, jump / Space Jump / Screw Attack
     {0x72A83A41, PROMPT_STICK},
     {0x738A4798, PROMPT_CSTICK_UP}, {0x73E9B3B2, PROMPT_CSTICK_LEFT},
-    {0x7F409C85, PAD_BUTTON_A}, // the logbook's "A to scroll the text" prompt (#34)
+    // The logbook's "A to scroll the text" prompt (#34): its lit disc.
+    {0x7F409C85, PAD_BUTTON_A, kBoxDisc},
     {0x83A73184, PAD_BUTTON_START},
     {0x8D13D507, PROMPT_CSTICK_UP}, {0x8E28D58C, PROMPT_STICK},
     {0x8EC3AB0B, PAD_BUTTON_X}, // multiplayer front end
@@ -124,13 +147,17 @@ constexpr PromptAsset kAssets[] = {
     {0xB5F3DA09, PROMPT_CSTICK}, // Trilogy only: "hold and point" to pick a Beam (GameCube: C-stick)
     {0xBC322C63, PAD_TRIGGER_Z}, {0xBFE00316, PAD_TRIGGER_Z}, // the second: multiplayer front end, 64x32
     {0xC14A95C6, PAD_TRIGGER_Z}, {0xC3E07487, PROMPT_STICK_RIGHT}, {0xC622B06F, PAD_BUTTON_RIGHT},
-    {0xC83111AA, PROMPT_CSTICK_DOWN}, {0xC96F93E3, PAD_BUTTON_A}, {0xCDA81421, PROMPT_STICK},
+    {0xC83111AA, PROMPT_CSTICK_DOWN},
+    {0xC96F93E3, PAD_BUTTON_A, kBoxDisc}, // the scan and message boxes' A: the lit disc
+    {0xCDA81421, PROMPT_STICK},
     {0xD212C48A, PAD_BUTTON_X}, {0xD3D8817F, PROMPT_CSTICK}, {0xD523DE3B, PAD_BUTTON_A},
-    {0xD89B9F7C, PAD_TRIGGER_R}, {0xDE5170B7, PAD_BUTTON_A}, {0xDEA628DC, PAD_BUTTON_B},
+    {0xD89B9F7C, PAD_TRIGGER_R},
+    {0xDE5170B7, PAD_BUTTON_A, kRing}, // the scan and message boxes' A: the ring
+    {0xDEA628DC, PAD_BUTTON_B},
     {0xDFC47FA2, PAD_BUTTON_A},
     {0xE2F4B915, PROMPT_DPAD}, // Trilogy only: "hold and point" to pick a Visor (GameCube: D-pad)
     {0xE43966EC, PROMPT_CSTICK},
-    {0xE6835669, PAD_BUTTON_START}, // the scan box's grey Start disc (a lore scan's "Press START for Logbook" page)
+    {0xE6835669, PAD_BUTTON_START, kDisc}, // the scan box's grey Start disc (a lore scan's "Press START for Logbook" page)
     {0xE72B1419, PAD_BUTTON_A},
     {0xF1328253, PAD_BUTTON_A}, // multiplayer front end
     {0xF1FA8D68, PAD_BUTTON_X}, {0xF237E982, PAD_TRIGGER_R}, {0xF43C48EF, PROMPT_STICK_LEFT},
@@ -366,6 +393,12 @@ const char* SuffixForSdlButton(int button) {
   case SDL_GAMEPAD_BUTTON_DPAD_DOWN: return "dpad_down";
   case SDL_GAMEPAD_BUTTON_DPAD_LEFT: return "dpad_left";
   case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return "dpad_right";
+  // Only the Steam Deck set has art for the back grips; elsewhere the file is missing and the
+  // prompt keeps its static icon.
+  case SDL_GAMEPAD_BUTTON_LEFT_PADDLE1: return "leftpaddle1";
+  case SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1: return "rightpaddle1";
+  case SDL_GAMEPAD_BUTTON_LEFT_PADDLE2: return "leftpaddle2";
+  case SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2: return "rightpaddle2";
   case PAD_NATIVE_BUTTON_TRIGGER_LEFT: return "lt";
   case PAD_NATIVE_BUTTON_TRIGGER_RIGHT: return "rt";
   default: return nullptr;
@@ -560,44 +593,326 @@ bool IconFitsBound(uint32_t iconWidth, uint32_t iconHeight, uint32_t width, uint
 // icon after Apply has unregistered it and moved on to another path, so each
 // path gets storage that is never changed or freed. Only the main thread adds
 // to the set, and there are only as many entries as distinct icon files.
-// The bool asks for the glow variant (GlowVariant).
-using IconSource = std::pair<std::string, bool>;
-const IconSource* StablePath(const std::string& path, bool glow = false) {
+using IconSource = std::pair<std::string, uint8_t>; // the file and its PromptStyle
+const IconSource* StablePath(const std::string& path, uint8_t style = kIcon) {
   static std::set<IconSource> sPaths;
-  return &*sPaths.emplace(path, glow).first;
+  return &*sPaths.emplace(path, style).first;
 }
 
-// The icon recoloured for a slot the game draws inside a glow that lifts every texel (the main
-// menu's selection orb): the game's own art there is a light symbol on a mid-tone disc, which the
-// lift leaves readable, while a light keycap with a dark symbol came out a blank white square.
-// So the body goes dark and whatever is darker than it - the symbol - goes white, eased over the
-// antialiased edge. `bytes` is one of tools/make_prompt_glyphs.py's DDS files: a 128-byte header,
-// then 8-bit RGBA.
-void GlowVariant(std::vector<uint8_t>& bytes) {
+// A symbol's coverage (tools/make_prompt_glyphs.py's <stem>_symbol.dds).
+struct Coverage {
+  int width = 0;
+  int height = 0;
+  std::vector<float> values; // 0..1, rows as the file stores them (bottom up, as the icon's)
+};
+
+// Port: the boxes' lit A from an icon: a disc where the game's teal one is (dark grey for kDisc, the
+// game's teal for kTealDisc), 26/32 of the texture across, on black (the game adds it onto the
+// screen), with the icon's symbol on it in white at the size of the game's own letter. `ring` makes
+// the ring texture instead (kRing, or kRingDrawn's when `teal`). The symbol is what stands out from
+// the icon's face: the face is the commonest shade inside the icon, and the symbol whatever differs
+// from it there, light, dark or cut out, so a Deck button's light letter, a keycap's dark one and
+// an Xbox button's hole all come out white. Only the icon's core counts, inside its own outline by
+// more than its rim, so the edge of a shape that is no circle (a Deck trigger) stays out. `orb`
+// makes the main menu orb's (kOrb): a smaller disc, centred, blended rather than added. `bytes` is
+// one of tools/make_prompt_glyphs.py's DDS files: a 128-byte header, then 8-bit RGBA. `symbol`, when
+// given, is the icon's symbol made by that tool (<stem>_symbol.dds, its coverage, large and sharp):
+// drawn instead of the one found in the icon, which a two-letter label (R2, RT, ZR) is too small in
+// to enlarge cleanly. A disc comes out `outSize` square when given (its header rewritten).
+void DiscVariant(std::vector<uint8_t>& bytes, bool ring, bool teal = false, bool orb = false,
+                 const Coverage* symbol = nullptr, uint32_t outSize = 0) {
   constexpr size_t kHeader = 128;
   if (bytes.size() <= kHeader) {
     return;
   }
-  uint8_t* px = bytes.data() + kHeader;
-  const size_t count = (bytes.size() - kHeader) / 4;
-  const auto luma = [](const uint8_t* p) { return (p[0] * 77 + p[1] * 150 + p[2] * 29) >> 8; };
-  // The body: the brightest of the opaque texels (a keycap's face, a button's disc).
-  int body = 0;
-  for (size_t i = 0; i < count; ++i) {
-    if (px[i * 4 + 3] >= 128) {
-      body = std::max(body, luma(px + i * 4));
-    }
-  }
-  if (body == 0) {
+  uint32_t both[2] = {};
+  std::memcpy(both, bytes.data() + 12, sizeof(both));
+  const int h = static_cast<int>(both[0]);
+  const int w = static_cast<int>(both[1]);
+  if (w <= 0 || h <= 0 || bytes.size() - kHeader != size_t(w) * size_t(h) * 4) {
     return;
   }
-  for (size_t i = 0; i < count; ++i) {
-    uint8_t* p = px + i * 4;
-    // 0 on the body, 1 once a texel is half the body's brightness or darker.
-    const float t = std::clamp(float(body - luma(p)) * 2.f / float(body), 0.f, 1.f);
-    for (int c = 0; c < 3; ++c) {
-      p[c] = static_cast<uint8_t>(p[c] * 0.35f * (1.f - t) + 255.f * t + 0.5f);
+  const std::vector<uint8_t> src(bytes.begin() + kHeader, bytes.end());
+  const auto at = [&](int x, int y) { return src.data() + (size_t(y) * w + x) * 4; };
+  const auto luma = [](const uint8_t* p) { return (p[0] * 77 + p[1] * 150 + p[2] * 29) >> 8; };
+  const auto opaque = [&](int x, int y) { return at(x, y)[3] >= 128; };
+  // The symbol's coverage, in its own texels (the icon's, or the made symbol's).
+  int mw = w, mh = h;
+  std::vector<float> mask(size_t(w) * h, 0.f);
+  int sx0 = w, sy0 = h, sx1 = -1, sy1 = -1;
+  if (symbol != nullptr) {
+    mw = symbol->width;
+    mh = symbol->height;
+    mask = symbol->values;
+    sx0 = mw, sy0 = mh;
+    for (int y = 0; y < mh; ++y) {
+      for (int x = 0; x < mw; ++x) {
+        if (mask[size_t(y) * mw + x] > 0.25f) {
+          sx0 = std::min(sx0, x); sy0 = std::min(sy0, y); sx1 = std::max(sx1, x); sy1 = std::max(sy1, y);
+        }
+      }
     }
+  } else {
+    // Outside: clear texels reachable from the border. A clear texel it doesn't reach is a hole in
+    // the icon (a cut-out symbol). Then each texel's distance in from the outside.
+    constexpr int kFar = 1 << 20;
+    std::vector<int> dist(size_t(w) * h, kFar);
+    std::vector<int> queue;
+    queue.reserve(size_t(w) * h);
+    const auto seed = [&](int x, int y) {
+      int& d = dist[size_t(y) * w + x];
+      if (d != 0 && !opaque(x, y)) {
+        d = 0;
+        queue.push_back(y * w + x);
+      }
+    };
+    for (int x = 0; x < w; ++x) {
+      seed(x, 0);
+      seed(x, h - 1);
+    }
+    for (int y = 0; y < h; ++y) {
+      seed(0, y);
+      seed(w - 1, y);
+    }
+    for (size_t q = 0; q < queue.size(); ++q) { // the outside, through clear texels
+      const int x = queue[q] % w, y = queue[q] / w;
+      const int n[4][2] = {{x + 1, y}, {x - 1, y}, {x, y + 1}, {x, y - 1}};
+      for (const auto& c : n) {
+        if (c[0] >= 0 && c[1] >= 0 && c[0] < w && c[1] < h) {
+          seed(c[0], c[1]);
+        }
+      }
+    }
+    for (size_t q = 0; q < queue.size(); ++q) { // then inwards, by steps of one texel either way
+      const int x = queue[q] % w, y = queue[q] / w;
+      const int d = dist[size_t(y) * w + x] + 1;
+      for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+          const int nx = x + dx, ny = y + dy;
+          if (nx >= 0 && ny >= 0 && nx < w && ny < h && dist[size_t(ny) * w + nx] > d) {
+            dist[size_t(ny) * w + nx] = d;
+            queue.push_back(ny * w + nx);
+          }
+        }
+      }
+    }
+    int x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (int y = 0; y < h; ++y) {
+      for (int x = 0; x < w; ++x) {
+        if (dist[size_t(y) * w + x] > 0) {
+          x0 = std::min(x0, x); y0 = std::min(y0, y); x1 = std::max(x1, x); y1 = std::max(y1, y);
+        }
+      }
+    }
+    if (x1 < 0) {
+      return;
+    }
+    // The core: inside the icon's own outline by more than its rim, whatever its shape (a Deck
+    // trigger is no circle; a circle around it caught its edge and drew that as a stroke).
+    const int rim = std::max(2, static_cast<int>(std::lround(0.12f * std::min(x1 - x0 + 1, y1 - y0 + 1))));
+    const auto core = [&](int x, int y) { return dist[size_t(y) * w + x] > rim; };
+    int histogram[32] = {};
+    for (int y = 0; y < h; ++y) {
+      for (int x = 0; x < w; ++x) {
+        if (core(x, y) && opaque(x, y)) {
+          ++histogram[luma(at(x, y)) >> 3];
+        }
+      }
+    }
+    const int face = static_cast<int>(std::max_element(std::begin(histogram), std::end(histogram)) -
+                                      std::begin(histogram)) * 8 + 4;
+    for (int y = 0; y < h; ++y) {
+      for (int x = 0; x < w; ++x) {
+        if (!core(x, y)) {
+          continue;
+        }
+        const uint8_t* p = at(x, y);
+        // A symbol cut out of the face (Kenney's Xbox letters) is a hole: clear texels count too.
+        const float alpha = p[3] / 255.f;
+        const float m = std::max(std::clamp((std::abs(luma(p) - face) - 40) / 64.f, 0.f, 1.f) * alpha,
+                                 1.f - alpha);
+        mask[size_t(y) * w + x] = m;
+        if (m > 0.25f) {
+          sx0 = std::min(sx0, x); sy0 = std::min(sy0, y); sx1 = std::max(sx1, x); sy1 = std::max(sy1, y);
+        }
+      }
+    }
+  }
+  const float sw = static_cast<float>(sx1 - sx0 + 1);
+  const float sh = static_cast<float>(sy1 - sy0 + 1);
+  // The game's letter is about 13x14 of 32; a wider symbol ("R2") may take 0.6 of the width.
+  // The orb's disc is smaller (kOrbDiscR), and its symbol with it.
+  constexpr float kBoxDiscR = 13.f, kOrbDiscR = 9.f; // radius, of 32
+  const float fit = orb ? kOrbDiscR / kBoxDiscR : 1.f;
+  const float scale = sx1 < 0 ? 0.f : std::min(0.44f * h / sh, 0.6f * w / sw) * fit;
+  const float ox = w * 0.5f - sw * scale * 0.5f;
+  // The ring, disc and symbol sit a little above the texture's centre (kCentreUp, in the game's
+  // texels; texture rows run bottom up, as the file stores them): the box's frame is cut back
+  // higher above the button than beside it, and centred, the ring left a sliver of it showing at
+  // the top.
+  constexpr float kCentreUp = 0.4f;
+  // The teal disc sits in a ring drawn as geometry, centred on the texture as the game's is.
+  const float cy = h * 0.5f + (teal || orb ? 0.f : kCentreUp * static_cast<float>(h) / 32.f);
+  const float oy = cy - sh * scale * 0.5f;
+  const auto sample = [&](float fx, float fy) {
+    // Bilinear, in the symbol's own texels.
+    fx -= 0.5f;
+    fy -= 0.5f;
+    const int ix = static_cast<int>(std::floor(fx));
+    const int iy = static_cast<int>(std::floor(fy));
+    const float tx = fx - ix, ty = fy - iy;
+    const auto m = [&](int x, int y) {
+      return x < 0 || y < 0 || x >= mw || y >= mh ? 0.f : mask[size_t(y) * mw + x];
+    };
+    return (m(ix, iy) * (1 - tx) + m(ix + 1, iy) * tx) * (1 - ty) +
+           (m(ix, iy + 1) * (1 - tx) + m(ix + 1, iy + 1) * tx) * ty;
+  };
+  // The teal disc stops half a game texel inside the drawn ring (13 of 32): an even gap all round.
+  // The orb's disc sits inside the game's ring, about as large as the game's own button there.
+  const float discR = (orb ? kOrbDiscR : teal ? PortPromptRingMath::kDiscRadius : kBoxDiscR) / 32.f *
+                      static_cast<float>(std::min(w, h));
+  // Off, a neutral dark grey rather than the game's teal, which belongs to the GameCube's green A
+  // and muddied the other sets' symbols. On, the game's own teal, under a drawn ring that gives the
+  // box back its look.
+  const float kFace[3] = {teal ? 0.f : 40.f, teal ? 107.f : 40.f, teal ? 121.f : 40.f};
+  constexpr float kLetter[3] = {240.f, 255.f, 255.f};
+  // The output: `outSize` square, or the icon's own size. `k` is icon texels per output texel; the
+  // geometry above is in icon texels.
+  const int outW = !ring && outSize > 0 ? static_cast<int>(outSize) : w;
+  const int outH = !ring && outSize > 0 ? static_cast<int>(outSize) : h;
+  const float k = static_cast<float>(w) / static_cast<float>(outW);
+  if (outW != w || outH != h) {
+    // The icon's header, with the new height, width and pitch.
+    const std::vector<uint8_t> header(bytes.begin(), bytes.begin() + kHeader);
+    bytes.assign(kHeader + size_t(outW) * outH * 4, 0);
+    std::copy(header.begin(), header.end(), bytes.begin());
+    const uint32_t dims[3] = {static_cast<uint32_t>(outH), static_cast<uint32_t>(outW),
+                              static_cast<uint32_t>(outW) * 4};
+    std::memcpy(bytes.data() + 12, dims, sizeof(dims));
+  }
+  uint8_t* out = bytes.data() + kHeader;
+  if (ring) {
+    // The game's ring starts 13 of 32 from the centre, in white (the game tints it). It runs out
+    // to the texture's edge (16) rather than the game's 15: the box's frame is cut back around the
+    // ring in a hexagon a little wider than a circle of 15, which the game's rougher ring (and an
+    // HD pack's) fills and a clean one left as a dark gap.
+    for (int y = 0; y < h; ++y) {
+      for (int x = 0; x < w; ++x) {
+        const float dx = x + 0.5f - w * 0.5f, dy = y + 0.5f - cy;
+        const float d = std::sqrt(dx * dx + dy * dy) * 32.f / static_cast<float>(std::min(w, h));
+        const float px = static_cast<float>(std::min(w, h)) / 32.f; // texels per game texel
+        // The drawn ring's (teal) is the frame line's profile bent round, shared with the ring
+        // that samples it (port_prompt_ring_math.h).
+        const float band =
+            teal ? PortPromptRingMath::BandCoverage(d)
+                 : std::clamp(std::min(d - 13.f, 15.75f - d) * px + 0.5f, 0.f, 1.f);
+        uint8_t* p = out + (size_t(y) * w + x) * 4;
+        p[0] = p[1] = p[2] = static_cast<uint8_t>(255.f * band + 0.5f);
+        p[3] = 255;
+      }
+    }
+    return;
+  }
+  for (int y = 0; y < outH; ++y) {
+    for (int x = 0; x < outW; ++x) {
+      // In icon texels: the output texel's centre, and its width for the disc's edge.
+      const float dx = (x + 0.5f) * k - w * 0.5f, dy = (y + 0.5f) * k - cy;
+      const float disc = std::clamp((discR - std::sqrt(dx * dx + dy * dy)) / k + 0.5f, 0.f, 1.f);
+      float letter = 0.f;
+      if (scale > 0.f) {
+        // Supersampled 2x2 when shrinking, so a thin stroke keeps its weight.
+        for (int s = 0; s < 4; ++s) {
+          const float px = (x + 0.25f + 0.5f * (s & 1)) * k, py = (y + 0.25f + 0.5f * (s >> 1)) * k;
+          letter += sample(sx0 + (px - ox) / scale, sy0 + (py - oy) / scale) * 0.25f;
+        }
+        letter *= disc;
+      }
+      uint8_t* p = out + (size_t(y) * outW + x) * 4;
+      if (orb) {
+        // Blended, not added: the disc's coverage is its alpha, its colour the face's.
+        for (int c = 0; c < 3; ++c) {
+          p[c] = static_cast<uint8_t>(kFace[c] * (1.f - letter) + kLetter[c] * letter + 0.5f);
+        }
+        p[3] = static_cast<uint8_t>(255.f * disc + 0.5f);
+        continue;
+      }
+      for (int c = 0; c < 3; ++c) {
+        p[c] = static_cast<uint8_t>(kFace[c] * disc * (1.f - letter) + kLetter[c] * letter + 0.5f);
+      }
+      p[3] = 255;
+    }
+  }
+}
+
+// The symbol tools/make_prompt_glyphs.py made for an icon, beside it: `<stem>_symbol.dds` for
+// `<stem>.dds` or `<stem>_<w>x<h>.dds`, an 8-bit one-channel DDS. False when there is none (a
+// texture pack's own icons), and the disc finds the symbol in the icon.
+bool ReadSymbol(const std::string& iconPath, Coverage& out) {
+  std::string stem = iconPath;
+  if (stem.size() > 4 && stem.compare(stem.size() - 4, 4, ".dds") == 0) {
+    stem.resize(stem.size() - 4);
+  }
+  const size_t underscore = stem.rfind('_');
+  if (underscore != std::string::npos) {
+    const std::string tail = stem.substr(underscore + 1);
+    const size_t x = tail.find('x');
+    if (x != std::string::npos && x > 0 && x + 1 < tail.size() &&
+        tail.find_first_not_of("0123456789x") == std::string::npos) {
+      stem.resize(underscore);
+    }
+  }
+  std::vector<uint8_t> bytes;
+  constexpr size_t kHeader = 128;
+  if (!ReadIconFile(stem + "_symbol.dds", bytes) || bytes.size() <= kHeader ||
+      std::memcmp(bytes.data(), "DDS ", 4) != 0) {
+    return false;
+  }
+  uint32_t dims[2] = {};
+  uint32_t bits = 0;
+  std::memcpy(dims, bytes.data() + 12, sizeof(dims));
+  std::memcpy(&bits, bytes.data() + 88, sizeof(bits));
+  if (bits != 8 || dims[0] == 0 || dims[1] == 0 || bytes.size() - kHeader != size_t(dims[0]) * dims[1]) {
+    return false;
+  }
+  out.height = static_cast<int>(dims[0]);
+  out.width = static_cast<int>(dims[1]);
+  out.values.resize(size_t(out.width) * out.height);
+  for (size_t i = 0; i < out.values.size(); ++i) {
+    out.values[i] = bytes[kHeader + i] / 255.f;
+  }
+  return true;
+}
+
+void ApplyStyle(std::vector<uint8_t>& bytes, uint8_t style, const std::string& iconPath) {
+  // A disc draws the icon's symbol from the one made for it when there is one, and comes out at
+  // 128x128 (4x the game's 32) whatever the icon's size, so that symbol stays sharp on a large
+  // screen.
+  constexpr uint32_t kDiscSize = 128;
+  Coverage symbol;
+  const Coverage* made = nullptr;
+  if ((style == kOrb || style == kDisc || style == kTealDisc) && ReadSymbol(iconPath, symbol)) {
+    made = &symbol;
+  }
+  if (style == kOrb) {
+    DiscVariant(bytes, false, false, true, made, kDiscSize);
+  } else if (style == kRingDrawn) {
+    // A clean white ring, centred, at 256x256 whatever the icon's size (it is only sampled by the
+    // drawn ring's mesh, which can be large on screen): the DDS header's height, width and pitch.
+    constexpr size_t kHeader = 128;
+    constexpr uint32_t kSize = 256;
+    if (bytes.size() < kHeader) {
+      return;
+    }
+    bytes.resize(kHeader + size_t(kSize) * kSize * 4);
+    const uint32_t dims[3] = {kSize, kSize, kSize * 4};
+    std::memcpy(bytes.data() + 12, dims, sizeof(dims));
+    DiscVariant(bytes, true, true);
+  } else if (style == kRing) {
+    DiscVariant(bytes, true);
+  } else if (style == kDisc) {
+    DiscVariant(bytes, false, false, false, made, kDiscSize);
+  } else if (style == kTealDisc) {
+    DiscVariant(bytes, false, true, false, made, kDiscSize);
   }
 }
 
@@ -613,9 +928,7 @@ bool ReadIconBytes(void* userData, const char* path, std::vector<uint8_t>& out) 
   if (!ReadIconFile(source.first, out)) {
     return false;
   }
-  if (source.second) {
-    GlowVariant(out);
-  }
+  ApplyStyle(out, source.second, source.first);
   return true;
 }
 
@@ -894,18 +1207,29 @@ struct BoundPrompt {
   uint32_t prompt;
   uint32_t width;
   uint32_t height;
-  bool glow;
+  uint8_t style;
   aurora::texture::ReplacementRegistration handle{};
   bool registered = false;
+  // The style served: a box disc or ring's depends on Render button prompt rings.
+  uint8_t served = kIcon;
 };
 std::unordered_map<const void*, BoundPrompt> sBound;
+// Whether any bound texture is served as the drawn ring's white ring (AnyDrawnRing, asked for
+// every HUD model drawn): worked out again only after sBound changes (bound, re-served, unbound).
+bool sDrawnRingStale = true;
+bool sDrawnRing = false;
 // Each action's stem as Poll last resolved it, by kActions index.
 std::string sActionStems[std::size(kActions)];
+// The same as a box's disc or ring reads it (PromptBoxScope): the scan text's button under the
+// scan visor, also while a rescanned object's box fades in before the scan completes (#127).
+std::string sBoxStems[std::size(kActions)];
 
-const std::string& ActionStem(uint32_t prompt) {
+bool IsBoxStyle(uint8_t style) { return style == kBoxDisc || style == kRing; }
+
+const std::string& StemFor(const BoundPrompt& bound) {
   for (size_t i = 0; i < std::size(kActions); ++i) {
-    if (kActions[i].prompt == prompt) {
-      return sActionStems[i];
+    if (kActions[i].prompt == bound.prompt) {
+      return IsBoxStyle(bound.style) ? sBoxStems[i] : sActionStems[i];
     }
   }
   static const std::string kNone;
@@ -931,9 +1255,7 @@ const IconPixels* StablePixels(const IconSource* source) {
       std::memcmp(bytes.data(), "DDS ", 4) != 0) {
     return nullptr;
   }
-  if (source->second) {
-    GlowVariant(bytes);
-  }
+  ApplyStyle(bytes, source->second, source->first);
   uint32_t both[2] = {};
   std::memcpy(both, bytes.data() + 12, sizeof(both));
   if (both[0] == 0 || both[1] == 0 || bytes.size() - kHeader != size_t(both[0]) * both[1] * 4) {
@@ -954,23 +1276,51 @@ const IconPixels* StablePixels(const IconSource* source) {
   return &pixels;
 }
 
-void ApplyBound(const void* owner, BoundPrompt& bound, const std::string& stem) {
+void ApplyBound(const void* owner, BoundPrompt& bound, const std::string& actionStem) {
+  sDrawnRingStale = true;
   if (bound.registered) {
     aurora::texture::unregister_replacement(bound.handle);
     bound.handle = {};
     bound.registered = false;
   }
+  // With Render button prompt rings on, the boxes' button is always drawn by the port, the
+  // GameCube set's too: where the game's own art would show (a GameCube pad on its own mapping, or
+  // the GameCube set chosen), it takes the GameCube icon for the action. Off is the game's art.
+  std::string stem = actionStem;
+  if (stem.empty() && (bound.style == kBoxDisc || bound.style == kRing) &&
+      PortOverlay::PromptRing()) {
+    stem = GameCubeStemForAction(static_cast<PADButton>(bound.prompt));
+  }
+  bound.served = kIcon;
   if (stem.empty()) {
     return;
   }
-  const std::string iconPath = FindIconForSize(stem, bound.width, bound.height);
+  // Port: a disc or ring (kDisc, kRing and their drawn-ring forms) is drawn, not scaled, so it can
+  // come out at any size; it takes the icon made for a slot twice as large, and comes out at twice
+  // the resolution of a plain icon (4x the game's, as HD texture packs draw the box around it), with
+  // a sharper symbol to draw from.
+  uint8_t style = bound.style;
+  const bool drawnRing = PortOverlay::PromptRing();
+  if (style == kBoxDisc) {
+    style = drawnRing ? kTealDisc : kDisc;
+  } else if (style == kRing && drawnRing) {
+    style = kRingDrawn;
+  }
+  std::string iconPath;
+  bound.served = style;
+  if (style == kDisc || style == kRing || style == kTealDisc || style == kRingDrawn || style == kOrb) {
+    iconPath = FindIconForSize(stem, bound.width * 2, bound.height * 2);
+  }
+  if (iconPath.empty()) {
+    iconPath = FindIconForSize(stem, bound.width, bound.height);
+  }
   uint32_t iconWidth = 0;
   uint32_t iconHeight = 0;
   if (iconPath.empty() || !IconDimensions(iconPath, iconWidth, iconHeight) ||
       !IconFitsBound(iconWidth, iconHeight, bound.width, bound.height)) {
     return;
   }
-  const IconSource* source = StablePath(iconPath, bound.glow);
+  const IconSource* source = StablePath(iconPath, style);
   // Port: registered decoded, so the icon shows on the texture's first draw. A file or virtual
   // replacement streams in on Aurora's workers after that first lookup, and the game's own
   // (GameCube) art shows until it lands: the pause screen's stick frames, each a texture of its
@@ -993,8 +1343,15 @@ void ApplyBound(const void* owner, BoundPrompt& bound, const std::string& stem) 
   }
   // Above the user's texture pack (priority 1) and the static device set (0): a remapped
   // action still shows the key or button it is bound to.
+  // The style's own name, so two styles of one file are two replacements.
+  const char* suffix = style == kOrb                                  ? "#orb"
+                       : style == kDisc                                ? "#disc"
+                       : style == kTealDisc                            ? "#teal"
+                       : style == kRing                                ? "#ring"
+                       : style == kRingDrawn                           ? "#ringdrawn"
+                                                                       : "";
   bound.handle = aurora::texture::register_virtual_replacement(
-      aurora::texture::TexturePointerKey{owner}, bound.glow ? iconPath + "#glow" : iconPath,
+      aurora::texture::TexturePointerKey{owner}, iconPath + suffix,
       aurora::texture::VirtualFileSource{&ReadIconBytes, const_cast<IconSource*>(source)},
       aurora::texture::ReplacementOptions{.priority = 2});
   bound.registered = bound.handle.id != 0;
@@ -1047,7 +1404,8 @@ const char* ConfirmLabel() {
     }
     return "A";
   }
-  if (std::strcmp(device, "xbox") == 0 || std::strcmp(device, "gamecube") == 0) {
+  if (std::strcmp(device, "xbox") == 0 || std::strcmp(device, "gamecube") == 0 ||
+      std::strcmp(device, "steamdeck") == 0) {
     return "A";
   }
   // A pad's mapping is positional: the game's A usually sits on the south button.
@@ -1136,14 +1494,32 @@ void Poll() {
   }
   const char* device = ActiveDevice();
   // Resolving every action's binding builds strings and rescans the bindings, so it runs when
-  // the device changes or the map opens or closes (the map rows name the sticks there), and
-  // otherwise a few times a second, which still follows a rebind.
+  // the device changes, the map opens or closes (the map rows name the sticks there) or the input
+  // contexts change, and otherwise a few times a second, which still follows a rebind.
   static std::string sLastDevice;
   static bool sLastMap = false;
   static uint64_t sLastResolveNs = 0;
   const uint64_t nowNs = SDL_GetTicksNS();
   const bool map = PortHarness::MapScreenOpen();
-  const bool changed = sLastDevice != device || sLastMap != map;
+  // Render button prompt rings changes what the boxes' disc and ring textures are served as.
+  static bool sLastRing = PortOverlay::PromptRing();
+  const bool ring = PortOverlay::PromptRing();
+  if (ring != sLastRing) {
+    sLastRing = ring;
+    for (auto& [owner, bound] : sBound) {
+      if (IsBoxStyle(bound.style)) {
+        ApplyBound(owner, bound, StemFor(bound));
+      }
+    }
+  }
+  // The bindings a prompt reads depend on the input contexts (the scan text takes the Menu A row,
+  // the Morph Ball its own rows), so a change resolves at once: on the timer alone the scan box
+  // opened on the gameplay button's icon for up to a quarter second (#127). The boxes resolve in
+  // their own context (sBoxStems): a rescan's box is up before the scan text context is.
+  static uint16_t sLastContexts = 0;
+  const uint16_t contexts = PortInputDevices::PromptContexts();
+  const bool changed = sLastDevice != device || sLastMap != map || sLastContexts != contexts;
+  sLastContexts = contexts;
   if (!changed && sLastResolveNs != 0 && nowNs - sLastResolveNs < 250000000ull) {
     return;
   }
@@ -1153,12 +1529,20 @@ void Poll() {
   for (size_t a = 0; a < std::size(kActions); ++a) {
     const PromptAction& action = kActions[a];
     const std::string stem = IconStemForPrompt(action.prompt, device);
+    std::string boxStem;
+    {
+      PortInputDevices::PromptBoxScope box;
+      boxStem = IconStemForPrompt(action.prompt, device);
+    }
     size_t applied = 0;
-    if (stem != sActionStems[a]) {
+    const bool stemChanged = stem != sActionStems[a];
+    const bool boxChanged = boxStem != sBoxStems[a];
+    if (stemChanged || boxChanged) {
       sActionStems[a] = stem;
+      sBoxStems[a] = boxStem;
       for (auto& [owner, bound] : sBound) {
-        if (bound.prompt == action.prompt) {
-          ApplyBound(owner, bound, stem);
+        if (bound.prompt == action.prompt && (IsBoxStyle(bound.style) ? boxChanged : stemChanged)) {
+          ApplyBound(owner, bound, StemFor(bound));
           ++applied;
         }
       }
@@ -1178,13 +1562,47 @@ void Poll() {
       ++applied;
     }
     if (applied != 0) {
-      std::fprintf(stderr, "[prompts] %s %s\n", action.label,
-                     stem.empty() ? "(back to the static icon)" : stem.c_str());
+      std::fprintf(stderr, "[prompts] %s %s%s%s\n", action.label,
+                     stem.empty() ? "(back to the static icon)" : stem.c_str(),
+                     boxStem == stem ? "" : ", boxes ",
+                     boxStem == stem ? "" : boxStem.empty() ? "static icon" : boxStem.c_str());
     }
   }
 }
 
-bool IsPromptAsset(uint32_t id) { return FindAsset(id) != nullptr; }
+bool IsBoxRing(const void* texture) {
+  const auto it = sBound.find(texture);
+  return it != sBound.end() && it->second.style == kRing;
+}
+
+bool DrawsRing(const void* texture) {
+  const auto it = sBound.find(texture);
+  return it != sBound.end() && it->second.registered && it->second.served == kRingDrawn;
+}
+
+bool AnyDrawnRing() {
+  if (sDrawnRingStale) {
+    sDrawnRingStale = false;
+    sDrawnRing = false;
+    for (const auto& [owner, bound] : sBound) {
+      if (bound.registered && bound.served == kRingDrawn) {
+        sDrawnRing = true;
+        break;
+      }
+    }
+  }
+  return sDrawnRing;
+}
+
+bool IsBoxDisc(const void* texture) {
+  const auto it = sBound.find(texture);
+  return it != sBound.end() && it->second.style == kBoxDisc;
+}
+
+bool IsTealDisc(const void* texture) {
+  const auto it = sBound.find(texture);
+  return it != sBound.end() && it->second.registered && it->second.served == kTealDisc;
+}
 
 uint32_t PromptButtonForAsset(uint32_t id) {
   const PromptAsset* asset = FindAsset(id);
@@ -1201,11 +1619,12 @@ bool BindTexture(const void* owner, uint32_t id, uint32_t width, uint32_t height
   if (bound.registered) {
     aurora::texture::unregister_replacement(bound.handle);
   }
-  bound = BoundPrompt{prompt, width, height, asset->glow};
+  bound = BoundPrompt{prompt, width, height, asset->style};
+  sDrawnRingStale = true;
   if (sEnabled) {
     // Textures stream in after Poll ran: give this one the action's current icon.
-    const std::string& stem = ActionStem(prompt);
-    if (!stem.empty()) {
+    const std::string& stem = StemFor(bound);
+    if (!stem.empty() || IsBoxStyle(bound.style)) {
       ApplyBound(owner, bound, stem);
     }
   }
@@ -1221,11 +1640,31 @@ void UnbindTexture(const void* owner) {
     aurora::texture::unregister_replacement(it->second.handle);
   }
   sBound.erase(it);
+  sDrawnRingStale = true;
 }
-bool KeyboardActive() { return sActiveInput.load(std::memory_order_relaxed) == ActiveInput::Keyboard; }
 
 bool PadActive() {
   return sActiveInput.load(std::memory_order_relaxed) == ActiveInput::Pad && PADGetIndexForPort(PAD_CHAN0) >= 0;
+}
+
+std::string DescribeAsset(uint32_t id) {
+  const PromptAsset* asset = FindAsset(id);
+  if (asset == nullptr) return "not a prompt image";
+  const char* device = ActiveDevice();
+  const u32 native = asset->prompt < PROMPT_STICK ? PadNativeForButton(static_cast<PADButton>(asset->prompt))
+                                                  : PAD_NATIVE_BUTTON_INVALID;
+  char line[160];
+  std::snprintf(line, sizeof(line), "prompt 0x%X, device %s, pad native %d, icon ", asset->prompt, device,
+                static_cast<int>(native));
+  const std::string stem = IconStemForPrompt(asset->prompt, device);
+  std::string out = line + (stem.empty() ? std::string("(static art)") : stem);
+  PortInput::Input in;
+  if (asset->prompt < PROMPT_STICK &&
+      PortInputDevices::PromptButtonInput(asset->prompt, PortInput::Family::Pad, in)) {
+    out += ", pad binding " + PortInput::InputToText(in);
+  }
+  if (asset->prompt < PROMPT_STICK) out += "\n    " + PortInputDevices::DescribePromptBindings(asset->prompt);
+  return out;
 }
 
 void NoteTouchInput(bool xboxLayout) {

@@ -18,7 +18,9 @@
 #include "port_video.h"
 #include "port_env.h"
 #include "port_overlay_internal.h"
+#include "port_harness.h"
 #include "port_logfile.h"
+#include "port_game_ui_page.h"
 #include "port_mouse.h"
 #include "port_radial.h"
 #include "debug_ui/debug_ui_internal.h"
@@ -67,6 +69,7 @@ extern "C" void AIPortSetOutputGain(float gain);
 namespace PortOverlayState {
 
 bool sSkipCinematics = false;
+bool sSkipPromptBox = true;
 int sSeamlessPickups = PortOverlay::kSeamlessPickups_Off;
 // `MP2_LOG_FILE`: whether stdout and stderr also go to a file (F1 > Testing, console `logfile`).
 // PortLogFile::Start reads it before Aurora comes up, so the row only reports the state the next
@@ -85,6 +88,14 @@ bool sBallCam = false;
 int sBallCamSpeed = PortOverlay::kBallCamSpeedDefault;
 bool sWalkSpeedEnabled = true;
 int sWalkSpeed = PortOverlay::kWalkSpeedDefault;
+// `MP2_PRIME1_AIR_PHYSICS`: Prime 1's airborne movement rules (CPlayerDynamics), saved in settings.cfg.
+bool sPrime1AirPhysics = false;
+// `MP2_PRIME1_BOOST_BALL`: Prime 1's Boost Ball recharge and impulse (CMorphBall), saved in settings.cfg.
+bool sPrime1BoostBall = false;
+// `MP2_PRIME1_BOOST_FALLOFF`: how much of Echoes' speed falloff a Prime 1 boost keeps, in percent.
+int sPrime1BoostFalloff = PortOverlay::kPrime1BoostFalloffDefault;
+// `MP2_PRIME1_DISC`: the player's Metroid Prime 1 disc, read for Prime 1 boost ball's values.
+std::string sPrime1DiscPath;
 int sScanSpeed = PortOverlay::kScanSpeedDefault;
 int sBeamSwitchSpeed = PortOverlay::kBeamSwitchSpeedDefault;
 int sMusicBoost = PortOverlay::kVolumeBoostDefault;
@@ -93,6 +104,7 @@ int sLanguage = 0;
 int sElevatorRide = PortOverlay::kElevatorRide_Original;
 int sPortalTransition = PortOverlay::kPortalTransition_Original;
 int sRotatingRooms = PortOverlay::kRotatingRooms_Original;
+int sTravelCutscenes = PortOverlay::kTravelCutscenes_Original;
 int sComboBeamCost = PortOverlay::kComboBeamCostMax;
 int sComboMissileCost = PortOverlay::kComboMissileCostMax;
 int sBeamAmmoPerExpansion = PortOverlay::kBeamAmmoPerExpansionDefault;
@@ -101,6 +113,7 @@ int sMapPickups = PortOverlay::kMapPickups_Off;
 bool sMapPickupKinds = false;
 bool sRevealMap = false;
 int sPromptGlyphs = 0;
+bool sPromptRing = true;
 bool sIgtTimer = false;
 bool sOriginalExperience = false;
 bool sUnlockHardMode = false;
@@ -108,6 +121,7 @@ bool sUnlockGalleries = false;
 float sDamageTakenMult = 1.f;
 float sDamageDealtMult = 1.f;
 bool sUnlockBeamDoors = false;
+bool sBeamDoorsStayUnlocked = false;
 bool sStackBeams = false;
 bool sStackBeamsSkipDark = false;
 int sHintDelay = 0;
@@ -127,6 +141,8 @@ int sPointerAimBox = PortOverlay::kPointerAimBoxDefault;
 int sPointerAimTurn = PortOverlay::kPointerAimTurnDefault;
 bool sGyroAim = false;
 int sGyroSource = PortOverlay::kGyroSourceDefault;
+bool sSteamInputBackButtons = true;
+bool sPreciseStickDeadZones = false; // `precise_stick_deadzones` (#131)
 int sGyroSpace = PortOverlay::kGyroSpaceDefault;
 int sGyroAutoCalibrate = PortOverlay::kGyroAutoCalibrateDefault;
 float sGyroSmoothing = 0.f;
@@ -150,6 +166,8 @@ bool sCardBackup = false;
 float sFirstPersonFov = 0.f;
 // The arm cannon is drawn at the world's FOV (gun_follows_fov), else at its own (gun_fov).
 bool sGunFollowsFov = false;
+// The morph ball's cameras widen or narrow with the first-person FOV (ball_follows_fov).
+bool sBallFollowsFov = true;
 float sGunFov = PortOverlay::kGunFovRetail;
 // Draw the world without the HUD's view overlays (`MP2_NO_HELMET`, `MP2_NO_VISOR_FX`): for
 // screenshots of an area, and for looking at what a visor effect covers.
@@ -165,6 +183,7 @@ bool sBallBars = false; // `ball_bars`: the morph ball view's narrowed viewport
 bool sDarkVisorFull = false;
 int sDarkVisorStatic = PortOverlay::kDarkVisorStaticMax;
 bool sInfiniteBeamAmmo = false; // Enhancements; saved, unlike the sInfiniteAmmo cheat
+bool sChargeOnlyBeamAmmo = false; // `charge_only_beam_ammo` (#130)
 bool sDarkWorldLightMusic = false; // `dark_world_light_music` (#36)
 int sHudOpacityEcho = PortOverlay::kHudOpacityVisor;
 int sHudOpacityDark = PortOverlay::kHudOpacityVisor;
@@ -270,6 +289,7 @@ static float sBoostSpeedScale = 1.f;
 static float sBoostDurationScale = 1.f;
 static bool sBoostAnywhere = false;
 static bool sBoostSteer = false;
+static bool sPhazonShot = false; // PortOverlay::PhazonShot; never saved, as sGodMode
 uint32_t sWorldId = 0;
 int sAreaId = -1;
 std::vector< SRoomEntry > sRooms;
@@ -336,6 +356,12 @@ uint64_t sFpsWindowStart = 0;
 int sFpsFrames = 0;
 // CPU time of the iterations in the current window, measured before PortPaceFrame sleeps.
 uint64_t sFpsWorkNs = 0;
+// The window's slowest iteration and how many overran a 60 Hz period; published as sFrameWork.
+uint64_t sFpsWorkMaxNs = 0;
+int sFpsWorkSlow = 0;
+PortOverlay::FrameWorkStats sFrameWork;
+// Pacing sleeps of the iteration in progress (NotePacingWait), not counted as its work.
+uint64_t sPacingWaitNs = 0;
 
 // Handed to aurora_set_graphics_quality only when they change; 0 means "never applied yet".
 int sAppliedMsaa = 0;
@@ -463,7 +489,13 @@ void TickFps() {
     sThroughputFps = sFpsWorkNs > 0
                          ? static_cast< float >(sFpsFrames) / (static_cast< float >(sFpsWorkNs) / 1e9f)
                          : 0.f;
+    sFrameWork.frames = sFpsFrames;
+    sFrameWork.avgMs = sFpsFrames > 0 ? static_cast< float >(sFpsWorkNs) / 1e6f / sFpsFrames : 0.f;
+    sFrameWork.maxMs = static_cast< float >(sFpsWorkMaxNs) / 1e6f;
+    sFrameWork.slow = sFpsWorkSlow;
     sFpsWorkNs = 0;
+    sFpsWorkMaxNs = 0;
+    sFpsWorkSlow = 0;
     sFpsFrames = 0;
     sFpsWindowStart = now;
   }
@@ -501,8 +533,26 @@ std::string PlainWorldName(const wchar_t* text) {
 namespace PortOverlay {
 
 void NoteFrameWork(uint64_t ns) {
+  // MP2_SLOW_FRAME_MS=<ms>: log every iteration whose work took longer, with the game update it
+  // ended on, to tie a hitch to what happened then (logcat on Android).
+  static const int sSlowLogMs = port::EnvInt("MP2_SLOW_FRAME_MS", 0);
+  constexpr uint64_t kPeriodNs = 16666667ull;
+  ns -= std::min(ns, sPacingWaitNs);
+  sPacingWaitNs = 0;
   sFpsWorkNs += ns;
+  sFpsWorkMaxNs = std::max(sFpsWorkMaxNs, ns);
+  if (ns > kPeriodNs) {
+    ++sFpsWorkSlow;
+  }
+  if (sSlowLogMs > 0 && ns > static_cast< uint64_t >(sSlowLogMs) * 1000000ull) {
+    std::fprintf(stderr, "[perf] slow frame %.1f ms at update %u\n", static_cast< double >(ns) / 1e6,
+                 PortHarness::GameUpdates());
+  }
 }
+
+void NotePacingWait(uint64_t ns) { sPacingWaitNs += ns; }
+
+FrameWorkStats LastFrameWork() { return sFrameWork; }
 
 
 void SetAreaLayers(const CWorldLayerState* layers, int areaId) {
@@ -612,17 +662,20 @@ void SetGameState(uint32_t worldId, int areaId, CWorld* world) {
   }
 }
 
-std::string RoomName(uint32_t worldId, int areaIndex) {
-  std::string world;
+std::string WorldName(uint32_t worldId) {
   if (gpMemoryCard != nullptr) {
     const rstl::vector< CMemoryCard::MemoryWorld >& worlds = gpMemoryCard->GetMemoryWorlds();
     for (int i = 0; i < worlds.size(); ++i) {
       if (static_cast< uint32_t >(worlds[i].first) == worldId) {
-        world = PlainWorldName(worlds[i].second.GetFrontEndName());
-        break;
+        return PlainWorldName(worlds[i].second.GetFrontEndName());
       }
     }
   }
+  return {};
+}
+
+std::string RoomName(uint32_t worldId, int areaIndex) {
+  const std::string world = WorldName(worldId);
   // Only the current world's rooms are named (the room picker's list); another world's keep the
   // saved label.
   std::string room;
@@ -640,7 +693,8 @@ void Toggle() {
   // MP1's Toggle: the cursor goes back to the window (releases the mouse capture), and opening
   // drops any button or key ImGui still holds (a press whose release never came would make it
   // ignore every later click), as a focus loss would.
-  PortMouse::SetUiActive(sVisible);
+  // A port page left open under the window (the special menu) keeps the cursor when F1 closes.
+  PortMouse::SetUiActive(sVisible || PortGameUi::PageOpen());
   if (sVisible && ImGui::GetCurrentContext() != nullptr) {
     ImGuiIO& io = ImGui::GetIO();
     io.AddFocusEvent(false);
@@ -707,16 +761,8 @@ bool Visible() {
 }
 
 bool PointerBlocked() {
-  return Visible() || PortMouse::UiActive() ||
+  return Visible() || PortMouse::UiActive() || PortDebug::UpdateToastHovered() ||
          (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse);
-}
-
-bool SkipCinematics() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return false;
-  }
-  return EnvBool("MP2_SKIP_CINEMATICS", sSkipCinematics);
 }
 
 namespace {
@@ -753,9 +799,15 @@ void SkipConfirmTap() {
 
 bool TakeSkipConfirmTap() { return sSkipConfirmTapped.exchange(false); }
 
-void SetSkipCinematics(bool skip) {
+std::string Prime1DiscPath() {
   ReadEnv();
-  sSkipCinematics = skip;
+  const char* env = port::EnvString("MP2_PRIME1_DISC");
+  return env != nullptr ? std::string(env) : sPrime1DiscPath;
+}
+
+void SetPrime1DiscPath(const std::string& path) {
+  ReadEnv();
+  sPrime1DiscPath = path;
   Persist();
 }
 
@@ -811,32 +863,6 @@ int WorldNameCard() {
   return EnvScreenMode("MP2_WORLD_NAME", OriginalExperience() ? kScreen_Show : kScreen_Skippable);
 }
 
-bool HideHelmet() {
-  ReadEnv();
-  return EnvBool("MP2_NO_HELMET", sHideHelmet);
-}
-
-bool HideVisorEffects() {
-  ReadEnv();
-  return EnvBool("MP2_NO_VISOR_FX", sHideVisorEffects);
-}
-
-bool CinemaBars() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return true;
-  }
-  return EnvBool("MP2_CINEMA_BARS", sCinemaBars);
-}
-
-bool SecondaryCrosshairs() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return true;
-  }
-  return EnvBool("MP2_SECONDARY_CROSSHAIRS", sSecondaryCrosshairs);
-}
-
 bool CrosshairInVisor(int visor) {
   ReadEnv();
   if (OriginalExperience()) {
@@ -850,22 +876,6 @@ bool CrosshairInVisor(int visor) {
   default:
     return true;
   }
-}
-
-bool BallBars() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return true;
-  }
-  return EnvBool("MP2_BALL_BARS", sBallBars);
-}
-
-bool DarkVisorFullScreen() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return false;
-  }
-  return EnvBool("MP2_DARK_VISOR_FULL", sDarkVisorFull);
 }
 
 int DarkVisorStatic() {
@@ -896,17 +906,6 @@ void SetHudOpacity(HudOpacityPart part, int percent) {
   Persist();
 }
 
-bool AimCrosshair() {
-  ReadEnv();
-  return EnvBool("MP2_AIM_CROSSHAIR", sAimCrosshair);
-}
-
-void SetAimCrosshair(bool enabled) {
-  ReadEnv();
-  sAimCrosshair = enabled;
-  Persist();
-}
-
 int CrosshairStyle() {
   ReadEnv();
   const char* env = port::EnvString("MP2_CROSSHAIR_STYLE");
@@ -920,34 +919,6 @@ int CrosshairStyle() {
     return kCrosshairStyle_GameCube;
   }
   return EnvIntIn("MP2_CROSSHAIR_STYLE", sCrosshairStyle, kCrosshairStyle_Classic, kCrosshairStyle_GameCube);
-}
-
-void SetCrosshairStyle(int style) {
-  ReadEnv();
-  sCrosshairStyle = std::clamp(style, kCrosshairStyle_Classic, kCrosshairStyle_GameCube);
-  Persist();
-}
-
-int CrosshairSize() {
-  ReadEnv();
-  return EnvIntIn("MP2_CROSSHAIR_SIZE", sCrosshairSize, kCrosshairSizeMin, kCrosshairSizeMax);
-}
-
-void SetCrosshairSize(int percent) {
-  ReadEnv();
-  sCrosshairSize = std::clamp(percent, kCrosshairSizeMin, kCrosshairSizeMax);
-  Persist();
-}
-
-int CrosshairOpacity() {
-  ReadEnv();
-  return EnvIntIn("MP2_CROSSHAIR_OPACITY", sCrosshairOpacity, kCrosshairOpacityMin, kCrosshairOpacityMax);
-}
-
-void SetCrosshairOpacity(int percent) {
-  ReadEnv();
-  sCrosshairOpacity = std::clamp(percent, kCrosshairOpacityMin, kCrosshairOpacityMax);
-  Persist();
 }
 
 bool CrosshairColor(float rgb[3]) {
@@ -993,12 +964,6 @@ bool GunFollowsFov() {
   return !OriginalExperience() && EnvBool("MP2_GUN_FOLLOWS_FOV", sGunFollowsFov);
 }
 
-void SetGunFollowsFov(bool enabled) {
-  ReadEnv();
-  sGunFollowsFov = enabled;
-  Persist();
-}
-
 float GunFov() {
   ReadEnv();
   if (OriginalExperience()) {
@@ -1041,28 +1006,11 @@ void SetMsaa(int samples) {
   Persist();
 }
 
-int Anisotropy() {
-  ReadEnv();
-  return EnvIntIn("MP2_ANISO", sAnisotropy, 1, 16);
-}
-
-void SetAnisotropy(int maxAnisotropy) {
-  ReadEnv();
-  sAnisotropy = std::clamp(maxAnisotropy, 1, 16);
-  Persist();
-}
-
 int HudScale() {
   ReadEnv();
   // 0 means the full-size HUD.
   const int env = port::EnvInt("MP2_HUD_SCALE", sHudScale);
   return env == 0 ? kHudScaleMax : (env >= kHudScaleMin && env <= kHudScaleMax ? env : sHudScale);
-}
-
-void SetHudScale(int percent) {
-  ReadEnv();
-  sHudScale = std::clamp(percent, kHudScaleMin, kHudScaleMax);
-  Persist();
 }
 
 bool HudScalingActive() { return sHudScaling; }
@@ -1111,6 +1059,9 @@ void SetBoostAnywhere(bool enabled) { sBoostAnywhere = enabled; }
 bool BoostSteerSet() { return sBoostSteer; }
 bool BoostSteer() { return sBoostSteer && !OriginalExperience(); }
 void SetBoostSteer(bool enabled) { sBoostSteer = enabled; }
+bool PhazonShotSet() { return sPhazonShot; }
+bool PhazonShot() { return sPhazonShot && !OriginalExperience(); }
+void SetPhazonShot(bool enabled) { sPhazonShot = enabled; }
 
 unsigned InfiniteAmmoKind(int itemType) {
   switch (itemType) {
@@ -1127,22 +1078,6 @@ unsigned InfiniteAmmoKind(int itemType) {
   }
 }
 
-bool InfiniteBeamAmmo() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return false;
-  }
-  return EnvBool("MP2_INFINITE_BEAM_AMMO", sInfiniteBeamAmmo);
-}
-
-bool DarkWorldLightMusic() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return false;
-  }
-  return EnvBool("MP2_DARK_WORLD_LIGHT_MUSIC", sDarkWorldLightMusic);
-}
-
 bool InfiniteAmmo(unsigned kinds) {
   ReadEnv();
   const unsigned on = sInfiniteAmmo | (InfiniteBeamAmmo() ? kInfAmmoDark | kInfAmmoLight : 0u);
@@ -1152,31 +1087,6 @@ bool InfiniteAmmo(unsigned kinds) {
 void SetInfiniteAmmo(unsigned kinds, bool enabled) {
   ReadEnv();
   sInfiniteAmmo = enabled ? sInfiniteAmmo | kinds : sInfiniteAmmo & ~kinds;
-}
-
-bool FastMorph() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return false;
-  }
-  return EnvBool("MP2_FAST_MORPH", sFastMorph);
-}
-
-void SetFastMorph(bool enabled) {
-  ReadEnv();
-  sFastMorph = enabled;
-  Persist();
-}
-
-bool MinimapTap() {
-  ReadEnv();
-  return EnvBool("MP2_MINIMAP_TAP", sMinimapTap);
-}
-
-void SetMinimapTap(bool enabled) {
-  ReadEnv();
-  sMinimapTap = enabled;
-  Persist();
 }
 
 int MapPickups() {
@@ -1204,48 +1114,9 @@ void SetMapPickups(int mode) {
   Persist();
 }
 
-bool MapPickupKinds() {
-  ReadEnv();
-  return EnvBool("MP2_MAP_PICKUP_KINDS", sMapPickupKinds);
-}
-
-void SetMapPickupKinds(bool enabled) {
-  ReadEnv();
-  sMapPickupKinds = enabled;
-  Persist();
-}
-
 bool RevealMap() {
   ReadEnv();
   return !OriginalExperience() && EnvBool("MP2_REVEAL_MAP", sRevealMap);
-}
-
-void SetRevealMap(bool enabled) {
-  ReadEnv();
-  sRevealMap = enabled;
-  Persist();
-}
-
-bool PointerMenus() {
-  ReadEnv();
-  return EnvBool("MP2_POINTER_MENUS", sPointerMenus);
-}
-
-void SetPointerMenus(bool enabled) {
-  ReadEnv();
-  sPointerMenus = enabled;
-  Persist();
-}
-
-bool MenuExit() {
-  ReadEnv();
-  return EnvBool("MP2_MENU_EXIT", sMenuExit);
-}
-
-void SetMenuExit(bool enabled) {
-  ReadEnv();
-  sMenuExit = enabled;
-  Persist();
 }
 
 void RequestQuit() {
@@ -1253,52 +1124,6 @@ void RequestQuit() {
   SDL_Event quit{};
   quit.type = SDL_EVENT_QUIT;
   SDL_PushEvent(&quit);
-}
-
-bool MapSwapFingers() {
-  ReadEnv();
-  return EnvBool("MP2_MAP_SWAP_FINGERS", sMapSwapFingers);
-}
-
-void SetMapSwapFingers(bool swap) {
-  ReadEnv();
-  sMapSwapFingers = swap;
-  Persist();
-}
-
-bool MapInvertX() {
-  ReadEnv();
-  return EnvBool("MP2_MAP_INVERT_X", sMapInvertX);
-}
-
-void SetMapInvertX(bool invert) {
-  ReadEnv();
-  sMapInvertX = invert;
-  Persist();
-}
-
-bool MapInvertY() {
-  ReadEnv();
-  return EnvBool("MP2_MAP_INVERT_Y", sMapInvertY);
-}
-
-void SetMapInvertY(bool invert) {
-  ReadEnv();
-  sMapInvertY = invert;
-  Persist();
-}
-
-bool BallCamControl() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return false;
-  }
-  return EnvBool("MP2_BALL_CAM", sBallCam);
-}
-
-int BallCamSpeed() {
-  ReadEnv();
-  return EnvIntIn("MP2_BALL_CAM_SPEED", sBallCamSpeed, kBallCamSpeedMin, kBallCamSpeedMax);
 }
 
 int WalkSpeed() {
@@ -1330,36 +1155,6 @@ bool ConsumeShowHintRequest() {
   return requested;
 }
 
-bool WalkSpeedEnabled() {
-  ReadEnv();
-  return EnvBool("MP2_WALK_SPEED_ENABLED", sWalkSpeedEnabled);
-}
-
-void SetWalkSpeedEnabled(bool enabled) {
-  ReadEnv();
-  sWalkSpeedEnabled = enabled;
-  Persist();
-}
-
-void SetWalkSpeed(int percent) {
-  ReadEnv();
-  sWalkSpeed = std::clamp(percent, kWalkSpeedMin, kWalkSpeedMax);
-  Persist();
-}
-
-bool SpringBall() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return false;
-  }
-  return EnvBool("MP2_SPRING_BALL", sSpringBall);
-}
-
-bool QuickResume() {
-  ReadEnv();
-  return EnvBool("MP2_QUICK_RESUME", sQuickResume);
-}
-
 // No settings: the bindings always work (unbind them in Controls > Remap) and states keep the
 // room; the env overrides stay for the harness.
 bool SaveStateHotkeys() {
@@ -1370,29 +1165,6 @@ bool SaveStateHotkeys() {
 bool SaveStateRoomState() {
   ReadEnv();
   return EnvBool("MP2_SAVESTATE_ROOM_STATE", true);
-}
-
-void SetQuickResume(bool enabled) {
-  ReadEnv();
-  sQuickResume = enabled;
-  Persist();
-}
-
-void SetSpringBall(bool enabled) {
-  ReadEnv();
-  sSpringBall = enabled;
-  Persist();
-}
-
-bool SpringBallFlick() {
-  ReadEnv();
-  return EnvBool("MP2_SPRING_BALL_FLICK", sSpringFlick);
-}
-
-void SetSpringBallFlick(bool enabled) {
-  ReadEnv();
-  sSpringFlick = enabled;
-  Persist();
 }
 
 float SpringBallFlickRate() {
@@ -1409,92 +1181,6 @@ bool LockOnToggle() {
   return EnvBool("MP2_LOCK_ON_TOGGLE", EnvBool("MP2_LOCKON_TOGGLE", sLockOnToggle));
 }
 
-void SetLockOnToggle(bool enabled) {
-  ReadEnv();
-  sLockOnToggle = enabled;
-  Persist();
-}
-
-bool SpiderToggle() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return false;
-  }
-  return EnvBool("MP2_SPIDER_TOGGLE", sSpiderToggle);
-}
-
-void SetSpiderToggle(bool enabled) {
-  ReadEnv();
-  sSpiderToggle = enabled;
-  Persist();
-}
-
-bool AimLockOn() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return false;
-  }
-  return EnvBool("MP2_AIM_LOCK_ON", sAimLockOn);
-}
-
-void SetAimLockOn(bool enabled) {
-  ReadEnv();
-  sAimLockOn = enabled;
-  Persist();
-}
-
-bool ScanShoot() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return false;
-  }
-  return EnvBool("MP2_SCAN_SHOOT", sScanShoot);
-}
-
-void SetScanShoot(bool enabled) {
-  ReadEnv();
-  sScanShoot = enabled;
-  Persist();
-}
-
-bool StickyCharge() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return false;
-  }
-  return EnvBool("MP2_STICKY_CHARGE", sStickyCharge);
-}
-
-void SetStickyCharge(bool enabled) {
-  ReadEnv();
-  sStickyCharge = enabled;
-  Persist();
-}
-
-bool AutoAim() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return true;
-  }
-  return EnvBool("MP2_AUTO_AIM", sAutoAim);
-}
-
-void SetAutoAim(bool enabled) {
-  ReadEnv();
-  sAutoAim = enabled;
-  Persist();
-}
-
-bool PointerAim() {
-  ReadEnv();
-  return EnvBool("MP2_POINTER_AIM", sPointerAim);
-}
-
-bool TrilogyRadialSelectors() {
-  ReadEnv();
-  return EnvBool("MP2_TRILOGY_RADIAL_SELECTORS", sTrilogyRadialSelectors);
-}
-
 void SetTrilogyRadialSelectors(bool enabled) {
   sTrilogyRadialSelectors = enabled;
   if (!enabled) {
@@ -1503,126 +1189,9 @@ void SetTrilogyRadialSelectors(bool enabled) {
   }
 }
 
-void SetPointerAim(bool enabled) {
-  ReadEnv();
-  sPointerAim = enabled;
-  Persist();
-}
-
-int PointerAimBox() {
-  ReadEnv();
-  return EnvIntIn("MP2_POINTER_AIM_BOX", sPointerAimBox, kPointerAimBoxMin, kPointerAimBoxMax);
-}
-
-int PointerAimTurn() {
-  ReadEnv();
-  return EnvIntIn("MP2_POINTER_AIM_TURN", sPointerAimTurn, kPointerAimTurnMin, kPointerAimTurnMax);
-}
-
-bool GyroAim() {
-  ReadEnv();
-  return EnvBool("MP2_GYRO_AIM", sGyroAim);
-}
-
-void SetGyroAim(bool enabled) {
-  ReadEnv();
-  sGyroAim = enabled;
-  Persist();
-}
-
-int GyroSource() {
-  ReadEnv();
-  return EnvIntIn("MP2_GYRO_SOURCE", sGyroSource, 0, 2);
-}
-
 int GyroSpace() {
   ReadEnv();
   return EnvIntIn("MP2_GYRO_SPACE", sGyroSpace, 0, PortGyro::kSpaceCount - 1);
-}
-
-int GyroAutoCalibrate() {
-  ReadEnv();
-  return EnvIntIn("MP2_GYRO_AUTO_CALIBRATE", sGyroAutoCalibrate, 0, 2);
-}
-
-float GyroSmoothing() {
-  ReadEnv();
-  return EnvFloatIn("MP2_GYRO_SMOOTHING", sGyroSmoothing, 0.f, kGyroThresholdMax);
-}
-
-float GyroTightening() {
-  ReadEnv();
-  return EnvFloatIn("MP2_GYRO_TIGHTENING", sGyroTightening, 0.f, kGyroThresholdMax);
-}
-
-float GyroCursorAngle() {
-  ReadEnv();
-  return EnvFloatIn("MP2_GYRO_CURSOR_ANGLE", sGyroCursorAngle, kGyroCursorAngleMin, kGyroCursorAngleMax);
-}
-
-int GyroMode() {
-  ReadEnv();
-  return EnvIntIn("MP2_GYRO_MODE", sGyroMode, kGyroModeMin, kGyroModeMax);
-}
-
-float GyroSensitivity() {
-  ReadEnv();
-  return EnvFloatIn("MP2_GYRO_SENSITIVITY", sGyroSensitivity, kGyroSensitivityMin, kGyroSensitivityMax);
-}
-
-bool GyroCursorCamera() {
-  ReadEnv();
-  return EnvBool("MP2_GYRO_CURSOR_CAMERA", sGyroCursorCamera);
-}
-
-bool GyroSplit() {
-  ReadEnv();
-  return EnvBool("MP2_GYRO_SPLIT", sGyroSplit);
-}
-
-float GyroSensitivityY() {
-  ReadEnv();
-  return EnvFloatIn("MP2_GYRO_SENSITIVITY_Y", sGyroSensitivityY, kGyroSensitivityMin, kGyroSensitivityMax);
-}
-
-bool HandOnCannon() {
-  ReadEnv();
-  return EnvBool("MP2_HAND_ON_CANNON", sHandOnCannon);
-}
-
-bool LockOnFreeAim() {
-  ReadEnv();
-  return EnvBool("MP2_LOCK_ON_FREE_AIM", sLockOnFreeAim);
-}
-
-bool ResetAimBoth() {
-  ReadEnv();
-  return EnvBool("MP2_RESET_AIM_BOTH", sResetAimBoth);
-}
-
-bool MenuStandardButtons() {
-  ReadEnv();
-  return EnvBool("MP2_MENU_STANDARD_BUTTONS", sMenuStandardButtons);
-}
-
-void SetMenuStandardButtons(bool enabled) {
-  ReadEnv();
-  sMenuStandardButtons = enabled;
-  Persist();
-}
-
-bool RapidCharge() {
-  ReadEnv();
-  if (OriginalExperience()) {
-    return false;
-  }
-  return EnvBool("MP2_RAPID_CHARGE", sRapidCharge);
-}
-
-void SetRapidCharge(bool enabled) {
-  ReadEnv();
-  sRapidCharge = enabled;
-  Persist();
 }
 
 namespace {
@@ -1649,40 +1218,6 @@ float PlayerFloat(int player, PlayerSetting key, float p1) {
 } // namespace
 
 bool PlayerSettingSet(int player, PlayerSetting key) { return Override(player, key) != nullptr; }
-
-void SetPlayerSetting(int player, PlayerSetting key, float value) {
-  ReadEnv();
-  if (key < 0 || key >= kPlayerSettingCount || !std::isfinite(value)) {
-    return;
-  }
-  if (key == kPlayer_GyroMode) {
-    value = std::clamp(std::round(value), float(kGyroModeMin), float(kGyroModeMax));
-  } else if (key == kPlayer_GyroSensitivity || key == kPlayer_GyroSensitivityY) {
-    value = std::clamp(value, kGyroSensitivityMin, kGyroSensitivityMax);
-  } else {
-    value = value != 0.f ? 1.f : 0.f;
-  }
-  if (player <= 0) {
-    switch (key) {
-    case kPlayer_LockOnToggle: sLockOnToggle = value != 0.f; break;
-    case kPlayer_StickyCharge: sStickyCharge = value != 0.f; break;
-    case kPlayer_RapidCharge: sRapidCharge = value != 0.f; break;
-    case kPlayer_AutoAim: sAutoAim = value != 0.f; break;
-    case kPlayer_LockOnFreeAim: sLockOnFreeAim = value != 0.f; break;
-    case kPlayer_GyroAim: sGyroAim = value != 0.f; break;
-    case kPlayer_GyroMode: sGyroMode = int(value); break;
-    case kPlayer_GyroSensitivity: sGyroSensitivity = value; break;
-    case kPlayer_GyroSplit: sGyroSplit = value != 0.f; break;
-    case kPlayer_GyroSensitivityY: sGyroSensitivityY = value; break;
-    case kPlayerSettingCount: return;
-    }
-  } else if (player < kSettingPlayers) {
-    sPlayerSettings[player][key] = {value, true};
-  } else {
-    return;
-  }
-  Persist();
-}
 
 void ClearPlayerSetting(int player, PlayerSetting key) {
   if (Override(player, key) == nullptr) {
@@ -1735,65 +1270,11 @@ float GyroSensitivityYEffective(int player) {
                            : GyroSensitivity(player);
 }
 
-bool CardBackup() {
-  ReadEnv();
-  return EnvBool("MP2_CARD_BACKUP", sCardBackup);
-}
-
-void SetCardBackup(bool enabled) {
-  ReadEnv();
-  sCardBackup = enabled;
-  Persist();
-}
-
-bool LogFile() {
-  ReadEnv();
-  return EnvBool("MP2_LOG_FILE", sLogFile);
-}
-
-void SetLogFile(bool enabled) {
-  ReadEnv();
-  sLogFile = enabled;
-  Persist();
-}
-
-int UiScale() {
-  ReadEnv();
-  return EnvIntIn("MP2_UI_SCALE", sUiScale, kUiScaleMin, kUiScaleMax);
-}
-
-void SetUiScale(int percent) {
-  ReadEnv();
-  sUiScale = std::clamp(percent, kUiScaleMin, kUiScaleMax);
-  Persist();
-}
-
-bool Vsync() {
-  ReadEnv();
-  return EnvBool("MP2_VSYNC", sVsync);
-}
-
-void SetVsync(bool enabled) {
-  ReadEnv();
-  sVsync = enabled;
-  Persist();
-}
-
-bool Fullscreen() {
-  ReadEnv();
-  return EnvBool("MP2_FULLSCREEN", sFullscreen);
-}
-
 void SetFullscreen(bool enabled) {
   ReadEnv();
   sFullscreen = enabled;
   Persist();
   VISetWindowFullscreen(enabled);
-}
-
-bool FrameLimit() {
-  ReadEnv();
-  return EnvBool("MP2_FRAME_LIMIT", sFrameLimit);
 }
 
 void SetFrameLimit(bool enabled) {
@@ -1802,11 +1283,6 @@ void SetFrameLimit(bool enabled) {
     sFrameLimit = enabled;
     Persist();
   }
-}
-
-bool SmoothFrames() {
-  ReadEnv();
-  return EnvBool("MP2_SMOOTH_FRAMES", sSmoothFrames);
 }
 
 void SetSmoothFrames(bool enabled) {
@@ -1874,8 +1350,6 @@ void SetTickHold(bool held) {
 
 void StepTicks(unsigned count) { sHeldTicks += count; }
 
-unsigned PendingHeldTicks() { return sHeldTicks; }
-
 unsigned TakeHeldTicks() {
   // One tick per loop, as MP1 does, so each step is one drawn frame.
   if (sHeldTicks == 0) {
@@ -1885,22 +1359,12 @@ unsigned TakeHeldTicks() {
   return 1;
 }
 
-bool PoseInterpolation() {
-  ReadEnv();
-  return EnvBool("MP2_POSE_INTERPOLATION", sPoseInterpolation);
-}
-
 void SetPoseInterpolation(bool enabled) {
   ReadEnv();
   if (sPoseInterpolation != enabled) {
     sPoseInterpolation = enabled;
     Persist();
   }
-}
-
-bool ParticleInterpolation() {
-  ReadEnv();
-  return EnvBool("MP2_PARTICLE_INTERPOLATION", sParticleInterpolation);
 }
 
 void SetParticleInterpolation(bool enabled) {
@@ -1991,11 +1455,6 @@ float HudSpreadCap() {
   return mode <= 0 ? (16.f / 9.f) / (4.f / 3.f) : mode == 1 ? (21.f / 9.f) / (4.f / 3.f) : 1e6f;
 }
 
-bool LookInterpolation() {
-  ReadEnv();
-  return EnvBool("MP2_LOOK_INTERPOLATION", sLookInterpolation);
-}
-
 void SetLookInterpolation(bool enabled) {
   ReadEnv();
   if (sLookInterpolation != enabled) {
@@ -2048,12 +1507,6 @@ int AspectMode() {
     return kAspect_16_9;
   }
   return mode;
-}
-
-void SetAspectMode(int mode) {
-  ReadEnv();
-  sAspectMode = std::clamp(mode, kAspect_4_3, kAspect_Window);
-  Persist();
 }
 
 // The Prime 1 port's ApplyAspectMode (src/MetroidPrime/main.cpp there), with one difference: 4:3
@@ -2272,21 +1725,6 @@ void ApplyVolumeBoosts() {
 
 namespace PortOverlay {
 
-bool DynamicRes() {
-  ReadEnv();
-  return EnvBool("MP2_DYNAMIC_RES", sDynamicRes);
-}
-
-int DynamicResTarget() {
-  ReadEnv();
-  return EnvIntIn("MP2_DYNAMIC_RES_TARGET", sDynamicResTarget, 0, kFpsCapMax);
-}
-
-float DynamicResMin() {
-  ReadEnv();
-  return EnvFloatIn("MP2_DYNAMIC_RES_MIN", sDynamicResMin, kDynamicResMinLowest, 4.f);
-}
-
 int UpscaleSharpen() {
   ReadEnv();
   if (const char* env = port::EnvString("MP2_UPSCALE_SHARPEN"); env != nullptr && env[0] != '\0') {
@@ -2296,56 +1734,11 @@ int UpscaleSharpen() {
   return sSharpenMode;
 }
 
-int UpscaleSharpenAmount() {
-  ReadEnv();
-  return EnvIntIn("MP2_UPSCALE_SHARPEN_AMOUNT", sSharpenAmount, 0, 100);
-}
-
 int ClampFpsCap(int fps) { return fps <= 0 ? 0 : std::clamp(fps, kFpsCapMin, kFpsCapMax); }
 
 int FpsCap() {
   ReadEnv();
   return ClampFpsCap(port::EnvInt("MP2_FPS_CAP", sFpsCap));
-}
-
-bool ShowShaderCompilation() {
-  ReadEnv();
-  return EnvBool("MP2_SHOW_SHADER_COMPILATION", sShowShaderCompilation);
-}
-
-bool ShowMenuHint() {
-  ReadEnv();
-  return EnvBool("MP2_SHOW_MENU_HINT", sShowMenuHint);
-}
-
-bool PerPixelLighting() {
-  ReadEnv();
-  return EnvBool("MP2_PER_PIXEL_LIGHTING", sPerPixelLighting);
-}
-
-bool OpenGles() {
-  ReadEnv();
-  return EnvBool("MP2_OPENGLES", sOpenGles);
-}
-
-PortGraphicsBackend::EGraphicsBackend GraphicsBackend() {
-  ReadEnv();
-  return sGraphicsBackend;
-}
-
-int StorageClamp() {
-  ReadEnv();
-  return sStorageClamp;
-}
-
-unsigned DriverWorkarounds() {
-  ReadEnv();
-  return sDriverWorkarounds;
-}
-
-bool LowPowerGpu() {
-  ReadEnv();
-  return sLowPowerGpu;
 }
 
 int ScanSpeed() {
@@ -2354,12 +1747,6 @@ int ScanSpeed() {
     return kScanSpeedDefault;
   }
   return EnvIntIn("MP2_SCAN_SPEED", sScanSpeed, kScanSpeedMin, kScanSpeedMax);
-}
-
-void SetScanSpeed(int percent) {
-  ReadEnv();
-  sScanSpeed = std::clamp(percent, kScanSpeedMin, kScanSpeedMax);
-  Persist();
 }
 
 int BeamSwitchSpeed() {
@@ -2371,45 +1758,10 @@ int BeamSwitchSpeed() {
                   kBeamSwitchSpeedMax);
 }
 
-void SetBeamSwitchSpeed(int percent) {
+bool PromptRing() {
   ReadEnv();
-  sBeamSwitchSpeed = std::clamp(percent, kBeamSwitchSpeedMin, kBeamSwitchSpeedMax);
-  Persist();
-}
-
-int MusicBoost() {
-  ReadEnv();
-  return EnvIntIn("MP2_MUSIC_BOOST", sMusicBoost, kVolumeBoostMin, kVolumeBoostMax);
-}
-
-void SetMusicBoost(int percent) {
-  ReadEnv();
-  sMusicBoost = std::clamp(percent, kVolumeBoostMin, kVolumeBoostMax);
-  ApplyVolumeBoosts();
-  Persist();
-}
-
-int SfxBoost() {
-  ReadEnv();
-  return EnvIntIn("MP2_SFX_BOOST", sSfxBoost, kVolumeBoostMin, kVolumeBoostMax);
-}
-
-void SetSfxBoost(int percent) {
-  ReadEnv();
-  sSfxBoost = std::clamp(percent, kVolumeBoostMin, kVolumeBoostMax);
-  ApplyVolumeBoosts();
-  Persist();
-}
-
-int Language() {
-  ReadEnv();
-  return EnvIntIn("MP2_LANGUAGE", sLanguage, 0, kLanguageMax);
-}
-
-void SetLanguage(int index) {
-  ReadEnv();
-  sLanguage = std::clamp(index, 0, kLanguageMax);
-  Persist();
+  // Original experience is the game's own art and geometry.
+  return !OriginalExperience() && EnvBool("MP2_PROMPT_RING", sPromptRing);
 }
 
 const char* PromptGlyphs() {
@@ -2417,8 +1769,9 @@ const char* PromptGlyphs() {
   if (OriginalExperience()) {
     return "gamecube";
   }
-  static constexpr const char* kNames[] = {nullptr, "xbox", "playstation", "switch", "gamecube", "keyboard"};
-  return kNames[EnvIntIn("MP2_PROMPT_GLYPHS", sPromptGlyphs, kPromptGlyphs_Auto, kPromptGlyphs_Keyboard)];
+  static constexpr const char* kNames[] = {nullptr, "xbox", "playstation", "switch", "gamecube", "keyboard",
+                                           "steamdeck"};
+  return kNames[EnvIntIn("MP2_PROMPT_GLYPHS", sPromptGlyphs, kPromptGlyphs_Auto, kPromptGlyphs_SteamDeck)];
 }
 
 int ElevatorRide() {
@@ -2454,24 +1807,12 @@ int ComboBeamCost() {
   return EnvIntIn("MP2_COMBO_BEAM_COST", sComboBeamCost, 0, kComboBeamCostMax);
 }
 
-void SetComboBeamCost(int cost) {
-  ReadEnv();
-  sComboBeamCost = std::clamp(cost, 0, kComboBeamCostMax);
-  Persist();
-}
-
 int ComboMissileCost() {
   ReadEnv();
   if (OriginalExperience()) {
     return kComboMissileCostMax;
   }
   return EnvIntIn("MP2_COMBO_MISSILE_COST", sComboMissileCost, 0, kComboMissileCostMax);
-}
-
-void SetComboMissileCost(int cost) {
-  ReadEnv();
-  sComboMissileCost = std::clamp(cost, 0, kComboMissileCostMax);
-  Persist();
 }
 
 int BeamAmmoPerExpansion() {
@@ -2481,12 +1822,6 @@ int BeamAmmoPerExpansion() {
   }
   return EnvIntIn("MP2_BEAM_AMMO_PER_EXPANSION", sBeamAmmoPerExpansion, kBeamAmmoPerExpansionMin,
                   kBeamAmmoPerExpansionMax);
-}
-
-void SetBeamAmmoPerExpansion(int ammo) {
-  ReadEnv();
-  sBeamAmmoPerExpansion = std::clamp(ammo, kBeamAmmoPerExpansionMin, kBeamAmmoPerExpansionMax);
-  Persist();
 }
 
 int RotatingRooms() {
@@ -2523,6 +1858,84 @@ bool RotatingSequenceActive(unsigned frame) {
   return sRotatingSequenceSeen && frame - sRotatingSequenceFrame <= 2;
 }
 
+int TravelCutscenes() {
+  ReadEnv();
+  if (OriginalExperience()) {
+    return kTravelCutscenes_Original;
+  }
+  const char* env = port::EnvString("MP2_TRAVEL_CUTSCENES");
+  if (env != nullptr && std::strcmp(env, "original") == 0) {
+    return kTravelCutscenes_Original;
+  }
+  if (env != nullptr && std::strcmp(env, "fast") == 0) {
+    return kTravelCutscenes_Fast;
+  }
+  return EnvIntIn("MP2_TRAVEL_CUTSCENES", sTravelCutscenes, kTravelCutscenes_Original,
+                  kTravelCutscenes_Fast);
+}
+
+void SetTravelCutscenes(int mode) {
+  ReadEnv();
+  sTravelCutscenes = std::clamp(mode, static_cast< int >(kTravelCutscenes_Original),
+                                static_cast< int >(kTravelCutscenes_Fast));
+  Persist();
+}
+
+static unsigned sTravelSequenceFrame = 0;
+static bool sTravelSequenceSeen = false;
+static bool sTravelArrivalPending = false;
+static float sTravelArrivalWait = 0.f;
+static bool sTravelArrivalSet = false;
+static unsigned short sTravelArrivalUid = 0;
+// Game seconds an arrival waits for its cutscene; the arrival sequences start on the first updates.
+static const float kTravelArrivalWait = 3.f;
+
+void NoteTravelSequence(unsigned frame) {
+  sTravelSequenceFrame = frame;
+  sTravelSequenceSeen = true;
+}
+
+void NoteTravelDeparture() {
+  // The next world's update count and uids start again: nothing noted here may match there.
+  sTravelSequenceSeen = false;
+  sTravelArrivalSet = false;
+  sTravelArrivalPending = true;
+  sTravelArrivalWait = 0.f;
+}
+
+bool TravelArrivalPending() { return sTravelArrivalPending; }
+
+void SetTravelArrival(unsigned short uid, unsigned frame) {
+  sTravelArrivalPending = false;
+  sTravelArrivalSet = true;
+  sTravelArrivalUid = uid;
+  // Counts as noted now, so the sequence keeps the uid until its first Think notes it.
+  NoteTravelSequence(frame);
+}
+
+bool IsTravelArrival(unsigned short uid) { return sTravelArrivalSet && sTravelArrivalUid == uid; }
+
+bool TravelSequenceActive(unsigned frame, float dt) {
+  if (sTravelArrivalPending) {
+    sTravelArrivalWait += dt;
+    if (sTravelArrivalWait > kTravelArrivalWait) {
+      sTravelArrivalPending = false;
+    }
+  }
+  const bool active = sTravelSequenceSeen && frame - sTravelSequenceFrame <= 2;
+  // The arrival sequence has stopped (or the setting is Original): its uid may be reused.
+  if (!active) {
+    sTravelArrivalSet = false;
+  }
+  static bool sWasActive = false;
+  if (active != sWasActive) {
+    std::fprintf(stderr, "[travel] a travel cutscene sequence %s at update %u\n",
+                 active ? "runs" : "ended", frame);
+    sWasActive = active;
+  }
+  return active;
+}
+
 int PortalTransition() {
   ReadEnv();
   if (OriginalExperience()) {
@@ -2546,17 +1959,6 @@ void SetPortalTransition(int mode) {
   ReadEnv();
   sPortalTransition = std::clamp(mode, static_cast< int >(kPortalTransition_Original),
                                  static_cast< int >(kPortalTransition_Skip));
-  Persist();
-}
-
-bool IgtTimer() {
-  ReadEnv();
-  return EnvBool("MP2_IGT_TIMER", sIgtTimer);
-}
-
-void SetIgtTimer(bool enabled) {
-  ReadEnv();
-  sIgtTimer = enabled;
   Persist();
 }
 
@@ -2585,26 +1987,9 @@ bool ConsumeReturnToTitleRequest() {
   return requested;
 }
 
-bool OriginalExperience() {
-  ReadEnv();
-  return EnvBool("MP2_ORIGINAL_EXPERIENCE", sOriginalExperience);
-}
-
-void SetOriginalExperience(bool enabled) {
-  ReadEnv();
-  sOriginalExperience = enabled;
-  Persist();
-}
-
 bool UnlockHardMode() {
   ReadEnv();
   return EnvBool("MP2_UNLOCK_HARD_MODE", sUnlockHardMode) && !OriginalExperience();
-}
-
-void SetUnlockHardMode(bool enabled) {
-  ReadEnv();
-  sUnlockHardMode = enabled;
-  Persist();
 }
 
 float DamageTakenMultiplier() {
@@ -2642,21 +2027,14 @@ bool UnlockGalleries() {
   return EnvBool("MP2_UNLOCK_GALLERIES", sUnlockGalleries) && !OriginalExperience();
 }
 
-void SetUnlockGalleries(bool enabled) {
-  ReadEnv();
-  sUnlockGalleries = enabled;
-  Persist();
-}
-
 bool UnlockBeamDoors() {
   ReadEnv();
   return EnvBool("MP2_UNLOCK_BEAM_DOORS", sUnlockBeamDoors) && !OriginalExperience();
 }
 
-void SetUnlockBeamDoors(bool enabled) {
+bool BeamDoorsStayUnlocked() {
   ReadEnv();
-  sUnlockBeamDoors = enabled;
-  Persist();
+  return EnvBool("MP2_BEAM_DOORS_STAY_UNLOCKED", sBeamDoorsStayUnlocked) && !OriginalExperience();
 }
 
 bool StackBeams() {
@@ -2664,21 +2042,10 @@ bool StackBeams() {
   return EnvBool("MP2_STACK_BEAMS", sStackBeams) && !OriginalExperience();
 }
 
-void SetStackBeams(bool enabled) {
-  ReadEnv();
-  sStackBeams = enabled;
-  Persist();
-}
+bool UnlockBeamDoorsSet() { return sUnlockBeamDoors; }
+bool StackBeamsSet() { return sStackBeams; }
 
-bool StackBeamsSkipDark() {
-  ReadEnv();
-  return EnvBool("MP2_STACK_BEAMS_SKIP_DARK", sStackBeamsSkipDark);
-}
-
-void SetStackBeamsSkipDark(bool enabled) {
-  ReadEnv();
-  sStackBeamsSkipDark = enabled;
-  Persist();
-}
+// The accessors that are one of the table's shapes.
+#include "port_overlay_accessors.inc"
 
 } // namespace PortOverlay

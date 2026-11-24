@@ -3,6 +3,7 @@
 // unit test needs neither Aurora nor a disc.
 
 #include "port_mods.h"
+#include "port_utf8_path.h"
 
 #include <algorithm>
 #include <cstring>
@@ -43,9 +44,7 @@ int HexDigit(char c) {
   return -1;
 }
 
-std::filesystem::path HostPath(const std::string& text) {
-  return std::filesystem::path(std::u8string(text.begin(), text.end()));
-}
+using PortUtf8::FromUtf8;
 
 } // namespace
 
@@ -295,7 +294,7 @@ int64_t Reader::ReadSegment(const Segment& segment, uint64_t at, uint8_t* buffer
     if (offset < segment.hostSize) {
       fromFile = size_t(std::min<uint64_t>(length, segment.hostSize - offset));
       if (mHost->path != segment.hostPath || !mHost->in.is_open()) {
-        mHost->in = std::ifstream(HostPath(segment.hostPath), std::ios::binary);
+        mHost->in = std::ifstream(FromUtf8(segment.hostPath), std::ios::binary);
         mHost->path = segment.hostPath;
       }
       mHost->in.clear();

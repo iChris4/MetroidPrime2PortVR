@@ -6,6 +6,11 @@
 
 #include "rstl/rc_ptr.hpp"
 
+#ifdef TARGET_PC
+// Complete types for the smart-pointer members (-Werror=delete-incomplete).
+#include "Kyoto/CRandom16.hpp"
+#endif
+
 class CTransitionDatabase;
 class CRandom16;
 class CSimplePool;

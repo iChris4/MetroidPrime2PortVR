@@ -36,6 +36,14 @@ bool Started();
 // MP2_SLOT=<fileIdx> were set, so the boot loads that save and the resume file then replaces it.
 void ArmFromResume(int fileIdx);
 
+// The special menu's card load (port_special_menu.h): QueueCardLoad keeps card file `fileIdx`
+// with the menu's return-to-title request, and ArmQueuedCardLoad (where that request is taken,
+// as the game quits) arms the skip for it, so the flow's way back through the pre-front-end window
+// reads that save and starts it. Unlike the resume, no quick resume replaces it, and there is no
+// boot splash to dismiss. A request never taken leaves the skip unarmed.
+void QueueCardLoad(int fileIdx);
+void ArmQueuedCardLoad();
+
 // True once the skip is armed (by the environment or ArmFromResume).
 bool Armed();
 

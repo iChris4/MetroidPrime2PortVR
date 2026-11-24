@@ -5,6 +5,7 @@
 #include "port_mobile.h"
 #include "debug_ui_internal.h"
 
+#include "port_cheats.h"
 #include "port_overlay.h"
 #include "port_collision_view.h"
 #include "port_savestate.h"
@@ -17,7 +18,6 @@
 #include "MetroidPrime/CMemoryCard.hpp"
 #include "MetroidPrime/Player/CGameState.hpp"
 #include "MetroidPrime/Player/CPlayerState.hpp"
-#include "MetroidPrime/ScriptObjects/CScriptConditionalRelay.hpp"
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -36,22 +36,8 @@ namespace PortDebug {
 
 namespace {
 
-// The Prime 1 port's Cheats page (debug_ui/cheats.cpp) for this game: the item list is Echoes'
-// own and the grant path is the console's `give`/`take` (platform/port_console.cpp, which is
-// CScriptPickup's own path): capacity and amount move together, and the step is a delta, so a
-// slider sets a value rather than adding one. Zero removes the item, which is all it takes -
-// every ability check here reads the capacity (HasPowerUp is `mCapacity > 0`).
-void GrantItem(CPlayerState& ps, CPlayerState::EItemType type, int capacity, int amount) {
-  // The Prime 1 port's GrantItem in this game's terms: `capacity` is what MP1 calls the power-up
-  // and `amount` what it calls the pickup, and the two fields are named that way here. The
-  // capacity is moved by the difference, because that is how AddPowerUp takes an expansion, and
-  // the amount is then set outright - sliding a counter down must lower the amount even when the
-  // capacity has room for it (which AddPowerUp alone would not do).
-  ps.AddPowerUp(type, capacity - ps.GetItemCapacity(type));
-  ps.SetItemAmount(type, amount);
-  // A translator gate reads the inventory once, when its area loads; this has it read again.
-  CScriptConditionalRelay::PortNoteInventoryCheat();
-}
+using PortCheats::GrantItem;
+using SItemCheck = PortCheats::Item;
 
 // A slider takes the value under the finger the moment it is pressed, before
 // UpdateTouchScroll can tell a scroll from a drag, so scrolling the page past
@@ -84,64 +70,6 @@ bool CheatSlider(const char* label, T& value, T min, T max, const char* format =
 
 bool CheatSlider(const char* label, int& value, int max) { return CheatSlider(label, value, 0, max); }
 
-struct SItemCheck {
-  const char* name;
-  CPlayerState::EItemType type;
-};
-
-constexpr SItemCheck kAbilityItems[] = {
-    {"Power Beam", CPlayerState::kIT_PowerBeam},
-    {"Dark Beam", CPlayerState::kIT_DarkBeam},
-    {"Light Beam", CPlayerState::kIT_LightBeam},
-    {"Annihilator Beam", CPlayerState::kIT_AnnihilatorBeam},
-    {"Charge Beam", CPlayerState::kIT_ChargeBeam},
-    {"Super Missile", CPlayerState::kIT_SuperMissile},
-    {"Darkburst", CPlayerState::kIT_Darkburst},
-    {"Sunburst", CPlayerState::kIT_Sunburst},
-    {"Sonic Boom", CPlayerState::kIT_SonicBoom},
-    {"Combat Visor", CPlayerState::kIT_CombatVisor},
-    {"Scan Visor", CPlayerState::kIT_ScanVisor},
-    {"Dark Visor", CPlayerState::kIT_DarkVisor},
-    {"Echo Visor", CPlayerState::kIT_EchoVisor},
-    {"Varia Suit", CPlayerState::kIT_VariaSuit},
-    {"Dark Suit", CPlayerState::kIT_DarkSuit},
-    {"Light Suit", CPlayerState::kIT_LightSuit},
-    {"Morph Ball", CPlayerState::kIT_MorphBall},
-    {"Boost Ball", CPlayerState::kIT_BoostBall},
-    {"Spider Ball", CPlayerState::kIT_SpiderBall},
-    {"Morph Ball Bombs", CPlayerState::kIT_MorphBallBombs},
-    {"Grapple Beam", CPlayerState::kIT_GrappleBeam},
-    {"Space Jump Boots", CPlayerState::kIT_SpaceJumpBoots},
-    {"Gravity Boost", CPlayerState::kIT_GravityBoost},
-    {"Seeker Launcher", CPlayerState::kIT_SeekerLauncher},
-    {"Screw Attack", CPlayerState::kIT_ScrewAttack},
-    {"Violet Translator", CPlayerState::kIT_VioletTranslator},
-    {"Amber Translator", CPlayerState::kIT_AmberTranslator},
-    {"Emerald Translator", CPlayerState::kIT_EmeraldTranslator},
-    {"Cobalt Translator", CPlayerState::kIT_CobaltTranslator},
-};
-
-constexpr SItemCheck kKeyItems[] = {
-    {"Sky Temple Key 1", CPlayerState::kIT_TempleKey1},
-    {"Sky Temple Key 2", CPlayerState::kIT_TempleKey2},
-    {"Sky Temple Key 3", CPlayerState::kIT_TempleKey3},
-    {"Sky Temple Key 4", CPlayerState::kIT_TempleKey4},
-    {"Sky Temple Key 5", CPlayerState::kIT_TempleKey5},
-    {"Sky Temple Key 6", CPlayerState::kIT_TempleKey6},
-    {"Sky Temple Key 7", CPlayerState::kIT_TempleKey7},
-    {"Sky Temple Key 8", CPlayerState::kIT_TempleKey8},
-    {"Sky Temple Key 9", CPlayerState::kIT_TempleKey9},
-    {"Agon Key 1", CPlayerState::kIT_AgonKey1},
-    {"Agon Key 2", CPlayerState::kIT_AgonKey2},
-    {"Agon Key 3", CPlayerState::kIT_AgonKey3},
-    {"Torvus Key 1", CPlayerState::kIT_TorvusKey1},
-    {"Torvus Key 2", CPlayerState::kIT_TorvusKey2},
-    {"Torvus Key 3", CPlayerState::kIT_TorvusKey3},
-    {"Hive Key 1", CPlayerState::kIT_HiveKey1},
-    {"Hive Key 2", CPlayerState::kIT_HiveKey2},
-    {"Hive Key 3", CPlayerState::kIT_HiveKey3},
-};
-
 // The toggles as a grid, as many columns as the widest name leaves room for.
 void DrawItemChecks(CPlayerState& ps, const char* tableId, const SItemCheck* items, int count) {
   float nameWidth = 0.f;
@@ -163,46 +91,13 @@ void DrawItemChecks(CPlayerState& ps, const char* tableId, const SItemCheck* ite
   }
 }
 
-// The game's player state, or null outside gameplay: the front end has its own player state and its
-// own Samus, and the page is about the game's.
-CPlayerState* GamePlayerState() {
-  CPlayerState* ps = gpGameState != nullptr ? gpGameState->GetPlayerState().GetPtr() : nullptr;
-  if (ps == nullptr ||
-      (gpGameState != nullptr && gpGameState->GetGameMode().GetGameModeType() == 'FRND')) {
-    return nullptr;
-  }
-  return ps;
-}
-
 } // namespace
 
 // PrimedGun Echoes: the Full health and Grant everything buttons, also run from the VR menu's DEBUG
 // tab (platform/vr/vr_host_echoes.cpp). Game thread only.
-void CheatFullHealth() {
-  if (CPlayerState* ps = GamePlayerState()) {
-    ps->HealthInfo()->SetHP(ps->CalculateHealth());
-  }
-}
+void CheatFullHealth() { PortCheats::FullHealth(); }
 
-void CheatGrantEverything() {
-  CPlayerState* ps = GamePlayerState();
-  if (ps == nullptr) {
-    return;
-  }
-  for (const SItemCheck& item : kAbilityItems) {
-    GrantItem(*ps, item.type, 1, 1);
-  }
-  for (const SItemCheck& item : kKeyItems) {
-    GrantItem(*ps, item.type, 1, 1);
-  }
-  for (const CPlayerState::EItemType counter :
-       {CPlayerState::kIT_Missile, CPlayerState::kIT_Powerbomb, CPlayerState::kIT_EnergyTanks,
-        CPlayerState::kIT_DarkAmmo, CPlayerState::kIT_LightAmmo}) {
-    const int max = CPlayerState::PortPowerUpMaxValue(counter);
-    GrantItem(*ps, counter, max, max);
-  }
-  ps->HealthInfo()->SetHP(ps->CalculateHealth());
-}
+void CheatGrantEverything() { PortCheats::GrantEverything(); }
 
 // The switches and readouts for working on what mods draw: the Collision view (port_collision_view.h)
 // and the frame statistics. MP1's PBR / room-geometry counters have no counterpart in this port.
@@ -237,39 +132,22 @@ void DrawRendering() {
   }
 }
 
+namespace {
+void CheatCheckbox(PortCheats::Cheat id, bool inlineHelp = false) { EntryCheckbox(PortCheats::Get(id), inlineHelp); }
+} // namespace
+
 void DrawCheatsSection() {
-  ImGui::Checkbox("God mode", &sGodMode);
-  ItemHelp("The player takes no damage; other actors still do. Not saved.");
-  ImGui::Checkbox("No Dark Aether damage", &sNoDarkAetherDamage);
-  ItemHelp("Dark Aether's air does not hurt, as with the Light Suit; light crystals still heal. "
-           "Not saved.");
-  ImGui::BeginDisabled(PortOverlay::OriginalExperience());
-  bool beamDoors = sUnlockBeamDoors;
-  if (ImGui::Checkbox("Unlock beam doors", &beamDoors)) {
-    PortOverlay::SetUnlockBeamDoors(beamDoors);
-  }
-  ImGui::EndDisabled();
-  ItemHelp("Colour-locked doors open to any of the four beams. Missile locks stay.");
-  ImGui::BeginDisabled(PortOverlay::OriginalExperience());
-  bool stackBeams = sStackBeams;
-  if (ImGui::Checkbox("Stack beams", &stackBeams)) {
-    PortOverlay::SetStackBeams(stackBeams);
-  }
-  ImGui::SetItemTooltip("Each shot also fires the other beams you own, at no extra ammo cost.");
+  using PortCheats::Cheat;
+  CheatCheckbox(Cheat::GodMode, true);
+  CheatCheckbox(Cheat::NoDarkAetherDamage, true);
+  CheatCheckbox(Cheat::UnlockBeamDoors, true);
+  CheatCheckbox(Cheat::StackBeams);
   ImGui::SameLine();
-  ImGui::BeginDisabled(!sStackBeams);
-  bool skipDark = sStackBeamsSkipDark;
-  if (ImGui::Checkbox("Leave out Dark Beam", &skipDark)) {
-    PortOverlay::SetStackBeamsSkipDark(skipDark);
-  }
-  ImGui::SetItemTooltip("Stacked shots skip the Dark Beam unless it's the one in hand, so they "
-                        "don't drain light beacons and crystals.");
+  ImGui::BeginDisabled(!PortOverlay::StackBeamsSet());
+  CheatCheckbox(Cheat::StackBeamsSkipDark);
   ImGui::EndDisabled();
-  bool moonJump = PortOverlay::MoonJumpSet();
-  if (ImGui::Checkbox("Moon jump", &moonJump)) {
-    PortOverlay::SetMoonJump(moonJump);
-  }
-  ImGui::SetItemTooltip("Holding Jump in the air lifts Samus at a steady speed, on foot only. Not saved.");
+  CheatCheckbox(Cheat::MoonJump);
+  ImGui::BeginDisabled(PortOverlay::OriginalExperience());
   float boostSpeed = PortOverlay::BoostSpeedScaleSet();
   float boostDuration = PortOverlay::BoostDurationScaleSet();
   bool boostChanged = CheatSlider("Boost Ball speed", boostSpeed, 1.f, PortOverlay::kBoostScaleMax, "%.1fx");
@@ -282,42 +160,31 @@ void DrawCheatsSection() {
   if (boostChanged) {
     PortOverlay::SetBoostScales(boostSpeed, boostDuration);
   }
-  bool boostAnywhere = PortOverlay::BoostAnywhereSet();
-  if (ImGui::Checkbox("Boost anywhere", &boostAnywhere)) {
-    PortOverlay::SetBoostAnywhere(boostAnywhere);
-  }
-  ImGui::SetItemTooltip("The Boost Ball also fires in the air, after a bomb or spring jump, and a boost "
-                        "no longer stops short when the ball leaves the ground, so a boost into a spring "
-                        "jump keeps its height. Not saved.");
-  ImGui::SameLine();
-  bool boostSteer = PortOverlay::BoostSteerSet();
-  if (ImGui::Checkbox("Steer while boosting", &boostSteer)) {
-    PortOverlay::SetBoostSteer(boostSteer);
-  }
-  ImGui::SetItemTooltip("The stick turns a boosted ball's course, keeping its speed. Not saved.");
   ImGui::EndDisabled();
+  CheatCheckbox(Cheat::BoostAnywhere);
+  ImGui::SameLine();
+  CheatCheckbox(Cheat::BoostSteer);
+  CheatCheckbox(Cheat::PhazonShot);
 
-  CPlayerState* ps = gpGameState != nullptr ? gpGameState->GetPlayerState().GetPtr() : nullptr;
-  // The front end has its own player state and its own Samus; the page is about the game's.
-  if (ps == nullptr ||
-      (gpGameState != nullptr && gpGameState->GetGameMode().GetGameModeType() == 'FRND')) {
+  CPlayerState* ps = PortCheats::PlayerInGame();
+  if (ps == nullptr) {
     ImGui::TextDisabled("Waiting for gameplay...");
     return;
   }
   CHealthInfo* health = ps->HealthInfo();
   ImGui::Text("Health: %.0f / %.0f", health->GetHP(), ps->CalculateHealth());
   if (ImGui::Button("Full health")) {
-    CheatFullHealth();
+    PortCheats::FullHealth();
   }
   ImGui::SameLine();
   if (ImGui::Button("Grant everything")) {
-    CheatGrantEverything();
+    PortCheats::GrantEverything();
   }
 
   ImGui::SeparatorText("Abilities");
-  DrawItemChecks(*ps, "##abilitychecks", kAbilityItems, int(std::size(kAbilityItems)));
+  DrawItemChecks(*ps, "##abilitychecks", PortCheats::Abilities().data(), int(PortCheats::Abilities().size()));
   if (ImGui::CollapsingHeader("Keys")) {
-    DrawItemChecks(*ps, "##keychecks", kKeyItems, int(std::size(kKeyItems)));
+    DrawItemChecks(*ps, "##keychecks", PortCheats::Keys().data(), int(PortCheats::Keys().size()));
   }
 
   const auto counter = [ps](const char* label, CPlayerState::EItemType type) {
@@ -399,29 +266,22 @@ void DrawCheatsSection() {
   ItemHelp("The items go into the save in memory: the next save on the memory card writes them, "
            "and nothing here is kept across a restart on its own.");
   ImGui::SeparatorText("Teleport");
-  if (ImGui::Button("Previous area")) {
-    PortWarp::CycleArea(-1);
-  }
+  // The warps' own buttons (port_cheats.h), as the special menu's Warp page lists them; Reload
+  // sits with the room lists below.
+  using PortCheats::Warp;
+  EntryButton(PortCheats::Get(Warp::PreviousArea));
   ImGui::SameLine();
-  if (ImGui::Button("Next area")) {
-    PortWarp::CycleArea(1);
-  }
+  EntryButton(PortCheats::Get(Warp::NextArea));
   ImGui::SameLine();
-  if (ImGui::Button("Previous world")) {
-    PortWarp::CycleWorld(-1);
-  }
+  EntryButton(PortCheats::Get(Warp::PreviousWorld));
   ImGui::SameLine();
-  if (ImGui::Button("Next world")) {
-    PortWarp::CycleWorld(1);
-  }
+  EntryButton(PortCheats::Get(Warp::NextWorld));
   // The room's twin in the other dimension, where Samus stands (PortWarp::Dimension). The game says
   // whether there was one a frame later; the line stays until the next press.
   static int sDimensionResult = 0;
-  if (ImGui::Button("Light / Dark world")) {
+  if (EntryButton(PortCheats::Get(Warp::Dimension))) {
     sDimensionResult = 0;
-    PortWarp::Dimension();
   }
-  ImGui::SetItemTooltip("Cross to the same spot in the other dimension, if this room has a twin there.");
   if (const int result = PortWarp::TakeDimensionResult(); result != 0) {
     sDimensionResult = result;
   }
@@ -598,10 +458,6 @@ void DrawCheatsSection() {
       }
     }
   }
-}
-
-void DrawCheatsTab() {
-  DrawCheatsSection();
 }
 
 } // namespace PortDebug

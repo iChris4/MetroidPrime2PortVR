@@ -1,6 +1,7 @@
 // MP1's port_storage_report.cpp, with MP2's folders (no mods or Remastered import here): the user
 // folder, the cache and, on Android, the app's internal storage.
 #include "port_storage_report.h"
+#include "port_utf8_path.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -27,12 +28,8 @@ namespace PortStorageReport {
 namespace {
 
 // The folders come as UTF-8; a narrow path is the ANSI code page on Windows.
-fs::path FromUtf8(const std::string& text) { return fs::path(std::u8string(text.begin(), text.end())); }
-
-std::string ToUtf8(const fs::path& path) {
-  const std::u8string text = path.u8string();
-  return std::string(text.begin(), text.end());
-}
+using PortUtf8::FromUtf8;
+using PortUtf8::ToUtf8;
 
 struct Totals {
   uint64_t bytes = 0;

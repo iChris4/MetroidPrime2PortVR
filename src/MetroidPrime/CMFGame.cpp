@@ -139,6 +139,7 @@ CMFGame::~CMFGame() {
   for (int player = 0; player < 4; ++player) {
     PortTouch::SetMorphed(false, player);
     PortTouch::SetOrbitLocked(false, false, player);
+    PortTouch::SetRezbitInfected(false, player);
   }
   PortTouch::SetScanTextUp(false);
   // Port: the render mode is widened by the aspect setting.

@@ -1,5 +1,8 @@
 #include "port_save_trilogy.h"
 
+#include "port_bytes.h"
+#include "port_crc32.h"
+
 #include <algorithm>
 #include <cstring>
 
@@ -14,20 +17,6 @@ constexpr uint32_t kHashValue = 0x4F54DF87;
 constexpr size_t kCrcEnd = 0x1980C;
 constexpr uint32_t kFormat = 0x030D1624;
 
-uint32_t Be32(const uint8_t* p) {
-  return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | uint32_t(p[3]);
-}
-void PutBe32(uint8_t* p, uint32_t v) {
-  p[0] = uint8_t(v >> 24);
-  p[1] = uint8_t(v >> 16);
-  p[2] = uint8_t(v >> 8);
-  p[3] = uint8_t(v);
-}
-uint64_t Be64(const uint8_t* p) { return (uint64_t(Be32(p)) << 32) | Be32(p + 4); }
-void PutBe64(uint8_t* p, uint64_t v) {
-  PutBe32(p, uint32_t(v >> 32));
-  PutBe32(p + 4, uint32_t(v));
-}
 double ToDouble(uint64_t bits) {
   double d;
   std::memcpy(&d, &bits, sizeof d);
@@ -39,31 +28,20 @@ uint64_t FromDouble(double d) {
   return bits;
 }
 
-uint32_t Crc32(const uint8_t* p, size_t n) {
-  uint32_t c = 0xFFFFFFFFu;
-  for (size_t i = 0; i < n; ++i) {
-    c ^= p[i];
-    for (int k = 0; k < 8; ++k) {
-      c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u)));
-    }
-  }
-  return ~c;
-}
-
 } // namespace
 
-uint32_t Checksum(const uint8_t* bin) { return Crc32(bin + 4, kCrcEnd - 4) ^ 0xFFFFFFFFu; }
+uint32_t Checksum(const uint8_t* bin) { return port::Crc32Register(0xFFFFFFFFu, bin + 4, kCrcEnd - 4); }
 
 bool Validate(const uint8_t* bin, size_t size, std::string& error) {
   if (size != kSize) {
     error = "save.bin is " + std::to_string(size) + " bytes, not " + std::to_string(kSize);
     return false;
   }
-  if (Be32(bin + 4) != kFormat) {
+  if (port::ReadBE32(bin + 4) != kFormat) {
     error = "save.bin has an unknown format id";
     return false;
   }
-  if (Be32(bin) != Checksum(bin)) {
+  if (port::ReadBE32(bin) != Checksum(bin)) {
     error = "save.bin fails its checksum";
     return false;
   }
@@ -87,7 +65,7 @@ bool FileOwned(const uint8_t* bin, int file) {
 }
 
 int TargetFile(const uint8_t* bin) {
-  const uint32_t current = Be32(bin + 8);
+  const uint32_t current = port::ReadBE32(bin + 8);
   if (current < kFiles && FileOwned(bin, int(current))) {
     return int(current);
   }
@@ -104,7 +82,7 @@ bool HasEchoes(const uint8_t* bin, int file) {
     return false;
   }
   const uint8_t* m = bin + kSummary[file] + kSummaryEchoes;
-  return Be32(m + 4) != 0xFFFFFFFFu && Be32(m + 24) == 3;
+  return port::ReadBE32(m + 4) != 0xFFFFFFFFu && port::ReadBE32(m + 24) == 3;
 }
 
 bool Read(const uint8_t* bin, int file, Payload& out) {
@@ -115,11 +93,11 @@ bool Read(const uint8_t* bin, int file, Payload& out) {
   std::memcpy(out.partA, slot, kPartSize);
   std::memcpy(out.partB, slot + kPartSize, kPartSize);
   const uint8_t* m = bin + kSummary[file] + kSummaryEchoes;
-  out.summary.difficulty = Be32(m);
-  out.summary.percent = Be32(m + 8);
-  out.summary.playTime = ToDouble(Be64(m + 12));
-  out.summary.tanks = Be32(m + 20);
-  out.summary.mlvl = Be32(m + 35);
+  out.summary.difficulty = port::ReadBE32(m);
+  out.summary.percent = port::ReadBE32(m + 8);
+  out.summary.playTime = ToDouble(port::ReadBE64(m + 12));
+  out.summary.tanks = port::ReadBE32(m + 20);
+  out.summary.mlvl = port::ReadBE32(m + 35);
   return true;
 }
 
@@ -168,23 +146,23 @@ bool Write(const std::vector<uint8_t>& base, int file, const Payload& payload, s
   if (had) {
     std::memcpy(keep, m + 28, 3);
     std::memcpy(keep + 3, m + 39, 2);
-    second = Be32(m + 4);
+    second = port::ReadBE32(m + 4);
   }
   std::memset(m, 0, kSummaryBytes);
-  PutBe32(m, payload.summary.difficulty);
-  PutBe32(m + 4, second);
-  PutBe32(m + 8, payload.summary.percent);
-  PutBe64(m + 12, FromDouble(payload.summary.playTime));
-  PutBe32(m + 20, payload.summary.tanks);
-  PutBe32(m + 24, 3);
+  port::WriteBE32(m, payload.summary.difficulty);
+  port::WriteBE32(m + 4, second);
+  port::WriteBE32(m + 8, payload.summary.percent);
+  port::WriteBE64(m + 12, FromDouble(payload.summary.playTime));
+  port::WriteBE32(m + 20, payload.summary.tanks);
+  port::WriteBE32(m + 24, 3);
   std::memcpy(m + 28, keep, 3);
-  PutBe32(m + 35, payload.summary.mlvl);
+  port::WriteBE32(m + 35, payload.summary.mlvl);
   std::memcpy(m + 39, keep + 3, 2);
 
-  if (Be32(d + kHash) == 0) {
-    PutBe32(d + kHash, kHashValue);
+  if (port::ReadBE32(d + kHash) == 0) {
+    port::WriteBE32(d + kHash, kHashValue);
   }
-  PutBe32(d, Checksum(d));
+  port::WriteBE32(d, Checksum(d));
   return true;
 }
 

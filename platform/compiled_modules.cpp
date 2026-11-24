@@ -128,13 +128,6 @@ void Epilog(const char* path) {
 
 } // namespace port::modules
 
-// C entry points, so src/REL/REL_Setup.cpp's _prolog/_epilog can forward to the
-// registry without depending on a C++ name. On the cube those two call the
-// module's own RELMain and RELExit; on the host the registry stands in for both.
-extern "C" void port_modules_init_all(void) { port::modules::InitAll(); }
-
-extern "C" void port_modules_shutdown_all(void) { port::modules::ShutdownAll(); }
-
 extern "C" void port_modules_prolog(const char* path) { port::modules::Prolog(path); }
 
 extern "C" void port_modules_epilog(const char* path) { port::modules::Epilog(path); }

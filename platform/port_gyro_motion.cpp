@@ -51,8 +51,6 @@ void Motion::EndManualCalibration() {
 
 float Motion::Confidence() const { return mMotion->GetAutoCalibrationConfidence(); }
 
-bool Motion::Steady() const { return mMotion->GetAutoCalibrationIsSteady(); }
-
 void Motion::Process(const float gyro[3], const float* accel, float dt, int space, bool autoCalibrate,
                      float& pitch, float& yaw) {
   // SDL's rates are counter-clockwise positive, so a turn right of a flat pad

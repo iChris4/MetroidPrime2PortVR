@@ -21,6 +21,7 @@
 //    into every PAK that holds it.
 
 #include "port_suit_colours.h"
+#include "port_utf8_path.h"
 
 #include <algorithm>
 #include <Kyoto/Streams/CLZOSupport.hpp>
@@ -44,8 +45,6 @@ std::string FileName(uint32_t id) {
   std::snprintf(name, sizeof(name), "%08X.TXTR", id);
   return name;
 }
-
-fs::path PathFromString(const std::string& text) { return fs::path(std::u8string(text.begin(), text.end())); }
 
 std::string PathString(const fs::path& path) {
   const auto u8 = path.u8string();
@@ -254,7 +253,7 @@ std::vector<PortMods::LooseResource> Collect(
   }
 
   DiscReader disc;
-  const fs::path dir = PathFromString(userPath) / "generated" / "suit-colours" / info.key;
+  const fs::path dir = PortUtf8::FromUtf8(userPath) / "generated" / "suit-colours" / info.key;
   std::string stamp = std::string("suit-colours ") + std::to_string(kVersion) + " " + info.key + " " + picksKey;
   for (const uint32_t id : jobs) {
     stamp += " " + FileName(id) + "@" + std::to_string(disc.Signature(id));

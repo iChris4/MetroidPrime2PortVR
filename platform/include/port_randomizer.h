@@ -9,12 +9,6 @@ namespace PortRandomizer {
 void EnsureLoaded();
 // True when a seed contains at least one placement.
 bool Enabled();
-// True when MP_RANDO_DUMP is set to a non-empty value other than "0".
-bool DumpEnabled();
-// Name from the loaded seed, or an empty string when none is available.
-const char* SeedName();
-// Number of pickup checks recorded during this process.
-int CheckCount();
 // Short status line suitable for the F1 overlay.
 const char* StatusText();
 // Logs a location in dump mode, or applies its placement when enabled.

@@ -14,7 +14,6 @@ namespace PortCollisionView {
 enum class Mode { Off, Overlay, Only };
 Mode GetMode();
 void SetMode(Mode mode);
-const char* ModeName(Mode mode);
 bool ParseMode(const char* name, Mode& mode);
 inline bool Only() { return GetMode() == Mode::Only; }
 

@@ -7,7 +7,7 @@
 // which a symbolizer turns back into a line of code), the build, and the stack.
 // The breadcrumbs (PortBreadcrumb) follow. Nothing else changes about the crash,
 // so the system still gets it afterwards: a core dump on Linux, Android's
-// tombstone, and the exit status still says which signal (boot_probe.sh greps it).
+// tombstone, and the exit status still says which signal (a harness greps it).
 // From MP1 (MetroidPrimePort), without its Windows report.
 //
 // MP2_CRASH_TEST=segv|abort crashes right after Install, to check the report.

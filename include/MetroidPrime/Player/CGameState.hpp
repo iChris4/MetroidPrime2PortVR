@@ -19,6 +19,12 @@
 #include "rstl/reserved_vector.hpp"
 #include "rstl/vector.hpp"
 
+#ifdef TARGET_PC
+// Complete types for the smart-pointer members (-Werror=delete-incomplete).
+#include "MetroidPrime/Player/CPlayerState.hpp"
+#include "MetroidPrime/Player/CWorldTransManager.hpp"
+#endif
+
 class CBitStreamReader;
 class CBitStreamWriter;
 class CGameMode;

@@ -169,6 +169,7 @@
 #include "port_savestate.h"
 #include "port_warp.h"
 #include "MetroidPrime/PortScanTarget.hpp"
+#include "MetroidPrime/PortSkipFrontEnd.hpp"
 #ifdef TARGET_PC
 #include "port_console.h"
 #endif
@@ -869,7 +870,22 @@ void CStateManager::PreRender(uint playerIndex) {
   mStateManagerContainer->mRenderLastAfterCameraFilters.clear();
   mProjectedShadows = nullptr;
 
+#ifdef TARGET_PC
+  // Port (MP1 #283): once per update for each player, as retail's one render per update did. An
+  // open door pings its occluded neighbour every Think and CGameArea::PreRender takes that ping;
+  // rendered twice between Thinks (frame rates above the simulation's) the second call counted
+  // the area as unwatched and it dropped and reloaded its textures over and over.
+  {
+    static uint sLastUpdate[4] = {~0u, ~0u, ~0u, ~0u};
+    uint& lastUpdate = sLastUpdate[playerIndex & 3];
+    if (lastUpdate != mUpdateFrameIdx) {
+      lastUpdate = mUpdateFrameIdx;
+      mWorld->PreRender();
+    }
+  }
+#else
   mWorld->PreRender();
+#endif
   BuildDynamicLightListForWorld();
   const CGameCamera* camera = mCameraManager->GetCurrentCamera(*this, true);
 #ifdef TARGET_PC
@@ -1497,6 +1513,9 @@ void CStateManager::DrawWorld(const CInGameGuiManagerSet& gui) {
   }
   if (visor == CPlayerState::kPV_Scan) {
     CScopedProfiler visorProfile(rstl::string_l("*GameVisor"), true);
+#ifdef TARGET_PC
+    CPortPipelineContextScope globalPipelines(AURORA_PIPELINE_CONTEXT_GLOBAL);
+#endif
     CapturePlayerTextures();
     mCurrentRenderPlayer->GetTargeting()->Draw(*this, gui);
   }
@@ -3286,7 +3305,8 @@ void CStateManager::ApplyDamage(TUniqueId damagerId, TUniqueId damageeId, TUniqu
         useWeaponDirection ? damagee->GetDamageVulnerability(position, direction, info)
                            : damagee->GetDamageVulnerability();
 #ifdef TARGET_PC
-    if (const char* dbg = std::getenv("MP2_DEBUG_BALL"); dbg != nullptr) {
+    static const bool sDebugBallDamage = std::getenv("MP2_DEBUG_BALL") != nullptr;
+    if (sDebugBallDamage) {
       {
         std::fprintf(stderr,
                      "[ball] applydamage to %04x eid %04x: weapon %d hits %d damage %.1f "
@@ -3989,7 +4009,9 @@ void CStateManager::ShowPausedHUDMemo(CAssetId strg, float time) {
 
 void CStateManager::SendScriptMsg(const CScriptMsg& msg) {
 #ifdef TARGET_PC
-  if (std::getenv("MP2_DEBUG_BALL") != nullptr && msg.GetMessage() == kSM_SetToZero) {
+  // Read once: this runs for every script message.
+  static const bool sDebugBall = std::getenv("MP2_DEBUG_BALL") != nullptr;
+  if (sDebugBall && msg.GetMessage() == kSM_SetToZero) {
     std::fprintf(stderr, "[ball] queue SetToZero -> %04x from %04x (depth %d)\n",
                  msg.GetId().Value(), msg.GetSenderId().Value(), int(mScriptMsgs.GetCount()));
   }
@@ -4468,6 +4490,13 @@ void CStateManager::Update(float inputDt, CArchitectureQueue& queue) {
 #endif
   float dt = inputDt;
   float cameraDt = inputDt;
+#ifdef TARGET_PC
+  // Port: Elevator and light beam cutscenes = Fast runs an elevator's or a light beam teleporter's
+  // departure and arrival cutscenes at the game's own double speed. Asked every update: it also
+  // times out an arrival that starts no cutscene.
+  const bool portTravelFast = PortOverlay::TravelSequenceActive(mUpdateFrameIdx, inputDt) &&
+                              PortOverlay::TravelCutscenes() == PortOverlay::kTravelCutscenes_Fast;
+#endif
   if (mCameraManagers[0]->IsInCinematicCamera()) {
     const CCinematicCamera* camera = mCameraManagers[0]->GetCinematicCamera();
     if ((camera->GetFlags() & 0x200) != 0) {
@@ -4479,6 +4508,7 @@ void CStateManager::Update(float inputDt, CArchitectureQueue& queue) {
         // game's own double speed.
         || (PortOverlay::RotatingRooms() == PortOverlay::kRotatingRooms_Fast &&
             PortOverlay::RotatingSequenceActive(mUpdateFrameIdx))
+        || portTravelFast
 #endif
     ) {
       dt *= 2.f;
@@ -4620,6 +4650,8 @@ void CStateManager::Update(float inputDt, CArchitectureQueue& queue) {
     // LiveSplit feed (game time, upgrade splits).
     PortOverlay::NoteGameTime(gpGameState->GetTotalPlayTime());
     if (PortOverlay::ConsumeReturnToTitleRequest()) {
+      // The special menu's card load arms the skip only now, as the game really quits.
+      PortSkipFrontEnd::ArmQueuedCardLoad();
       gpMain->SetRestartMode(CMain::kRM_Default);
       QuitGame();
     }

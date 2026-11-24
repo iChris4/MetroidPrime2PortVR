@@ -22,15 +22,12 @@ namespace PortPrompts {
 // texture set follow this.
 const char* ActiveDevice();
 
-// True while the keyboard or mouse is the input the player last used, ignoring
-// the MP2_TEXTURE_DEVICE override. The Prime 1 port holds rumble off then, so a
-// pad left plugged in does not shake while the game is played on keyboard/mouse;
-// nothing in Echoes asks yet.
-bool KeyboardActive();
-
 // True while a connected pad is the input the player last used (not the touch
 // overlay's virtual one). Starts true: no key or click yet means no keyboard.
 bool PadActive();
+
+// For the console's `prompticon`: what a prompt image id stands for and the icon it gets now.
+std::string DescribeAsset(uint32_t id);
 
 // What the game's A button is called on the device in use ("A", "Cross", "Enter"...), for text
 // prompts such as the cinematic skip confirm.
@@ -55,11 +52,20 @@ void Poll();
 // in-game prompts follow the input the player actually reached for.
 void NoteTouchInput(bool xboxLayout);
 
+// The scan, message and logbook boxes' button, for the drawn ring (port_prompt_ring.h).
+// IsBoxRing: the texture is the boxes' ring (whatever it is served as). DrawsRing: it is served as
+// the drawn ring's clean white ring. AnyDrawnRing: some texture is. IsTealDisc: the texture is the
+// boxes' disc, served as the game's teal with the bound button's symbol.
+bool IsBoxRing(const void* texture);
+bool DrawsRing(const void* texture);
+bool AnyDrawnRing();
+bool IsTealDisc(const void* texture);
+// The texture is the boxes' lit disc (whatever it is served as).
+bool IsBoxDisc(const void* texture);
 // Prompt art is bound by asset id. FTextureFactory asks CTexture to bind the texture it just
 // built: when `id` is a prompt's, its icon follows the binding from then on (registered under the
 // CTexture's own address, so it holds whatever the texels are) and BindTexture returns true.
 // UnbindTexture drops it (the CTexture's destructor). Both main-thread only.
-bool IsPromptAsset(uint32_t id);
 // PrimedGun Echoes: the PADButton a prompt texture stands for (PAD_TRIGGER_L for the GameCube L
 // art), or 0 when `id` is not a prompt's or is a stick or D-pad picture. For text that names the
 // headset controls in place of the game's `&image=` icons.

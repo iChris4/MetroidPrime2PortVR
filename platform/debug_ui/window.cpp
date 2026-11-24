@@ -6,8 +6,11 @@
 
 #include "port_build_info.h"
 #include "port_env.h"
+#include "port_resume_prompt.h"
+#include "port_skip_prompt.h"
 #include "port_input_remap_ui.h"
 #include "port_mouse.h"
+#include "port_note_toast.h"
 #include "port_overlay.h"
 #include "port_prompts.h"
 #include "port_savestate.h"
@@ -319,53 +322,17 @@ bool DrawDesktopWindow() {
 
 } // namespace
 
-// ShowNote's text, set from any thread and timed from the first frame that draws it (MP1's
-// overlays.cpp:468-512).
 namespace {
-std::mutex sNoteMutex;
-std::string sNote;
-bool sNoteNew = false;
 // Set at startup when the last session ended on a failed disc read (main.cpp's marker file).
 std::atomic_bool sDiscReadFailedLastSession{false};
 } // namespace
 
-void ShowNote(const std::string& text) {
-  std::lock_guard<std::mutex> lock(sNoteMutex);
-  sNote = text;
-  sNoteNew = true;
-}
+// MP1's overlay toast (overlays.cpp:468-512), drawn here in the game's text (port_note_toast.h).
+void ShowNote(const std::string& text) { PortNoteToast::Show(text); }
 
 void NoteDiscReadFailedLastSession() { sDiscReadFailedLastSession = true; }
 
 namespace {
-void DrawNoteToast() {
-  static std::string sText;
-  static double sShownAt = -1.0;
-  const double now = ImGui::GetTime();
-  {
-    std::lock_guard<std::mutex> lock(sNoteMutex);
-    if (sNoteNew) {
-      sText = sNote;
-      sNoteNew = false;
-      sShownAt = now;
-    }
-  }
-  if (sText.empty() || now - sShownAt > 2.5) {
-    return;
-  }
-  const ImGuiViewport* viewport = ImGui::GetMainViewport();
-  PlaceTopToast(viewport);
-  ImGui::SetNextWindowBgAlpha(0.8f);
-  if (ImGui::Begin("##note-toast", nullptr,
-                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoNav |
-                       ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings |
-                       ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::TextUnformatted(sText.c_str());
-    TopToastPlaced(viewport);
-  }
-  ImGui::End();
-}
-
 // Once per launch, for longer and in red: the last session ended on a failed disc read.
 void DrawDiscReadFailedAlert() {
   static double sShownAt = -1.0;
@@ -416,12 +383,47 @@ std::string HotkeyHint() {
   return hint;
 }
 
-// The boot's "Resume where you left off?" prompt: a dimmed viewport with a centred window. Yes and
-// No call AnswerResumePrompt; the pad and keys answer through the splash (CSplashScreen).
+// The boot's "Resume where you left off?" prompt. The game draws it (port_resume_prompt.h); this
+// takes the pointer over its choices: hovering one highlights it, a click answers. The pad and keys
+// answer through the splash (CSplashScreen). Should the game's box be unavailable, a dimmed viewport
+// with a centred window whose Yes and No call AnswerResumePrompt.
 void DrawResumePrompt() {
   PortSaveState::ResumeInfo info;
   bool yes = true;
   if (ImGui::GetCurrentContext() == nullptr || !PortSaveState::ResumePromptShown(info, yes)) {
+    return;
+  }
+  if (!PortResumePrompt::Unavailable()) {
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    // The choice a press started on: a release answers only over that one.
+    static int sPressed = -1;
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && !ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+      sPressed = -1;
+    }
+    for (int choice = 0; choice < 2; ++choice) {
+      const PortGameUi::ScreenRect rect = PortResumePrompt::ChoiceRect(choice);
+      if (!rect.valid) {
+        continue;
+      }
+      // The word's ink, grown by half its height all round: easier to hit.
+      const float padY = 0.5f * (rect.y1 - rect.y0) * vp->Size.y;
+      const ImVec2 lo(vp->Pos.x + rect.x0 * vp->Size.x - padY, vp->Pos.y + rect.y0 * vp->Size.y - padY);
+      const ImVec2 hi(vp->Pos.x + rect.x1 * vp->Size.x + padY, vp->Pos.y + rect.y1 * vp->Size.y + padY);
+      if (mouse.x < lo.x || mouse.x > hi.x || mouse.y < lo.y || mouse.y > hi.y) {
+        continue;
+      }
+      if (ImGui::GetIO().MouseDelta.x != 0.f || ImGui::GetIO().MouseDelta.y != 0.f ||
+          ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        PortSaveState::SelectResumePrompt(choice == 0);
+      }
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        sPressed = choice;
+      }
+      if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && sPressed == choice) {
+        PortSaveState::AnswerResumePrompt(choice == 0);
+      }
+    }
     return;
   }
   const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -542,6 +544,29 @@ void DrawSkipConfirm() {
   if (ImGui::GetCurrentContext() == nullptr || alpha <= 0.f) {
     return;
   }
+  if (PortOverlay::SkipPromptBox() && !PortSkipPrompt::Unavailable()) {
+    // The game draws the prompt (port_skip_prompt.h); this only takes a tap or click on it.
+    const PortGameUi::ScreenRect rect = PortSkipPrompt::LastRect();
+    if (!rect.valid) {
+      return;
+    }
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(vp->Pos.x + rect.x0 * vp->Size.x, vp->Pos.y + rect.y0 * vp->Size.y));
+    ImGui::SetNextWindowSize(ImVec2((rect.x1 - rect.x0) * vp->Size.x, (rect.y1 - rect.y0) * vp->Size.y));
+    ImGui::SetNextWindowBgAlpha(0.f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
+    if (ImGui::Begin("##skip-confirm-box", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoNav |
+                         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoBackground)) {
+      if (ImGui::IsWindowHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+        PortOverlay::SkipConfirmTap();
+      }
+    }
+    ImGui::End();
+    ImGui::PopStyleVar();
+    return;
+  }
   float aspect = 1.f;
   const ImTextureID icon = SkipConfirmIcon(aspect);
   char text[64];
@@ -613,13 +638,10 @@ void DrawUI() {
   if (!sVisible) {
     DrawResumePrompt();
   }
-  DrawMenuHintToast();
   DrawDiscReadFailedAlert();
   DrawIgtTimer();
   DrawSkipConfirm();
-  DrawShaderCompilationToast();
   DrawUpdateToast();
-  DrawNoteToast();
   DrawPhotoUI();
 #if defined(PORT_TOUCH_OVERLAY)
   DrawTouchOverlay();

@@ -6,6 +6,9 @@
 #include "rstl/string.hpp"
 
 #include "Kyoto/Text/CSaveableState.hpp"
+#ifdef TARGET_PC
+#include "Kyoto/Text/CInstruction.hpp" // complete for the ncrc_ptr release (-Werror=delete-incomplete)
+#endif
 
 class CInstruction;
 class CBlockInstruction;

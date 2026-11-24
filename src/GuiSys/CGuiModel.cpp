@@ -14,6 +14,7 @@
 #include "Kyoto/Graphics/CTexture.hpp"
 #include "port_pointer.h"
 #include "vr/vr_view.h"
+#include "port_prompt_ring.h"
 #endif
 #ifdef TARGET_PC
 #include <cstdlib>
@@ -71,7 +72,15 @@ void CGuiModel::BeginDraw() {
   sDrawing = true;
 }
 
-void CGuiModel::EndDraw() { sDrawing = false; }
+void CGuiModel::EndDraw() {
+#ifdef TARGET_PC
+  // Port: the boxes' drawn button rings, over the frame's models (port_prompt_ring.h).
+  if (PortPromptRing::EndBatch()) {
+    UpdateDrawState(-1, CColor::Black());
+  }
+#endif
+  sDrawing = false;
+}
 
 CGuiModel* CGuiModel::Create(CGuiFrame* frame, CInputStream& in, uint version) {
   const CGuiWidgetParms parms = ReadWidgetHeader(frame, in);
@@ -108,6 +117,8 @@ void CGuiModel::Draw(const CGuiWidgetDrawParms& parms) const {
     }
     // PortVr: the wrist visor display fades with the HUD.
     mPortHudDrawAlpha = parms.GetAlpha();
+    // Port: the drawn button ring closes the box's notch around the button (port_prompt_ring.h).
+    PortPromptRing::BeforeDraw(*this);
 #endif
     if (!sDrawing) {
       CCubeMaterial::ResetCachedMaterials();
@@ -204,6 +215,11 @@ void CGuiModel::Draw(const CGuiWidgetDrawParms& parms) const {
       DrawModel(flags);
     }
 
+#ifdef TARGET_PC
+    if (PortPromptRing::AfterDraw(*this, color)) {
+      UpdateDrawState(-1, CColor::Black());
+    }
+#endif
     if (cullChanged) {
       CGraphics::SetCullMode(kCM_None);
     }
@@ -335,6 +351,11 @@ int CGuiModel::PortIconLayers(PortIconLayer* out, int max) const {
     }
   }
   return count;
+}
+
+const CCubeModel* CGuiModel::PortCubeModel() const {
+  const CGuiFrameModelDatabase* db = GetParentFrame()->GetModelDatabase();
+  return db != nullptr ? db->GetModel(mModelIndex) : nullptr;
 }
 
 bool CGuiModel::PortGetBounds(CAABox& out) const {

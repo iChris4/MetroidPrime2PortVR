@@ -34,6 +34,9 @@ enum {
   AURORA_PERF_DST_ALPHA_DUP,    // dstAlpha alpha-only duplicate draws
   AURORA_PERF_BIND_INVALIDATE,  // texture::invalidate_bindings calls
   AURORA_PERF_DRAWS,            // recorded draw calls
+  AURORA_PERF_ARRAY_UPLOAD,       // vertex arrays copied into the frame's storage (FIFO thread)
+  AURORA_PERF_ARRAY_UPLOAD_BYTES, // their size in bytes
+  AURORA_PERF_ARRAY_REUSE,        // array binds served by a copy made earlier in the frame
   AURORA_PERF_COUNTER_COUNT,
 };
 

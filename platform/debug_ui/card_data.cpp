@@ -116,7 +116,8 @@ void OnPick(void* userdata, const char* const* files, int) {
 }
 
 void OpenDialog(Pick pick) {
-  static const SDL_DialogFileFilter filters[] = {{"Save files (.gci)", "gci"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter filters[] = {{"Save files (.gci, Trilogy save.bin)", "gci;bin"},
+                                                 {"All files", "*"}};
   sDialogOpen = true;
   void* userdata = reinterpret_cast< void* >(static_cast< intptr_t >(pick));
   if (pick == kPick_Import) {
@@ -375,8 +376,9 @@ void DrawCardTransfer() {
   if (ImGui::Button("Import file...")) {
     OpenDialog(kPick_Import);
   }
-  ItemHelp("Loads a .gci save of this release. The card's current save is copied to save-backups "
-           "first.");
+  ItemHelp("Loads a .gci save, or the Echoes progress of a Wii Trilogy save.bin (Dolphin's "
+           "Wii/title/00010000/52334d45/data/save.bin; the Trilogy one needs a save on this card "
+           "to go into). The card's current save is copied to save-backups first.");
   const fs::path dolphin = DolphinCardFolder();
   ImGui::SameLine();
   ImGui::BeginDisabled(dolphin.empty());

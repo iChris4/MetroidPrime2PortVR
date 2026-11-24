@@ -1,5 +1,8 @@
 #include "port_disc_verify.h"
 
+#include "port_bytes.h"
+#include "port_crc32.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -9,10 +12,6 @@ namespace PortDiscVerify {
 
 namespace {
 uint32_t Rotl(uint32_t value, int bits) { return (value << bits) | (value >> (32 - bits)); }
-uint32_t Be32(const uint8_t* p) {
-  return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
-         (static_cast<uint32_t>(p[2]) << 8) | p[3];
-}
 } // namespace
 
 Sha1Stream::Sha1Stream() : mState{0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0}, mBuffer{} {}
@@ -20,7 +19,7 @@ Sha1Stream::Sha1Stream() : mState{0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476
 void Sha1Stream::Block(const uint8_t* block) {
   uint32_t words[80];
   for (size_t i = 0; i < 16; ++i) {
-    words[i] = Be32(block + i * 4);
+    words[i] = port::ReadBE32(block + i * 4);
   }
   for (size_t i = 16; i < 80; ++i) {
     words[i] = Rotl(words[i - 3] ^ words[i - 8] ^ words[i - 14] ^ words[i - 16], 1);
@@ -141,28 +140,9 @@ const Revision* FindRevision(const char* id6, unsigned version) {
   return nullptr;
 }
 
-// CRC-32 (the one zlib's crc32 computes, polynomial 0xEDB88320 reflected), written out so the
-// check needs no zlib: this tree links none, and the table's values come from Python's
+// zlib's CRC-32 (port_crc32.h, so the check needs no zlib); the table's values come from Python's
 // zlib.crc32 (tools/disc_chunk_table.py).
-uint32_t Crc32(const void* data, size_t size) {
-  static const auto table = [] {
-    std::array<uint32_t, 256> t{};
-    for (uint32_t i = 0; i < 256; ++i) {
-      uint32_t c = i;
-      for (int k = 0; k < 8; ++k) {
-        c = (c & 1) != 0 ? 0xedb88320u ^ (c >> 1) : c >> 1;
-      }
-      t[i] = c;
-    }
-    return t;
-  }();
-  const auto* bytes = static_cast<const uint8_t*>(data);
-  uint32_t crc = 0xffffffffu;
-  for (size_t i = 0; i < size; ++i) {
-    crc = table[(crc ^ bytes[i]) & 0xff] ^ (crc >> 8);
-  }
-  return crc ^ 0xffffffffu;
-}
+uint32_t Crc32(const void* data, size_t size) { return port::Crc32(data, size); }
 
 bool AllZero(const uint8_t* data, size_t size) {
   return size == 0 || (data[0] == 0 && std::memcmp(data, data + 1, size - 1) == 0);
@@ -173,14 +153,14 @@ std::vector<FstFile> ParseFst(const uint8_t* fst, size_t size) {
   if (size < 12 || fst[0] != 1) {
     return files;
   }
-  const uint32_t count = Be32(fst + 8);
+  const uint32_t count = port::ReadBE32(fst + 8);
   if (count == 0 || static_cast<uint64_t>(count) * 12 > size) {
     return files;
   }
   const uint8_t* names = fst + static_cast<size_t>(count) * 12;
   const size_t namesSize = size - static_cast<size_t>(count) * 12;
   auto nameOf = [&](const uint8_t* entry) {
-    const size_t at = Be32(entry) & 0x00ffffff;
+    const size_t at = port::ReadBE32(entry) & 0x00ffffff;
     if (at >= namesSize) {
       return std::string();
     }
@@ -195,9 +175,9 @@ std::vector<FstFile> ParseFst(const uint8_t* fst, size_t size) {
     }
     const std::string path = dirs.back().second + nameOf(entry);
     if (entry[0] != 0) {
-      dirs.emplace_back(Be32(entry + 8), path + "/");
+      dirs.emplace_back(port::ReadBE32(entry + 8), path + "/");
     } else {
-      files.push_back({Be32(entry + 4), Be32(entry + 8), path});
+      files.push_back({port::ReadBE32(entry + 4), port::ReadBE32(entry + 8), path});
     }
   }
   return files;

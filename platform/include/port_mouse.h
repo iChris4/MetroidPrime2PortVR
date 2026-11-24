@@ -290,7 +290,6 @@ void AddStickAim(float x, float y, float dt, int player = 0);
 // layout) and calls SetTouchEnabled; like twin-stick it works with or without mouse aim. The
 // Java UI thread calls AddTouchAim/SetTouchAimDown/SpringSwipe, so those are safe from either
 // thread and the game thread only ever sees a whole tick's travel.
-bool TouchEnabled();
 void SetTouchEnabled(bool enabled);
 // Finger travel in density-independent pixels (right/down positive), scaled here by
 // TouchAimSpeed() because the UI thread has no view of the aim's units.
@@ -307,11 +306,9 @@ void SpringSwipe();
 bool TouchAimActive();
 // Aim pixels per dp, the Prime port's `touch_aim_speed` (2.25 by default). Clamped to
 // 0.25..10; MP2_TOUCH_AIM_SPEED overrides it the lazy way MP2_MOUSE_SENS does.
-float TouchAimSpeed();
 void SetTouchAimSpeed(float pixelsPerDp);
-// The vertical drag's speed (PortTouch's "Separate vertical speed"; the same as TouchAimSpeed
+// The vertical drag's speed (PortTouch's "Separate vertical speed"; the same as the above
 // with the split off), same clamp.
-float TouchAimSpeedY();
 void SetTouchAimSpeedY(float pixelsPerDp);
 // The debug overlay owns the cursor while it is open: no capture, no aim applied.
 void SetUiActive(bool active);
@@ -401,6 +398,11 @@ void SetPointerAimPosition(float x, float y, int player = 0);
 // The console holds a pointer it placed there (free, the view not turned) until it is placed at 0 0.
 void SetPointerAimHold(bool hold, int player = 0);
 void Synchronize(float x, float y, float z, int player = 0);
+// The game placed the player facing (x, y, z) (CPlayer::Teleport): the aim of any direct source
+// takes that direction, so the next UpdateAim does not turn the body back to the heading it
+// tracked before the placement. A spawn point at the end of a cutscene places Samus after that
+// tick's UpdateAim, and the aim owns the view again on the next (issue #121).
+void Place(float x, float y, float z, int player = 0);
 // The console's `aim <yaw_deg> <pitch_deg>`: place the aim outright instead of turning it from
 // travel, which is the only way a run with no stick can aim at a low target. yawDeg is the
 // view's heading in the world's own terms (0 = +y, 90 = +x, as `face` reads it); pitchDeg is

@@ -53,6 +53,12 @@ public:
   static float GetDefaultFirstPersonFarClipDistance();
   static float GetDefaultFirstPersonNearClipDistance();
   static float GetDefaultThirdPersonVerticalFOV();
+#ifdef TARGET_PC
+  // Port: a morph ball camera FOV (the default or a camera hint's) scaled by the FOV setting;
+  // PortRescaleFov gives fov as it would be at FOV setting toSetting instead of fromSetting.
+  static float PortFollowFovSetting(float fov);
+  static float PortRescaleFov(float fov, float fromSetting, float toSetting);
+#endif
 
   static float sFirstPersonFOV;
   static float sThirdPersonFOV;

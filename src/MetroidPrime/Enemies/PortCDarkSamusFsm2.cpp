@@ -32,11 +32,17 @@
 
 #include "types.h"
 
+// MP2_DS_FSM logs the state machine; read once, these run every frame.
+static bool DsFsmLog() {
+  static const bool enabled = getenv("MP2_DS_FSM") != nullptr;
+  return enabled;
+}
+
 namespace {
 
 // The state change log of PortCDarkSamusFsm.cpp's DsStateEntered (MP2_DS_FSM).
 void DsStateEntered(const char* name, EStateMsg msg) {
-  if (msg == kStateMsg_Activate && getenv("MP2_DS_FSM") != nullptr) {
+  if (msg == kStateMsg_Activate && DsFsmLog()) {
     fprintf(stderr, "[dsfsm] state change: %s\n", name);
   }
 }

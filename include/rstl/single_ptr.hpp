@@ -58,6 +58,14 @@ single_ptr< T >& single_ptr< T >::Set(T* ptr) {
   return *this = ptr;
 }
 
+#ifdef TARGET_PC
+// single_ptr<void> owns a raw allocation: `delete (void*)` is undefined on the host, free it.
+template <>
+inline single_ptr< void >::~single_ptr() {
+  ::operator delete(mPtr);
+}
+#endif
+
 typedef single_ptr< void > unk_singleptr;
 CHECK_SIZEOF(unk_singleptr, 0x4);
 } // namespace rstl

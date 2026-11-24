@@ -830,6 +830,7 @@ static sqlite3* open_pipeline_cache_seed_db(const std::string& path) {
     Log.info("No bundled initial pipeline cache found at '{}'", path);
     return nullptr;
   }
+  sqlite::use_memory_temp_store(seedDb);
 
   bool schemaMatch = false;
   const auto schemaQuery = fmt::format("SELECT 1 FROM aurora_schema WHERE value = {}", PipelineCacheSchema);
@@ -1748,7 +1749,8 @@ static bool load_rows(sqlite3_stmt* stmt, const CachedRowOptions& opts, CachedRo
   }
   const bool ok = ret == SQLITE_DONE;
   if (!ok) {
-    Log.error("Failed to read pipeline cache rows: {}", sqlite3_errmsg(g_pipelineCacheDb));
+    Log.error("Failed to read pipeline cache rows: {} (code {})", sqlite3_errmsg(g_pipelineCacheDb),
+              sqlite3_extended_errcode(g_pipelineCacheDb));
   }
   sqlite3_reset(stmt);
   sqlite3_clear_bindings(stmt);

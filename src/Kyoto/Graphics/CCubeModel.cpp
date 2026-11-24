@@ -10,6 +10,8 @@
 #include "dolphin/gx/GXVert.h"
 #ifdef TARGET_PC
 #include "Kyoto/Graphics/PortDrawDebug.hpp"
+#include "dolphin/gx/GXExtra.h"
+#include "port_prompt_ring.h"
 #endif
 
 #include <string.h>
@@ -45,6 +47,88 @@ void CCubeModel::PortSetBuildContext(uint assetId, int areaId, int modelIndex) {
 }
 
 uint CCubeModel::PortBuildAssetId() { return sPortBuild.mAssetId; }
+
+static uchar sPortResident = 0;
+
+void CCubeModel::PortSetResident(bool arrays, bool displayLists) {
+  sPortResident = arrays ? (displayLists ? kPortResidentArrays | kPortResidentDisplayLists
+                                         : kPortResidentArrays)
+                         : 0;
+}
+
+// A model's arrays and display lists point into its CMDL, or its area's geometry, which nothing
+// writes after the model is made and which outlives it (CModel::~CModel and CGameArea free it
+// after the model goes; CModel::RemapData makes the moved copy's model before this one goes), so
+// Aurora keeps a copy on the GPU and its draws stop copying them into every frame's buffers.
+// Retains are counted by pointer, so models sharing data (a remap, a GUI frame) are fine.
+// Display lists only on request: a resident list draws on its own, where the lists of a model's
+// surfaces sent in a row merge into one draw (Landing Site: 293 draws a frame, 1113 resident).
+namespace {
+// Retain or release one array or display list. An empty one is skipped both ways: its pointer is
+// the next section's (MemoryFromPartData), whose count it must not change.
+void PortResident(bool retain, const void* data, uint size) {
+  if (data == nullptr || size == 0) {
+    return;
+  }
+  if (retain) {
+    GXPortRetainResident(data, size);
+  } else {
+    GXPortReleaseResident(data);
+  }
+}
+} // namespace
+
+void CCubeModel::PortSetResidentData(bool retain) {
+  if ((mPortResident & kPortResidentArrays) == 0) {
+    return;
+  }
+  PortResident(retain, mInstance.GetVertexPointer(), mInstance.GetVertexSize());
+  PortResident(retain, mInstance.GetNormalPointer(), mInstance.GetNormalSize());
+  PortResident(retain, mInstance.GetColorPointer(), mInstance.GetColorSize());
+  PortResident(retain, mInstance.GetTCPointer(), mInstance.GetTCSize());
+  PortResident(retain, mInstance.GetPackedTCPointer(), mInstance.GetPackedTCSize());
+  if ((mPortResident & kPortResidentDisplayLists) == 0) {
+    return;
+  }
+  // The lists are released by what was retained, not read from the surfaces again: the surface
+  // vector can go before the model (CGuiFrameModelDatabase declares it after its models).
+  if (retain) {
+    const rstl::vector< void* >& surf = mInstance.Surfaces();
+    mPortResidentLists.reserve(surf.size());
+    for (int i = 0; i < surf.size(); ++i) {
+      const CCubeSurface surface(surf[i]);
+      if (surface.GetDisplayList() != nullptr && surface.GetDisplayListSize() != 0) {
+        PortResident(true, surface.GetDisplayList(), surface.GetDisplayListSize());
+        mPortResidentLists.push_back(surface.GetDisplayList());
+      }
+    }
+  } else {
+    for (int i = 0; i < mPortResidentLists.size(); ++i) {
+      GXPortReleaseResident(mPortResidentLists[i]);
+    }
+    mPortResidentLists.clear();
+  }
+}
+
+void CCubeModel::PortUpdateResidentData() const {
+  if ((mPortResident & kPortResidentArrays) == 0) {
+    return;
+  }
+  // As PortSetResidentData retained them: an empty array is skipped (its pointer is the next one's).
+  const auto update = [](const void* data, uint size) {
+    if (data != nullptr && size != 0) {
+      GXPortUpdateResident(data);
+    }
+  };
+  update(mInstance.GetVertexPointer(), mInstance.GetVertexSize());
+  update(mInstance.GetNormalPointer(), mInstance.GetNormalSize());
+  update(mInstance.GetColorPointer(), mInstance.GetColorSize());
+  update(mInstance.GetTCPointer(), mInstance.GetTCSize());
+  update(mInstance.GetPackedTCPointer(), mInstance.GetPackedTCSize());
+  for (int i = 0; i < mPortResidentLists.size(); ++i) {
+    GXPortUpdateResident(mPortResidentLists[i]);
+  }
+}
 
 const uchar* CCubeModel::PortNeutralMaterial() {
   // Flags 0x8000 (big-endian, like the disc's): sSkippedMaterialFlags always holds that bit, so
@@ -137,7 +221,8 @@ CCubeModel::CCubeModel(rstl::vector< void* >* surfaces,
 , mPortAssetId(kPortNoAsset)
 , mPortAreaId(-1)
 , mPortModelIndex(-1)
-, mPortMaterialRefused(false) {
+, mPortMaterialRefused(false)
+, mPortResident(0) {
 #else
 , mMaterialData(nullptr) {
 #endif
@@ -166,11 +251,17 @@ CCubeModel::CCubeModel(rstl::vector< void* >* surfaces,
   }
 #ifdef TARGET_PC
   PortDrawDebug::OnModelCreated(this);
+  mPortResident = sPortResident;
+  PortSetResidentData(true);
 #endif
 }
 
 #ifdef TARGET_PC
-CCubeModel::~CCubeModel() { PortDrawDebug::OnModelDestroyed(this); }
+CCubeModel::~CCubeModel() {
+  PortSetResidentData(false);
+  PortDrawDebug::OnModelDestroyed(this);
+  PortPromptRing::ModelGone(this); // Port: the drawn button ring's records of it
+}
 #endif
 
 void CCubeModel::MakeTexturesFromMats(const void* data,

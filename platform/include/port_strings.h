@@ -57,6 +57,12 @@ inline bool StartsWith(std::string_view s, std::string_view prefix) {
   return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
 }
 
+// A settings file's switch: off when empty or 0, false, off or no in any case; on otherwise.
+inline bool ParseBool(std::string_view value) {
+  const std::string lower = Lower(std::string(value));
+  return !(lower.empty() || lower == "0" || lower == "false" || lower == "off" || lower == "no");
+}
+
 // `s` without the leading and trailing bytes found in `chars`. The view
 // points into `s`; Trim makes a copy for callers that keep the result.
 inline std::string_view TrimView(std::string_view s, std::string_view chars = " \t\r\n") {

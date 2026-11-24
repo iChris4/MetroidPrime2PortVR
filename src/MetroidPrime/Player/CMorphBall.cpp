@@ -68,6 +68,7 @@
 #include "rstl/math.hpp"
 #ifdef TARGET_PC
 #include "port_overlay.h"
+#include "port_prime1_tweaks.h"
 #include "port_touch.h"
 #include <cstdio>
 #include <cstdlib>
@@ -75,6 +76,17 @@
 static bool PortBallDebug() {
   static const bool enabled = std::getenv("MP2_DEBUG_BALL") != nullptr;
   return enabled;
+}
+
+// Prime 1 boost ball (PortOverlay::Prime1BoostBall): single player only, and only with Prime 1's
+// values read from the player's disc (`prime1_disc`): without them the recharge and falloff
+// changes would run on Echoes' flat boost speeds, a combination neither game has. For the same
+// reason it is off wherever CTweakBall hands out Echoes' values (EchoesValuesScope: Spider Ball
+// tracks and half-pipes).
+static bool PortPrime1BoostBall(const CStateManager& mgr) {
+  PortPrime1Tweaks::BoostBall values;
+  return PortPrime1Tweaks::EchoesValuesDepth() == 0 && PortOverlay::Prime1BoostBall() &&
+         !mgr.IsMultiplayer() && PortPrime1Tweaks::Values(values);
 }
 
 // The Boost Ball duration cheat (PortOverlay::BoostDurationScale) stretches the boosted window.
@@ -2023,6 +2035,12 @@ void CMorphBall::EnterBoosting(CStateManager& mgr, bool skipImpulse) {
     mBallState = kBS_Boost;
     mBoostDamageScale = 1.f;
   }
+#ifdef TARGET_PC
+  // A Spider Ball or half-pipe boost takes Echoes' Boost Ball values under Prime 1 boost ball
+  // (port_prime1_tweaks.h).
+  const PortPrime1Tweaks::EchoesValuesScope spiderEchoes(mBallState == kBS_SpiderBoost ||
+                                                         GetIsInHalfPipeMode());
+#endif
 
   if (mPlayer.DampsBoostEntryVelocity()) {
     mPlayer.SetVelocityWR(mPlayer.GetVelocityWR() * 0.4f);
@@ -2046,7 +2064,15 @@ void CMorphBall::EnterBoosting(CStateManager& mgr, bool skipImpulse) {
       }
       incSpeed = rstl::max_val(0.f, incSpeed);
     } else {
+#ifdef TARGET_PC
+      // Prime 1 boost ball: Prime 1 adds the full impulse whatever the ball's speed; the slider
+      // brings back part of Echoes' falloff (100% is Echoes).
+      const float falloff =
+          PortPrime1BoostBall(mgr) ? PortOverlay::Prime1BoostFalloff() / 100.f : 1.f;
+      incSpeed *= 1.f - falloff * mPlayer.GetVelocityWR().Magnitude() / 50.f;
+#else
       incSpeed *= 1.f - mPlayer.GetVelocityWR().Magnitude() / 50.f;
+#endif
     }
 
     CVector3f lookDir;
@@ -2116,6 +2142,12 @@ void CMorphBall::ComputeBoostBallMovement(const CFinalInput& input, CStateManage
   if (!IsMovementAllowed()) {
     return;
   }
+#ifdef TARGET_PC
+  // Charging on a Spider Ball track and the boost off it, and boosts in a half-pipe, take Echoes'
+  // Boost Ball values under Prime 1 boost ball (port_prime1_tweaks.h).
+  const PortPrime1Tweaks::EchoesValuesScope spiderEchoes(
+      mBallState == kBS_Spider || mBallState == kBS_SpiderBoost || GetIsInHalfPipeMode());
+#endif
 
   mTimeNotInBoost += dt;
   CPlayerState* playerState = mPlayer.GetPlayerState();
@@ -2151,7 +2183,13 @@ void CMorphBall::ComputeBoostBallMovement(const CFinalInput& input, CStateManage
 
   if (!IsBoosting() || activateBoost) {
     if (mPlayer.BoostHeld(input) && !activateBoost) {
-      const bool canCharge = mTimeNotInBoost > gpTweakBall->GetBoostBallDrainTime();
+      bool canCharge = mTimeNotInBoost > gpTweakBall->GetBoostBallDrainTime();
+#ifdef TARGET_PC
+      // Prime 1 boost ball: Prime 1 has no recharge wait, a charge starts once the boost ends.
+      if (PortPrime1BoostBall(mgr)) {
+        canCharge = true;
+      }
+#endif
       if (canCharge) {
         if (mBallAnimationIndex == 0) {
           mBallAnimationIndex = 1;
@@ -2711,6 +2749,11 @@ void CMorphBall::UpdateBallLight(float dt, CStateManager& mgr) {
 }
 
 void CMorphBall::UpdateEffects(float dt, CStateManager& mgr) {
+#ifdef TARGET_PC
+  // The charge and drain glow follow the values the boost uses (ComputeBoostBallMovement).
+  const PortPrime1Tweaks::EchoesValuesScope spiderEchoes(
+      mBallState == kBS_Spider || mBallState == kBS_SpiderBoost || GetIsInHalfPipeMode());
+#endif
   const CTransform4f swooshToWorld = GetSwooshToWorld();
   const CPlayerState* playerState = mPlayer.GetPlayerState();
   const bool dead = mPlayer.GetDeathTime() > 0.f;

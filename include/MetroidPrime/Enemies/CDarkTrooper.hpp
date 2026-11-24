@@ -18,6 +18,11 @@
 #include "rstl/reserved_vector.hpp"
 #include "rstl/single_ptr.hpp"
 
+#ifdef TARGET_PC
+// Complete types for the smart-pointer members (-Werror=delete-incomplete).
+#include "MetroidPrime/Enemies/CPirateRagDoll.hpp"
+#endif
+
 class CPirateRagDoll;
 class CScannableObjectInfo;
 class CPFArea;

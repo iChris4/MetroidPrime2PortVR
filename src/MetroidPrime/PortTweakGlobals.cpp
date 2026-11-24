@@ -4,8 +4,7 @@
 // **Not a configure.py unit**, for the reason every file in this group gives: a
 // definition inside a claimed unit shifts that unit's small-data offsets and
 // re-optimises unrelated functions, which `tools/gate.sh` reports as a
-// regression. See the header of `src/MetroidPrime/PortGlobals.cpp` for the
-// measurement (adding one `static` to `MetroidPrime/main.cpp` moved
+// regression (measured: adding one `static` to `MetroidPrime/main.cpp` moved
 // `__ct__CGameArchitectureSupport` 84.51% -> 81.54%). Nothing here can reach
 // `main.dol` or any of the 86 REL modules.
 //

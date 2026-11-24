@@ -39,6 +39,8 @@ void SetAreaLayers(const CWorldLayerState* layers, int areaId);
 // "Temple Grounds - Landing Site": the English world and room names, as far as they are known
 // (rooms only for the current world, once their name tables have loaded); empty when the room's is not.
 std::string RoomName(uint32_t worldId, int areaIndex);
+// "Temple Grounds": the world's English name alone; empty when it is not known.
+std::string WorldName(uint32_t worldId);
 // Opens the window on the first page whose name starts with `name` (case-insensitive: "save"
 // is Save states), or closes it for "off"; false when no page matches (console `overlay`).
 // "<page>/<sub-tab>" also selects the first sub-tab whose name starts with the part after the slash.
@@ -76,6 +78,10 @@ void SkipConfirmArm();
 void SkipConfirmDisarm();
 // 0..1 for the prompt's draw (fades out over its last half second), 0 when not armed.
 float SkipConfirmAlpha();
+// Enhancements > Pace > Game-style skip prompt (`skip_prompt_box`, `MP2_SKIP_PROMPT_BOX`; on by
+// default): the armed skip's prompt is a compact game message box at the bottom of the screen
+// (port_skip_prompt.h); off, the overlay's "Press [A] to skip".
+bool SkipPromptBox();
 // A tap/click on the prompt happened since the last call (the game then counts it as the second press).
 void SkipConfirmTap();
 bool TakeSkipConfirmTap();
@@ -127,6 +133,12 @@ void SetBoostAnywhere(bool enabled);
 bool BoostSteerSet();
 bool BoostSteer();
 void SetBoostSteer(bool enabled);
+// Cheat (F1 > Cheats, console `phazon`): a full charge turns into the final fight's Phazon shot
+// (the one absorbed Phazon shots give, CPlayerGun::PortCheatPhazonCharge), anywhere. Never saved;
+// off in the Original experience.
+bool PhazonShotSet();
+bool PhazonShot();
+void SetPhazonShot(bool enabled);
 // Cheat (F1 > Cheats, a checkbox per counter; `MP2_INFINITE_AMMO=1` turns on all four): firing
 // spends none of the chosen ammo (CPlayerState::DecrementAmmoAndDisplayAlertIfOut). Never saved.
 enum : unsigned {
@@ -143,6 +155,10 @@ bool InfiniteAmmo(unsigned kinds);
 // Enhancement (F1 > Enhancements, saved, env `MP2_INFINITE_BEAM_AMMO`): Light and Dark Ammo are
 // infinite, whatever the cheat's bits say. Original experience turns it off.
 bool InfiniteBeamAmmo();
+// Enhancement (F1 > Enhancements > Ammo, saved, env `MP2_CHARGE_ONLY_BEAM_AMMO`, #130): uncharged
+// Dark, Light and Annihilator shots cost no ammo (CPlayerGun::GetBeamAmmoTypeAndCosts); charged
+// shots and combos cost what they do in retail. Original experience turns it off.
+bool ChargeOnlyBeamAmmo();
 // Enhancement (F1 > Enhancements > Music, saved, env `MP2_DARK_WORLD_LIGHT_MUSIC`, #36): Dark
 // Aether's area themes play their light world counterparts (CScriptStreamedMusic::Play); takes
 // effect at the next track start. Original experience turns it off.
@@ -162,22 +178,18 @@ void SetFastMorph(bool enabled);
 bool PointerMenus();
 void SetPointerMenus(bool enabled);
 bool MapSwapFingers();
-void SetMapSwapFingers(bool swap);
 // Exit Game on the main menu (`MP2_MENU_EXIT`, issue #80; default on): the main menu shows an
 // "Exit Game" legend in its bottom-left corner with the Z button's prompt (its binding: RB by
 // default, View on the Remastered preset), and holding Z there, or a finger or mouse button on the
 // legend, for kMenuExitHoldSeconds quits as F1 > Game > Exit game does.
 const float kMenuExitHoldSeconds = 1.5f;
 bool MenuExit();
-void SetMenuExit(bool enabled);
 // Saves the settings and asks the main loop to shut down, as closing the window does.
 void RequestQuit();
 // Map rotate flips (Controls > Options > Map, `MP2_MAP_INVERT_X`/`_Y`): the game turns the map
 // opposite to the stick, so flipping both gives camera-style rotation (CAutoMapper).
 bool MapInvertX();
-void SetMapInvertX(bool invert);
 bool MapInvertY();
-void SetMapInvertY(bool invert);
 // Morph Ball camera control (`ball_cam`, env `MP2_BALL_CAM`, off by default and under Original
 // experience; issue #54): the mouse, the right stick and touch aim swipes orbit the Morph Ball
 // camera around the ball and raise or lower it (the stick only turns it while Spring Ball is on).
@@ -213,6 +225,32 @@ void SetBeamAmmoPerExpansion(int ammo);
 // off, so a custom action can flip between retail and the slider's speed as a sprint.
 int WalkSpeed();
 void SetWalkSpeed(int percent);
+// Prime 1 air physics (`MP2_PRIME1_AIR_PHYSICS=1`, off by default, single player only): airborne
+// Samus moves by Metroid Prime 1's (GM8E01_00) rules instead of Echoes' patched ones, so L-jumps,
+// R-jumps and scan dashes carry their speed again. No friction while the jump is held and rising,
+// only the speed along her facing is capped, and a sideways dash keeps its speed when it ends
+// (CPlayerDynamics: GetDampedClampedVelocityWR, ComputeMovement, FinishSidewaysDash).
+bool Prime1AirPhysics();
+void SetPrime1AirPhysics(bool enabled);
+// Prime 1 boost ball (`MP2_PRIME1_BOOST_BALL=1`, off by default, single player only): the Boost
+// Ball as in Metroid Prime 1. A new charge can start as soon as a boost ends (Echoes waits the
+// tweak's drain time from the boost's start), and the impulse keeps Prime1BoostFalloff() percent
+// of Echoes' speed falloff (Echoes scales it by 1 - speed/50; Prime 1 not at all), so boosts
+// chain and stack (CMorphBall::ComputeBoostBallMovement, EnterBoosting).
+bool Prime1BoostBall();
+void SetPrime1BoostBall(bool enabled);
+// Boost speed falloff (`MP2_PRIME1_BOOST_FALLOFF`, percent, default 0 = Prime 1, 100 = Echoes):
+// with Prime 1 boost ball on, the impulse is scaled by 1 - (percent/100) * speed/50.
+const int kPrime1BoostFalloffMin = 0;
+const int kPrime1BoostFalloffMax = 100;
+const int kPrime1BoostFalloffDefault = 0;
+int Prime1BoostFalloff();
+void SetPrime1BoostFalloff(int percent);
+// The player's Metroid Prime 1 disc (`prime1_disc`, env `MP2_PRIME1_DISC`; any image nod reads).
+// With Prime 1 boost ball on, the Boost Ball's charge and speed tweaks are read from it
+// (port_prime1_tweaks.h, CTweakBall); the port ships none of Prime 1's data.
+std::string Prime1DiscPath();
+void SetPrime1DiscPath(const std::string& path);
 bool WalkSpeedEnabled();
 void SetWalkSpeedEnabled(bool enabled);
 // Scan speed in percent (`MP2_SCAN_SPEED`, 100 = retail): ScanSpeed() scales the time a scan takes
@@ -237,21 +275,26 @@ const int kVolumeBoostMin = 100;
 const int kVolumeBoostMax = 200;
 const int kVolumeBoostDefault = 100;
 int MusicBoost();
-void SetMusicBoost(int percent);
 int SfxBoost();
-void SetSfxBoost(int percent);
 // Glyph set the on-screen prompts are forced to (`MP2_PROMPT_GLYPHS`: 0 follow the input in use,
-// 1 Xbox, 2 PlayStation, 3 Switch, 4 GameCube, 5 keyboard); PromptGlyphs() is the device name or
-// nullptr to follow the input. Original experience shows the GameCube art.
+// 1 Xbox, 2 PlayStation, 3 Switch, 4 GameCube, 5 keyboard, 6 Steam Deck); PromptGlyphs() is the
+// device name or nullptr to follow the input. Original experience shows the GameCube art.
 enum EPromptGlyphs {
   kPromptGlyphs_Auto,
   kPromptGlyphs_Xbox,
   kPromptGlyphs_PlayStation,
   kPromptGlyphs_Switch,
   kPromptGlyphs_GameCube,
-  kPromptGlyphs_Keyboard
+  kPromptGlyphs_Keyboard,
+  kPromptGlyphs_SteamDeck
 };
 const char* PromptGlyphs();
+// Options > On-screen prompts > Render button prompt rings (`prompt_ring`, `MP2_PROMPT_RING`; on
+// by default; off under Original experience): the scan, message and logbook boxes' button, with any
+// glyph set, is the game's teal disc in a ring drawn as geometry, the box's notch made a round hole
+// (port_prompt_ring.cpp); off, the game's own button (GameCube glyphs) or a ring and grey disc drawn
+// into the game's two textures.
+bool PromptRing();
 // Tap or click on the HUD minimap opens the map screen (default on; MP2_MINIMAP_TAP).
 bool MinimapTap();
 void SetMinimapTap(bool enabled);
@@ -288,6 +331,24 @@ void SetRotatingRooms(int mode);
 // asks whether one played in the last updates (frame is CStateManager::GetUpdateFrameIdx).
 void NoteRotatingSequence(unsigned frame);
 bool RotatingSequenceActive(unsigned frame);
+// Elevator and light beam cutscenes (`MP2_TRAVEL_CUTSCENES`: original|fast): the in-room departure
+// and arrival cutscenes of the elevators and the light beam teleporters (energy controllers, Great
+// Temple, Sky Temple Gateway). Fast runs them at the game's own double speed under a cinematic
+// camera; the ride between the worlds is Elevator ride's.
+enum ETravelCutscenes { kTravelCutscenes_Original, kTravelCutscenes_Fast };
+int TravelCutscenes();
+void SetTravelCutscenes(int mode);
+// CScriptSequenceTimer::Think reports a running travel sequence each update (frame is
+// CStateManager::GetUpdateFrameIdx). CScriptWorldTeleporter reports a world change: the next
+// world's first camera sequence to start (TravelArrivalPending) is the arrival, kept by its packed
+// uid (SetTravelArrival, IsTravelArrival) until it stops running; an arrival that starts none
+// within a few seconds is dropped. CStateManager::Update asks TravelSequenceActive every update.
+void NoteTravelSequence(unsigned frame);
+void NoteTravelDeparture();
+bool TravelArrivalPending();
+void SetTravelArrival(unsigned short uid, unsigned frame);
+bool IsTravelArrival(unsigned short uid);
+bool TravelSequenceActive(unsigned frame, float dt);
 // Text language (`MP2_LANGUAGE`: 0 English, 1 German, 2 French, 3 Spanish, 4 Italian, 5 Dutch,
 // 6 Japanese): CMain::GetLanguage returns it at startup and the overlay re-applies it every frame
 // (CStringTable::SetLanguage), so a change shows at once in text read from then on; a screen that
@@ -340,8 +401,15 @@ void SetDamageDealtMultiplier(float m);
 // Skip Dark (`MP2_STACK_BEAMS_SKIP_DARK`): the stack leaves the Dark Beam out unless it is in hand,
 // so stacked shots don't drain light beacons and crystals.
 bool UnlockBeamDoors();
+bool UnlockBeamDoorsSet(); // as set (UnlockBeamDoors: in effect)
 void SetUnlockBeamDoors(bool enabled);
+// Unlock beam doors once opened (F1 > Game > Unlocks, `beam_doors_stay_unlocked`, env
+// `MP2_BEAM_DOORS_STAY_UNLOCKED`): a colour-locked door that was opened once is a blue door again
+// when its room reloads (CScriptDoor::Think) and on the map. False while Original experience is on.
+bool BeamDoorsStayUnlocked();
+void SetBeamDoorsStayUnlocked(bool enabled);
 bool StackBeams();
+bool StackBeamsSet(); // as set (StackBeams: in effect)
 void SetStackBeams(bool enabled);
 bool StackBeamsSkipDark();
 void SetStackBeamsSkipDark(bool enabled);
@@ -421,9 +489,10 @@ void SetPointerAim(bool enabled);
 int PointerAimBox();
 int PointerAimTurn();
 // Gyro aim (`MP2_GYRO_AIM=1`, default off; MP1's gyro aim in "always aim" mode, pointer only): a
-// controller's gyro (or the phone's, `MP2_GYRO_SOURCE` 0 auto, 1 controller, 2 phone) moves the
-// pointer while pointer aim is on. `MP2_GYRO_CURSOR_ANGLE` degrees of pad turn sweep the pointer
-// across the screen. Space (`MP2_GYRO_SPACE`, PortGyro::Space), auto calibrate
+// controller's gyro (or the phone's, `MP2_GYRO_SOURCE` 0 auto, 1 controller, 2 phone; under Steam
+// Input, the physical controller's behind Player 1's virtual pad, see port_steam_triton.h)
+// moves the pointer while pointer aim is on. `MP2_GYRO_CURSOR_ANGLE` degrees of pad turn sweep the
+// pointer across the screen. Space (`MP2_GYRO_SPACE`, PortGyro::Space), auto calibrate
 // (`MP2_GYRO_AUTO_CALIBRATE` 0 off, 1 always, 2 only in menus), smoothing and tightening
 // (`MP2_GYRO_SMOOTHING`/`MP2_GYRO_TIGHTENING`, deg/s, 0 = off) are MP1's, ranges and defaults.
 const int kGyroSourceDefault = 0;
@@ -466,8 +535,15 @@ bool ResetAimBoth();
 // page's Menu rows instead of the gameplay layout. Off while the touch controls are in use.
 bool MenuStandardButtons();
 void SetMenuStandardButtons(bool enabled);
-void SetGyroAim(bool enabled);
 int GyroSource();
+// Under Steam Input, read the back buttons (SDL's paddles) of the physical controller behind Player
+// 1's virtual pad, which has none (`MP2_STEAM_INPUT_BACK_BUTTONS`, default on; Linux only).
+bool SteamInputBackButtons();
+// Controller settings > Precise stick deadzones (`precise_stick_deadzones`, env
+// `MP2_PRECISE_STICK_DEADZONES`, default off, #131): the Stick / C-stick deadzone sliders are the
+// only deadzone. Tilt past a slider runs from zero, and the game's own PADClamp cut (15 of 127 per
+// axis) is offset away, so a stick moves Samus and the aim from its first step past the slider.
+bool PreciseStickDeadZones();
 int GyroSpace();
 int GyroAutoCalibrate();
 float GyroSmoothing();
@@ -495,8 +571,6 @@ enum PlayerSetting {
 };
 const int kSettingPlayers = 4;
 bool PlayerSettingSet(int player, PlayerSetting key);
-// Player 0 sets Player 1's own setting; players 1-3 set their override. Both persist.
-void SetPlayerSetting(int player, PlayerSetting key, float value);
 // Player 1-3 follows Player 1 again for `key`, or for all of them.
 void ClearPlayerSetting(int player, PlayerSetting key);
 void ClearPlayerSettings(int player);
@@ -529,6 +603,11 @@ void SetLogFile(bool enabled);
 float FirstPersonFov();
 // 30..120, or 0 for the game's own.
 void SetFirstPersonFov(float degrees);
+// The morph ball's cameras (ball, path, spindle; camera hints' FOVs) widen or narrow in step with
+// FirstPersonFov (`ball_follows_fov`, `MP2_BALL_FOLLOWS_FOV`, default on; retail 60 at 55); off and
+// under Original experience they keep retail's (CCameraManager::PortFollowFovSetting).
+bool BallFollowsFov();
+void SetBallFollowsFov(bool enabled);
 // The arm cannon is drawn at its own FOV (GunFov, `gun_fov`, `MP2_GUN_FOV`, retail 55) whatever the
 // view's, like a view-model FOV, unless GunFollowsFov (`gun_follows_fov`, `MP2_GUN_FOLLOWS_FOV`):
 // then it shares the world's projection. Both are retail's under Original experience.
@@ -573,6 +652,8 @@ void SetHudScalingActive(bool active);
 // (the per-visor effect: on this port that is the scan visor's window and edges).
 bool HideHelmet();
 bool HideVisorEffects();
+void SetHideHelmet(bool enabled);
+void SetHideVisorEffects(bool enabled);
 // Cutscene black bars (`cinema_bars`, env `MP2_CINEMA_BARS`, F1 > HUD and view): the letterbox the
 // game draws over a cinematic and the viewport shrink that goes with it. On by default (the
 // game's own); off lets the cinematic fill the screen. Read by CCameraFilterPass. Original
@@ -669,6 +750,18 @@ void SetFrameLimit(bool enabled);
 // The time one main-loop iteration spent working, before PortPaceFrame's sleep; feeds the F1
 // Frame rate row "Throughput" (frames per second with the pacing wait left out).
 void NoteFrameWork(uint64_t ns);
+// A pacing sleep inside the iteration (CGraphics::EndScene's 60 Hz or FPS-cap wait): taken off the
+// iteration's work when NoteFrameWork runs.
+void NotePacingWait(uint64_t ns);
+// The last full second of that work: iterations, mean and slowest in ms, and how many took longer
+// than a 60 Hz period (console `status`). MP2_SLOW_FRAME_MS=<ms> logs each slower iteration.
+struct FrameWorkStats {
+  int frames = 0;
+  float avgMs = 0.f;
+  float maxMs = 0.f;
+  int slow = 0;
+};
+FrameWorkStats LastFrameWork();
 // MP1's smooth frames (`MP2_SMOOTH_FRAMES=0|1`, F1 > Video > Frame rate, console `interp`); on by
 // default. With the cap off, the camera is drawn between the last two 60 Hz ticks.
 bool SmoothFrames();
@@ -690,7 +783,6 @@ float PresentOverrideValue();
 bool TickHold();
 void SetTickHold(bool held);
 void StepTicks(unsigned count);
-unsigned PendingHeldTicks();
 unsigned TakeHeldTicks();
 // MP1's pose interpolation (`MP2_POSE_INTERPOLATION=0|1`, F1 > Video > Frame rate); off by default.
 // With smooth frames on and the cap off, skinned models draw a blend of their last two tick poses
@@ -731,7 +823,9 @@ void SetScanSpread(int percent);
 // (default), else kRenderScaleMin-kRenderScaleMax x the render mode's base, through
 // VISetFrameBufferScale from Draw. Photo mode's capture overrides it while it runs.
 const float kRenderScaleMin = 0.5f;
-const float kRenderScaleMax = 4.f;
+// 8x (3840 lines) supersamples a 4K display; Aurora fits the EFB inside the device's texture
+// size limit, so a wide window can draw a little less.
+const float kRenderScaleMax = 8.f;
 float RenderScale();
 void SetRenderScale(float scale);
 // Rendering aspect ratio, as the Prime 1 port's (`MP2_ASPECT=4:3|16:9|window`, `MP2_WIDESCREEN=1`
@@ -811,11 +905,5 @@ bool PerPixelLighting();
 // storage clamp (-1 auto; Aurora reads `MP2_STORAGE_CLAMP` itself), the Dawn driver workarounds
 // (`MP2_DRIVER_WORKAROUNDS`) and the low-power adapter (Aurora reads `MP2_GPU_POWER=low`).
 bool OpenGles();
-// The renderer choice (`graphics_backend`, `MP2_GRAPHICS_BACKEND` overrides it for one run;
-// see port_graphics_backend.h). Stored on every platform, used on Windows and desktop Linux.
-PortGraphicsBackend::EGraphicsBackend GraphicsBackend();
-int StorageClamp();
-unsigned DriverWorkarounds();
-bool LowPowerGpu();
 
 } // namespace PortOverlay

@@ -25,6 +25,7 @@
 
 #include <aurora/aurora.h>
 #include <aurora/event.h>
+#include <aurora/gfx.h>
 #include <aurora/dvd.h>
 #include <dolphin/dvd.h>
 #include <dolphin/gx/GXAurora.h>
@@ -78,6 +79,7 @@ extern "C" void* OSGetArenaHi();
 extern void* gPortGameHeapLo;
 extern void* gPortGameHeapHi;
 #include "Kyoto/Basics/COsContext.hpp"
+#include "Kyoto/Graphics/CCubeModel.hpp"
 #include "Kyoto/Graphics/CGraphicsSys.hpp"
 #include "compiled_modules.h"
 #include "input/port_input_devices.h"
@@ -114,6 +116,7 @@ extern void* gPortGameHeapHi;
 #include "port_touch.h"
 #include "port_tweaks.h"
 #include "port_video.h"
+#include "port_imgui_fonts.h"
 
 // The decompilation's exported entry point; see src/MetroidPrime/main.cpp.
 namespace port {
@@ -201,10 +204,6 @@ std::string DesktopDiscFallback(const std::string& resolved) {
 // user path, so the port has to name the same folder or the two disagree about where
 // settings.cfg, controls.toml and the tools' backups live. Not SDL's call itself because SDL is
 // only on the entry's include path on Android, and because asking it creates the folder.
-std::filesystem::path Utf8Path(const std::string& text) {
-  return std::filesystem::path(std::u8string(text.begin(), text.end()));
-}
-
 std::string PerUserFolder() {
   std::string dir;
 #if defined(_WIN32)
@@ -264,7 +263,7 @@ std::string ExecutableFolder() {
 std::string InstallFolder() {
   std::string dir;
   if (InAppImage()) {
-    const std::u8string parent = Utf8Path(std::getenv("APPIMAGE")).parent_path().u8string();
+    const std::u8string parent = PortUtf8::FromUtf8(std::getenv("APPIMAGE")).parent_path().u8string();
     dir.assign(parent.begin(), parent.end());
   } else {
     dir = ExecutableFolder();
@@ -282,7 +281,7 @@ bool InAppBundle(const std::string& dir) {
 }
 
 bool FolderWritable(const std::string& dir) {
-  const std::filesystem::path probe = Utf8Path(dir) / ".port_write_test";
+  const std::filesystem::path probe = PortUtf8::FromUtf8(dir) / ".port_write_test";
   {
     std::ofstream file(probe, std::ios::binary);
     if (!file) {
@@ -313,9 +312,9 @@ std::string DesktopUserFolder(const char** why) {
     const std::string portable = InAppImage() ? install : install + "user/";
     std::error_code error;
     const bool hereHasSettings =
-        std::filesystem::exists(Utf8Path(portable + "settings.cfg"), error);
+        std::filesystem::exists(PortUtf8::FromUtf8(portable + "settings.cfg"), error);
     const bool legacyHasSettings =
-        !perUser.empty() && std::filesystem::exists(Utf8Path(perUser + "settings.cfg"), error);
+        !perUser.empty() && std::filesystem::exists(PortUtf8::FromUtf8(perUser + "settings.cfg"), error);
     if (hereHasSettings || !legacyHasSettings) {
       dir = portable;
       *why = "portable";
@@ -329,7 +328,7 @@ std::string DesktopUserFolder(const char** why) {
   }
   if (!dir.empty()) {
     std::error_code error;
-    std::filesystem::create_directories(Utf8Path(dir), error);
+    std::filesystem::create_directories(PortUtf8::FromUtf8(dir), error);
   }
   return dir;
 }
@@ -1079,8 +1078,7 @@ std::string PickDiscUntilChosen() {
 
 // Crash reports are PortCrash's (platform/port_crash.cpp): signal, fault address, module offset,
 // build, stack and breadcrumbs, written into the log, and the signal then goes on to the handler
-// that was there before (the default one, so the exit status still says "died on signal 11",
-// which boot_probe.sh greps; on Android debuggerd's, which writes the tombstone).
+// that was there before (the default one, so the exit status still says "died on signal 11"; on Android debuggerd's, which writes the tombstone).
 #if defined(__ANDROID__)
 // Everything the report wrote went into the stderr pipe, and only the pump thread turns it into
 // logcat lines: give it up to half a second to empty the pipe, or the process dies with the stack
@@ -1293,6 +1291,8 @@ int main(int argc, char** argv) {
       .windowPosY = -1,
       .windowWidth = static_cast< uint32_t >(widescreen ? 1280 : 960),
       .windowHeight = 720u,
+      // A system font merged into the overlay's for the game text ProggyClean lacks (MP1 d0c5cce42).
+      .imGuiInitCallback = PortImGuiFonts::Init,
       .mem1Size = MEM1_DEFAULT_SIZE,
       .mem2Size = ARAM_DEFAULT_SIZE,
       // An embedded seed wins over a stale initial_pipeline_cache.db beside the executable.
@@ -1301,6 +1301,14 @@ int main(int argc, char** argv) {
       // MP2_PIPELINE_SEED=0: start from an empty cache (tools/pipeline_seed.py record runs with it).
       .pipelineCacheNoSeed = !port::EnvFlag("MP2_PIPELINE_SEED", true),
   };
+  // GPU room for models' vertex arrays, uploaded once when a model is made instead of copied into
+  // every frame's buffers (CCubeModel::PortSetResident). A model that finds it full is sent each
+  // frame as before. MP2_GX_RESIDENT_MB=<n> (0 = off; up to 2048); MP2_GX_RESIDENT_DL=1 keeps
+  // display lists there too (fewer bytes a frame, but 2-4x the draws: they no longer merge).
+  // Aurora gives two fifths of it to arrays: 6 MiB, where ten Temple Grounds areas peaked at 1.2.
+  const int kResidentMiB = 16;
+  config.residentGeometryMiB =
+      static_cast< uint32_t >(std::clamp(port::EnvInt("MP2_GX_RESIDENT_MB", kResidentMiB), 0, 2048));
 #if !defined(__ANDROID__)
   // The window icon, for a bare binary that no desktop entry describes. Android takes its icon
   // from the APK.
@@ -1351,11 +1359,18 @@ int main(int argc, char** argv) {
   // Lazy mode keeps built pipelines until memory runs short (MP1 issue #187), areas left long ago
   // included, so walking back is free. It trims on Android's memory warnings (port_memory_log.cpp)
   // and on the memory log's MemAvailable check every 5 s: under 1024 MiB available it releases
-  // what a minute of frames didn't draw, under 512 MiB all but what the last frames drew (GLOBAL
-  // pipelines stay). Overrides: MP2_PIPELINE_TRIM_MIB / MP2_PIPELINE_TRIM_SEVERE_MIB (0 turns a
+  // what a minute of frames didn't draw, under 512 MiB what 30 s didn't (GLOBAL
+  // pipelines stay: Samus, gun, HUD, visors). Android has no moderate level: a 3-4 GB phone sits
+  // under 1024 MiB available all the time, and rebuilding pipelines costs up to 2 s each on a Mali
+  // (issue #98). Overrides: MP2_PIPELINE_TRIM_MIB / MP2_PIPELINE_TRIM_SEVERE_MIB (0 turns a
   // level off), MP2_PIPELINE_EVICT=<frames> (a fixed idle sweep at every frame start, any mode).
   if (config.pipelineCacheLazy) {
-    const int trimMib = port::EnvInt("MP2_PIPELINE_TRIM_MIB", 1024);
+#ifdef __ANDROID__
+    constexpr int kDefaultTrimMib = 0;
+#else
+    constexpr int kDefaultTrimMib = 1024;
+#endif
+    const int trimMib = port::EnvInt("MP2_PIPELINE_TRIM_MIB", kDefaultTrimMib);
     const int severeMib = port::EnvInt("MP2_PIPELINE_TRIM_SEVERE_MIB", 512);
     PortMemoryLog::SetPipelinePressure(trimMib, severeMib);
     if (std::getenv("MP2_PIPELINE_TRIM_MIB") != nullptr ||
@@ -1481,6 +1496,8 @@ int main(int argc, char** argv) {
     }
   }
   const AuroraInfo auroraInfo = aurora_initialize(argc, argv, &config);
+  CCubeModel::PortSetResident(aurora_get_resident_geometry_mib() != 0,
+                              port::EnvFlag("MP2_GX_RESIDENT_DL"));
   // The settings file, JSON and the logs read and write numbers in the "C" format. A toolkit loaded
   // with the window (a GTK decoration plugin, an input method) may call setlocale(LC_ALL, ""), and
   // under a comma-decimal locale "1.5" would then read as 1 (MP1's main.cpp:1304).

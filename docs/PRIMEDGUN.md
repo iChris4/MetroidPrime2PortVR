@@ -1,5 +1,55 @@
 # PrimedGun Echoes: engineering notes
 
+## Upstream 0.16.0 merged (2026-11-24)
+
+The upstream repository is gone: github.com/Odrannnn/MetroidPrime2Port and the Odrannnn account
+answer 404 since mid-November, so `git fetch upstream` fails. Its last commits survive in forks that
+kept the history: Timdeuces/MetroidPrime2Port's `preserve` branch ends at `1cbd4180c`
+(2026-11-13: 0.16.0 and one commit), and tib-kpl/MetroidPrime2Port and bshar1865/MetroidPrime2Port
+contain it too. It descends from the last upstream commit fetched here (`3db89b73d`), and every
+first-parent commit after it is Odran's (rivyr's and BubbleTea033's PR branches come in through his
+merges), so the content is upstream's, unchanged. No fork holds a later upstream commit, and
+Software Heritage's last visit (2026-11-06) is older. The local `refs/remotes/upstream/port` was set
+to `1cbd4180c` by hand.
+
+123 upstream commits since `9ec12fe36`: releases 0.13.0 to 0.16.0, the special menu (#132), the
+resume Yes/No, skip prompt, F1 hint, shader count, note and update toasts drawn in the game's own
+boxes (#113, #119), the button ring drawn as geometry (#102), Steam Input gyro and back buttons
+with Steam Deck glyphs, the pad used last plays player 1 (#120), model vertex arrays kept on the GPU
+(`MP2_GX_RESIDENT_MB`), per-frame array copies, opt-in Prime 1 air physics and boost ball (#122),
+Precise stick deadzones, beam doors that stay unlocked, charge-only beam ammo, the Phazon shot cheat,
+Trilogy save import, the PAL card signature, and cleanups (shared UTF-8 path helpers, 67 unused port
+functions dropped, the plain setting accessors as table rows).
+
+Conflicts (17 files):
+- `CMakeLists.txt`: our OpenXR block; upstream retired `MP_BOOT_STUBS`.
+- `aurora.cpp`, `command_processor.cpp/.hpp`, `input.cpp`: as in Prime 1's merge (upstream's
+  `aurora_joystick_update_ns` next to our tagged `aurora_end_frame*`; the per-frame array copies
+  after our de-index plan and bind-group cache).
+- `CGuiModel.hpp/.cpp`: the wrist display's alpha and upstream's `PortPromptRing` both kept.
+- `cheats.cpp`: the buttons call upstream's `PortCheats::FullHealth`/`GrantEverything`; the VR menu's
+  `CheatFullHealth`/`CheatGrantEverything` now wrap them (`PortCheats::PlayerInGame` replaces our
+  `GamePlayerState`).
+- `port_prompts.h`: `IsPromptAsset` is gone upstream; our `PromptButtonForAsset` stays.
+- `platform/main.cpp`: our OpenXR start before `aurora_initialize`, then upstream's
+  `CCubeModel::PortSetResident`.
+- `port_mouse.cpp`: `TouchEnabled()` had no caller and upstream dropped it, with our gate in it.
+- `port_overlay.cpp`: `HudWide()` stays written out (off while the headset runs); its row in
+  `port_overlay_accessors.inc` is replaced by a comment.
+- `CPlayerDynamics.cpp`: our directional move and upstream's Prime 1 air stick frame both kept.
+- `port_savestate_fields.cpp` takes upstream's cached fingerprints; `port_savestate.h` comment,
+  `settings.cpp` and `src/MetroidPrime/main.cpp` includes kept from both sides.
+
+Build fix: the console had two `rezbit` commands (ours from `b3a67b4bd`, upstream's `bca5bb107`).
+Upstream's is kept, so desk checks now use `rezbit start` / `rezbit stop`.
+
+Checks: build/vr, `ctest -L port` 69/69 (macho and entity schema skipped), the TARGET_PC strip-diff
+against `upstream/port` adds no non-PC text, and a desktop run from the card's save (Temple
+Grounds) quits cleanly. Not checked: the headset, the Quest APK. The VR panel still asks the
+resume question. Upstream's game-drawn prompts and toasts are drawn after the IOWin draw, under
+whatever stereo route is current: on the virtual screen (boot, title) that is fine; in immersive
+play (the cutscene skip prompt, note toasts, the special menu) they are unchecked.
+
 ## Visor effects follow the head (2026-11-09)
 
 Ported from Prime 1 (MetroidPrimePortVR 344aabfc6, user-confirmed there). Water off the visor, rain

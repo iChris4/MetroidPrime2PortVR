@@ -40,6 +40,7 @@ Window s_window;
 constexpr const char* BreakNames[AURORA_PERF_BREAK_COUNT] = {"copy", "depthsnap", "encoder", "offscreen", "resolve"};
 constexpr const char* CounterNames[AURORA_PERF_COUNTER_COUNT] = {
     "copytex", "texhit", "texmiss", "texhash", "texupload", "texinit", "texinitdata", "dstalphadup", "bindinval", "draws",
+    "arrayupload", "arraybytes", "arrayreuse",
 };
 
 uint64_t module_offset(uintptr_t pc) noexcept {

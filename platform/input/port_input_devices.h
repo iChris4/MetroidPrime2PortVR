@@ -65,6 +65,11 @@ PADStatus Poll();
 // their player. False, with nothing done, without a pad on the port or a player for it; the
 // pad then reads Aurora's own mapping.
 bool PollPlayer(int port, PADStatus& status);
+// Outside a multiplayer match every pad plays player 1: the pad just used (SDL joystick id)
+// takes pad port 0, unsaved. In a match the Player combos' assignment stands.
+void NotePadUsed(u32 instance);
+// Once per frame: a match starting puts the saved Player choices back.
+void MatchPortsTick();
 
 // Runs the port's own actions (port menu, screenshot) from their bindings; called once a
 // loop iteration from port_events.cpp, so they work while the game is paused.
@@ -141,6 +146,22 @@ void BuildProfile(PortInput::Profile& out, int port = 0);
 // button or pushes a PAD axis from `family`, preferring one that applies in the current
 // context. False when none.
 bool PromptButtonInput(unsigned padButton, PortInput::Family family, PortInput::Input& out);
+// While alive on this thread, the prompts resolve as a scan/message box's button reads: under
+// the scan visor that is the scan text's context even before the scan completes (#127).
+class PromptBoxScope {
+public:
+  PromptBoxScope();
+  ~PromptBoxScope();
+  PromptBoxScope(const PromptBoxScope&) = delete;
+  PromptBoxScope& operator=(const PromptBoxScope&) = delete;
+
+private:
+  bool mPrev;
+};
+// The contexts PromptButtonInput resolves against now: the prompts re-resolve when they change.
+uint16_t PromptContexts();
+// For the console's `prompticon`: the contexts in play and the single-input rows of a pad button's action.
+std::string DescribePromptBindings(unsigned padButton);
 bool PromptAxisInput(PADAxis axis, PortInput::Family family, PortInput::Input& out);
 // A pad input as the native button the prompts name (an SDL_GamepadButton or
 // PAD_NATIVE_BUTTON_TRIGGER_*), or PAD_NATIVE_BUTTON_INVALID.

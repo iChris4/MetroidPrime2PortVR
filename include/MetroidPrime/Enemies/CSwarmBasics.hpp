@@ -235,7 +235,12 @@ public:
 
 protected:
   // Opaque owned allocation: cleanup is established, but its element type is unresolved.
+#ifdef TARGET_PC
+  // Never allocated by known code; complete so the auto_ptr's delete is well-formed on the host.
+  class CUnknownBuffer {};
+#else
   class CUnknownBuffer; // Guessed name
+#endif
 
   // Guessed member names, supported by native accesses and the corresponding Prime swarm.
   CAABox mAabox;

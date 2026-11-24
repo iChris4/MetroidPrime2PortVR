@@ -86,6 +86,11 @@ u32 GXPortCopySerial(void);
 // for it (AuroraConfig::residentGeometryMiB), it is sent every frame as before.
 void GXPortRetainResident(const void* data, u32 size);
 void GXPortReleaseResident(const void* data);
+// Port extension: `data`, retained, has changed: its GPU copy is taken again from what it holds now,
+// for the draws after this call (its count is kept). Nothing for data that isn't retained. For
+// what edits a model's arrays or display lists after it is made (the drawn button ring moves a
+// box's frame line), at the size it was retained with.
+void GXPortUpdateResident(const void* data);
 // Aurora extension: the PBR environment probe (see GX_AURORA_COPY_PROBE_FACE and
 // GX_AURORA_SET_PBR_PROBE).
 void GXCopyProbeFace(u32 face);

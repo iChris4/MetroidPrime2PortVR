@@ -150,6 +150,11 @@ void CFirstPersonCamera::UpdateTransform(CStateManager& mgr, float dt) {
     }
   }
   sPortLockPitchHeld = portLockPitch;
+  // Set when the aim tracks the view: it is synchronized with the camera's final orientation at
+  // the end of the update, as MP1 does, not with this early direction, which a lock-on replaces
+  // below. Syncing here left the aim on the pre-lock (level) view, so releasing a lock-on snapped
+  // the view back to the horizon.
+  bool portSyncAim = false;
   if (PortMouse::DirectAim(player->GetPlayerIndex()) && !portLockPitch) {
     if (PortMouse::Aiming(player->GetPlayerIndex()) && PortMouse::Initialized(player->GetPlayerIndex())) {
       const float aimYaw = PortMouse::Yaw(player->GetPlayerIndex());
@@ -157,7 +162,7 @@ void CFirstPersonCamera::UpdateTransform(CStateManager& mgr, float dt) {
       lookDir = CVector3f(sinf(-aimYaw) * cosf(aimPitch), cosf(-aimYaw) * cosf(aimPitch),
                           sinf(aimPitch));
     } else {
-      PortMouse::Synchronize(lookDir.GetX(), lookDir.GetY(), lookDir.GetZ(), player->GetPlayerIndex());
+      portSyncAim = true;
     }
   }
 #endif
@@ -473,6 +478,12 @@ void CFirstPersonCamera::UpdateTransform(CStateManager& mgr, float dt) {
   mGunFollowXf.SetTranslation(eyePos);
   SetTranslation(eyePos + player->GetTransform().Rotate(bobXf.GetTranslation()));
   mGunFollowXf.Orthonormalize();
+#ifdef TARGET_PC
+  if (portSyncAim) {
+    const CVector3f forward = mGunFollowXf.GetForward();
+    PortMouse::Synchronize(forward.GetX(), forward.GetY(), forward.GetZ(), player->GetPlayerIndex());
+  }
+#endif
 }
 
 void CFirstPersonCamera::PreThink(float dt, CStateManager& mgr) {}

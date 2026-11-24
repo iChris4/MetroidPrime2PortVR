@@ -6,6 +6,7 @@
 class CModelFlags;
 #ifdef TARGET_PC
 class CAABox;
+class CCubeModel;
 class CTexture;
 #endif
 
@@ -43,6 +44,10 @@ public:
   // off hand: this model's own material and colour path at `transform`, without the depth test,
   // at the alpha of its last HUD draw times `alpha`.
   void PortDrawWrist(const CTransform4f& transform, float alpha) const;
+  // The model's mesh in the frame's database (null until the frame has loaded), and how it blends:
+  // for the drawn button ring (port_prompt_ring.h).
+  const CCubeModel* PortCubeModel() const;
+  int PortDrawFlags() const { return mDrawFlags; }
 #endif
   static void BeginDraw();                        // Guessed name
   static void EndDraw();                          // Guessed name

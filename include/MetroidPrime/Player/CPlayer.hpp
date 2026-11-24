@@ -319,6 +319,9 @@ public:
   float GetMorphBallTransitionFactor() const {
     return mMorphDuration == 0.f ? 0.f : CMath::Clamp(0.f, mMorphTime / mMorphDuration, 1.f);
   }
+#ifdef TARGET_PC
+  float GetMorphDuration() const { return mMorphDuration; }
+#endif
   bool CanEnterMorphBallState(CStateManager& mgr, float dt) const;
   bool CanLeaveMorphBallState(CStateManager& mgr, CVector3f& position) const;
   bool AttachActorToPlayer(TUniqueId actor, bool disableGun);

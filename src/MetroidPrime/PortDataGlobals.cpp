@@ -5,7 +5,7 @@
  * null rc_ptr's refcount reaches 0 and `delete`s static storage).
  *
  * Value sources: "dol" = orig/G2ME01/sys/main.dol read at the address symbols.txt gives (big-endian);
- * "PortGlobals" = the older excluded src/MetroidPrime/PortGlobals.cpp; "asm" = the literal pool entry
+ * "PortGlobals" = the old tree's src/MetroidPrime/PortGlobals.cpp (deleted; in git history); "asm" = the literal pool entry
  * the retail function loads (r2 = 0x804223C0). Symbols whose retail value is zero (runtime-assigned
  * pointers/state, .bss/.sbss) stay stubs in PortLinkStubs.cpp.
  *

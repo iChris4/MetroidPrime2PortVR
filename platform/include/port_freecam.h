@@ -45,8 +45,6 @@ void TakeRequests(CStateManager& mgr);
 // A vertical field of view in degrees that replaces the game camera's while the camera is on
 // (photo mode); 0 leaves the game's. FovFor widens it to the game's aspect like the camera does.
 float FovOverride();
-// The override for the frame being drawn, blended between ticks like the view.
-float PresentedFovOverride();
 void SetFovOverride(float degrees, bool snap = true);
 
 // Touch (photo mode on a phone): a stick in [-1, 1] added to the left stick until changed

@@ -495,6 +495,17 @@ void CScriptDoor::Think(float dt, CStateManager& mgr) {
 
   switch (mDoorState) {
   case kDS_Closed:
+#ifdef TARGET_PC
+    // Unlock beam doors once opened (#129): retail turns an opened colour door blue (the area's
+    // script sends kSM_Reset) only until its room is loaded again. The save keeps which doors were
+    // opened (the map's visited doors, set on both sides of the doorway), so such a door is reset
+    // again here, shut, before it is drawn. A locked door waits for its lock, as kSM_Reset does.
+    if (!mHasReset && !mResetPending && mLockState == kLS_Unlocked &&
+        mBaseVulnerability.PortIsColorLock() && PortOverlay::BeamDoorsStayUnlocked() &&
+        mgr.MapWorldInfo()->IsDoorVisited(GetEditorId())) {
+      ResetDoor(mgr);
+    }
+#endif
     if (mCurrentHealth.GetHP() <= 0.f && mgr.GetNextAreaId() == GetCurrentAreaId()) {
 #ifdef TARGET_PC
       std::fprintf(stderr, "[door] %04x broken, waiting for the next area\n",

@@ -9,6 +9,7 @@
 
 #include "port_mobile.h"
 #include "../port_overlay_internal.h"
+#include "port_menu_entry.h"
 
 #include <imgui.h>
 
@@ -82,6 +83,24 @@ inline bool Changed(bool changed) {
   return changed;
 }
 
+// A checkbox on a setting's variable: the change is saved (Changed) and `tooltip` shows on hover.
+inline bool CheckboxTip(const char* label, bool* value, const char* tooltip) {
+  const bool changed = Changed(ImGui::Checkbox(label, value));
+  ImGui::SetItemTooltip("%s", tooltip);
+  return changed;
+}
+
+// A checkbox on a value behind a getter and setter; the setter does any saving.
+template < class Get, class Set >
+bool CheckboxFn(const char* label, Get get, Set set) {
+  bool value = get();
+  const bool changed = ImGui::Checkbox(label, &value);
+  if (changed) {
+    set(value);
+  }
+  return changed;
+}
+
 // Pages and sections, each drawn by the file it is named after.
 struct DebugPage {
   const char* name;
@@ -142,6 +161,11 @@ inline constexpr bool kInlineHelp = true;
 inline constexpr bool kInlineHelp = false;
 #endif
 void ItemHelp(const char* text);
+// A port_menu_entry.h switch as a checkbox (its name, state and whole story as help: the inline
+// kind under it, or a tooltip, so two can share a line), greyed while Original experience holds it
+// off; and an action as a button, greyed while it can't be done. True when it changed or ran.
+bool EntryCheckbox(const PortMenuEntry::Switch& entry, bool inlineHelp = false);
+bool EntryButton(const PortMenuEntry::Action& entry);
 void SameLineAfterHelp();
 // The menu sounds (MP1's): derived from ImGui's state, called at the end of DrawUI.
 void UpdateMenuSounds(bool visible);
@@ -187,11 +211,10 @@ void DrawVideoDisplay();
 void DrawVideoQuality();
 void DrawVideoCompatibility();
 // Drawn every frame, the window open or not (DrawUI).
-void DrawShaderCompilationToast();
 void DrawUpdateToast(); // once per launch: a newer release than this build is out
+bool UpdateToastHovered(); // the cursor is over it: a press there is not the game's
 // photo.cpp: photo mode's panel, bar and toast, and the touch fingers that fly its camera.
 void DrawPhotoUI();
-void DrawMenuHintToast();
 // Top-centre toasts stack instead of overlapping: BeginTopToastStack once per frame before them,
 // then PlaceTopToast before each Begin and TopToastPlaced inside it (MP1's API).
 void BeginTopToastStack();

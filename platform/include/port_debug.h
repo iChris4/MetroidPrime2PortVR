@@ -158,15 +158,6 @@ bool MusyxAudioEnabled();
 void SetMusyxAudioEnabled(bool enabled);
 
 // Session
-/**
- * The reset flag. Defined in `platform/port_reset.cpp`, which is in the build; see that file
- * for why it is not in `debug_ui.cpp`.
- */
-extern bool sResetRequested;
-
-void RequestReset();
-bool ConsumeResetRequest();
-
 bool Visible();
 // Writes the settings file now instead of waiting for the next overlay frame,
 // so a disc chosen during startup is remembered even if no frame is drawn yet.

@@ -14,7 +14,7 @@ the log.
 hp, hp_max, visor, beam, freecam) for scripts.
 
 ## Commands
-- `status [--json]` — world, area, player position, health, visor, beam, morph state, frame/pipeline/texture totals and Dawn's GPU memory estimate (`dawn:` line); --json: one line for scripts
+- `status [--json]` — world, area, player position, health, visor, beam, morph state, frame/pipeline/texture totals, the last second's frame work (`work last second:` mean, worst and frames over 16.7 ms, pacing sleeps left out; `MP2_SLOW_FRAME_MS=<ms>` also logs each slower frame with its game update) and Dawn's GPU memory estimate (`dawn:` line); --json: one line for scripts
 - `areas` — the current world's area slots (index, MREA id, name if loaded), then the current area's transform rows
 - `warp <slot|id|name>` — load an area of the current world (what MP2_TELEPORT takes)
 - `nextarea | prevarea` — the next or previous existing area of this world (also `prevarea`)
@@ -31,6 +31,7 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `nodarkair <0|1>` — no Dark Aether air damage (the F1 cheat)
 - `moonjump [0|1]` — moon jump (the F1 cheat): holding jump in the air keeps Samus rising, on foot only; no argument prints it. Not saved; set but inactive under Original experience (`(refused: Original experience)`)
 - `boost [speed <1..10>] [time <1..10>] [air 0|1] [steer 0|1]` — the F1 Boost Ball cheats: push and boosted-time scales, boosting in the air (and through bomb/spring jumps), steering a boosted ball; prints all four. Not saved; refused as `moonjump`. Bare `boost` releases a boost (below)
+- `phazon [0|1]` — Phazon shot anywhere (the F1 cheat, issue #100): a full charge fires the final Dark Samus fight's Phazon shot with any beam, at no ammo cost; no argument prints it. Not saved; refused as `moonjump`
 - `combocost [0..30]`, `combomissiles [0..5]`, `beamammo [50..100]` — combo beam ammo cost, combo missile cost, Dark/Light ammo per capacity pickup (F1 Cheats, each with a Reset); no argument prints it
 - `infammo [all|missile|powerbomb|dark|light] [0|1]` — infinite ammo per counter (fire at zero, HUD shows ∞, real counts and pickups kept; F1 Cheats); no 0|1 flips
 - `mpforce <0|1>` — IsMultiplayer reports true (multiplayer-only arms)
@@ -41,6 +42,8 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `pads` — the controller on each pad port 0-3 (players 1-4: `port N: <index> <name>` or `port N: none`) and the controller count; the F1 page's Player rows set it
 - `padport <index> <port>` / `padport clear <port>` — give controller `<index>` (see `pads`) pad port 0-3, or free a port (what the F1 Player combos call)
 - `padpreset <name> [port]` — apply a pad preset (`gamecube`, `remastered`, `modern`, `southpaw`) to the controller on pad port 0-3 (default 0; what the F1 remap page's Presets button does for its Player selector). Reports `no controller` for an empty port and a no-op for a virtual pad (Aurora ignores their mappings); only port 0 gets the keyboard/mouse overlay
+- `prompticon <hexid...>` — for each prompt image id (the hex in a string's `&image=`, see `strg ... raw`): the GameCube button it stands for, the device, the pad native button the bindings give it and the icon it is drawn with now
+- `keypreset <classic|mouse>` — apply a keyboard preset, as the F1 remap page's Presets buttons do
 - `remapport [port]` — the player (port 0-3) the F1 remap page's Player selector points at, which `padpreset` ignores (it takes its own port); no argument prints it
 - `padmap <port> [<btn> <in>]` — a port's GameCube buttons on its controller's Aurora mapping; with a button (`a`..`z`, `start`, `up`..`right`) and an input (`a`, `lb`, `lt`, `none`, an SDL number) binds it, swapping with the button that had it
 - `players` — each player's position, yaw, aim, twin stick, direct aim, orbit and beam
@@ -50,6 +53,7 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `overlay <page>[/<sub>]|off` — open the F1 window on a page (name prefixes: `overlay video/qual`)
 - `gpuselftest` — run the GPU self-test next frame; PASS/FAIL lines go to the log
 - `state save|load <slot> [hold]` — the F5/F9 save states (load 0 = undo the last load); `load ... hold` stops the simulation on the tick the room state is restored
+- `specialmenu [open|close|up|down|left|right|a|b|x|y|start]` — drives the special menu (`platform/include/port_special_menu.h`, the in-game menu L3 + R3 or F2 opens in single-player gameplay with F1 shut; the pad reads its menu bindings there) as the pad would: `open`/`close`, a direction, or a button. Left and right turn through its pages (Save states, Memory card, Game, Cheats, Items, Warp), up and down pick a slot or row, and each page's actions are on its buttons: on Save states A loads the selected slot, Y saves to it (a filled one asks to overwrite) and X makes it the quick slot (F5/F9); on Memory card A loads the selected card save (after Yes: it quits to the title and starts that save); on the pages of rows A flips a switch or does an action. A question's Yes or No is picked with left or right and answered with A; B goes back. With no argument it says what the menu shows: closed, or the page, the selected slot or row, a question's choice and the last result. The menu holds the simulation while open, so time its commands by wall clock (`@<secs>`), not `@f`
 - `statedump <file>` — write every object (uid, class, hp, pos, AI state, room-script state) and the player as JSON lines; `tools/statecheck.py` compares dumps around a save/load round trip
 - `reloadmods` — read the mods folder again and rebuild the room (the F1 Mods page's Reload mods button)
 - `reloadroom` — rebuild the room from the disc, as leaving and coming back does, with Samus kept where she stands (the F1 Cheats page's Reload button)
@@ -77,14 +81,15 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `noise <type> [x y z]` — InformListeners at the player (6 = safe-zone noise)
 - `gameevent <ev> [src] [tgt] [value] [as <proxyType>]` — deliver a game event to every CScriptPlayerProxy listener (ev: score kill generic scan damage stop spawn; value: float for damage, state for generic)
 - `fastmorph <0|1>` — fast morph: the morph transition takes 0.2 s, not a second
-- `scanspeed [50..400]`, `elevator [original|fast|skip]`, `portal [original|fast|skip]`, `rooms [original|fast]`, `original [0|1]`, `igt [0|1]`, `language [0..6]` — the Game page's
+- `scanspeed [50..400]`, `elevator [original|fast|skip]`, `portal [original|fast|skip]`, `rooms [original|fast]`, `travel [original|fast]`, `original [0|1]`, `igt [0|1]`, `language [0..6]` — the Game page's
   scan speed, elevator ride, Original experience and on-screen time (`scan_speed`, `elevator_ride`,
   `original_experience`, `igt_timer` in SETTINGS.md); no argument prints the value
-- `fov [30..120|retail] | gun [0|1] | cannon [45..120]` — first-person FOV (`fov`), whether the arm cannon follows it (`gun_follows_fov`), the cannon's own FOV (`gun_fov`); no value prints it
+- `fov [30..120|retail] | gun [0|1] | ball [0|1] | cannon [45..120]` — first-person FOV (`fov`), whether the arm cannon follows it (`gun_follows_fov`), whether the morph ball's cameras do (`ball_follows_fov`), the cannon's own FOV (`gun_fov`); no value prints it
 - `beamswitch [100..400]` — beam switch speed in percent (`beam_switch_speed`); no argument prints it
 - `walkspeed [50..200|on|off]` — walk speed in percent, or `on`/`off` for the Custom walk speed switch (off is retail speed; shows the speed in effect with no argument); `walk_speed` and `walk_speed_enabled` in SETTINGS.md
 - `pointer <x> <y> move|click|dclick|tap|dtap|down|up [l|r|touch]|drag <x1> <y1> [l|r|touch]|wheel <n>|pinch <ratio>`, `pointer back|where|hits` — scripted mouse/touch input for the pointer menus, in GUI (EFB) pixels as screenshots show them; `where` prints the position and the widget rects under it, `hits` lists the recorded rects
 - `hintshow` — show the hint the game would show next (F1 > Game > Show current hint)
+- `gameui <message|hint|scan|plain|frame|bar|label> [nofill] [nobutton] [scale=<f>] [anchor] [x y] <text...>` — a test box from the port's game UI kit (`platform/include/port_game_ui.h`): the paused message box, the HUD's hint memo, the scan visor's box, the quit screen's plain box (no button), or the map and pause screens' thick frame, instruction bar or title label, sized to the text; `nofill` draws its line alone, `nobutton` leaves its button out, `scale=0.75` draws it at three quarters of the game's size. It goes at `anchor` (`topleft` `top` `topright` `left` `centre` `right` `bottomleft` `bottom` `bottomright`, default `centre`) moved by `x y` in screen heights (a margin in from an anchored edge, else + right / + down). `gameui text [scale=<f>] [anchor] [x y] <text...>` is the game's text alone. `gameui question [scale=<f>] [anchor] [x y] <title...>` is the game's Yes/No box (the quit screen's) with that title (`\n` breaks a line) over Yes and No, and `gameui select <0|1>` highlights one. `gameui off` hides any of them; `gameui dump <FRME_name>` logs a frame's widgets (name, type, position, visibility, scale), each model's vertex extent and the construction kit's zones, and each text pane's size, for finding what a new style is made of. Sizes are logged as `[gameui]` lines once loaded. `{` and `}` stand for `&` and `;`, as for `memo`
 - `memo <0|1> <text...>` — show a HUD memo; `1` makes it a hint memo (framed box with the button ring); `memo pause <strg>` (asset id or `STRG_...` name) shows that string table as the boxed memo a paused HUDMemo opens (map stations, "Active transport located.")
 - `springball <0|1>` — spring ball: C-stick up in Morph Ball bomb-jumps (needs Bombs)
 - `lockon <0|1>` — toggle lock-on: an L press latches until the next press
@@ -105,6 +110,7 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `obj <id>` — one object (an id as `objs` prints it: u046e, or e<editor id>): health, fsm, messages, door beams
 - `send <id> <msg> [from <id>] deliver a script message to an object (name or number), from a sender`
 - `covdump` — coverage build: write the gcov counters now (and zero them)
+- `rezbit [start|stop]` — player 0's Rezbit virus state (0 none, 1 infected, 2 recovering, 3 recovered); `start` infects the suit as a Rezbit's virus attack does (L+R+B recovers), `stop` clears it
 - `hurt <id> <amount> [weapon] damage an object as a shot would (weapon 0 = power beam)`
 - `frame` — the game updates run so far (what MP2_FRAMES counts)
 - `fsm <id> <state>` — force a patterned actor's AI state by name (as `obj` prints it; FSM2 sub-machines too; an unknown name lists the valid ones)
@@ -141,7 +147,7 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `items` — power-up amounts and capacities
 - `world <world> [area]` — load another world (the MP1 console's `warp <world>`)
 - `worlds` — the memory card's world ids, areas and name tables
-- `strg <id|name> [index]` — a string table as the game loads it
+- `strg <id|name> [index [raw]]` — a string table as the game loads it; `raw` prints the string with its `&image=`/`&font=` tags
 - `give <item> [n] | take` — add an item (capacity and amount), or remove capacity (also `take`)
 - `press <a+b+...> [updates]` — hold pad buttons (0 updates: until the next press/stick)
 - `grapple <id> [d]` — wake a grapple point, stand d (8) units from it facing it, hold L
@@ -150,7 +156,7 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `stick <x> <y> [updates]` — hold the main stick, -127..127
 - `cstick <x> <y> [updates]` — hold the C-stick (Spring Ball in Morph Ball), -127..127
 - `credits [1|2]` — end the game into the credits (1: the <75% route, 2: the <100% route)
-- `screenshot` — the F12 capture; the log names the file it wrote
+- `screenshot` — a BMP of the frame (F12 and F1 > Game save a PNG under `screenshots/`, with a toast); the log names the file it wrote
 - `at <update> <command>` — run one command on that game update (`frame`), not on arrival, so runs at different speeds act on the same tick
 - `gallery [mask]` — the slideshow gallery unlock mask (0..63): print, or set via PercentScans/mode flags
 - `help` — this list
@@ -165,7 +171,7 @@ hp, hp_max, visor, beam, freecam) for scripts.
 - `window [<width> <height>]` — the window size in pixels; with two numbers, leave fullscreen and resize
 - `pipetrim [frames]` — release built pipelines unused for that many frames (16 minimum) at the next frame start, as Android's onTrimMemory does; Aurora logs `pipeline cache: evicted N`. They rebuild on their next draw
 - `save export [<path>]` — write the card's save file out (default: save-backups/)
-- `save import <path|latest>` — put a .gci back on the card; the file it replaces is kept
+- `save import <path|latest>` — put a .gci or a Trilogy save.bin on the card; the file it replaces is kept
 - `gci restore [n]` — list the other Echoes release's saves beside this card (G2ME and G2MP keep separate cards), or copy entry `n` onto this card, converted for this disc; the file it replaces is kept in save-backups. Also F1 > System > Memory card > "Restore from ..." and a one-time offer at boot when the card has no save
 - `save backup | backups` — copy the card now, or list the copies in save-backups
 - `a; b; c` — run several commands in the same game tick (one reply each)

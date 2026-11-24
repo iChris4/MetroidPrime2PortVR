@@ -36,6 +36,15 @@ extern const int gkPVSEnabled;
 #include "rstl/string.hpp"
 #include "rstl/vector.hpp"
 
+#ifdef TARGET_PC
+// The rc_ptr/single_ptr members below delete these types in every unit that instantiates their
+// release path; with only the forward declarations that is a delete of an incomplete type, which
+// skips the destructor in whichever unit's copy the linker keeps (-Werror=delete-incomplete).
+#include "MetroidPrime/CScriptMailbox.hpp"
+#include "MetroidPrime/CWorldLayerState.hpp"
+#include "MetroidPrime/Player/CWorldTransManager.hpp"
+#endif
+
 class CWorld;
 class CPortalTransition;
 class CArchitectureQueue;

@@ -24,7 +24,12 @@ public:
 
   CRagDoll(float normalGravity, float floatingGravity, float overTime, float damping,
            float restitution, uint flags);
+#ifdef TARGET_PC
+  // Owners hold derived rag dolls in rstl::single_ptr; a host delete through the base must be safe.
+  virtual ~CRagDoll() {}
+#else
   ~CRagDoll() {}
+#endif
 
   CAABox CalculateRenderBounds() const;
   void PreRenderAllViewports(CActor& actor, float extent);

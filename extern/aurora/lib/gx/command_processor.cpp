@@ -670,6 +670,63 @@ gfx::BindGroupRef cached_multiview_bind_group(const ShaderInfo& info, uint64_t s
   return entry->multiview;
 }
 
+// Port: a vertex array is copied into a frame's storage once, not once per slot and bind. The game
+// sets a model's arrays again for each of its draws that follows another model's, and CCubeModel
+// binds one UV array to all eight TEX slots, so the per-slot copy (AttrArray::cachedRange) put the
+// same bytes into a frame many times: ~4.1 of the ~5 MB a Temple Grounds frame copied. Keyed by
+// pointer and size, like the per-slot copy; it lasts until the frame's recording ends
+// (clear_frame_arrays), and a write the game makes to an array mid-frame is picked up after it
+// clears the array (CGX::ClearArray, as the swarms and CFoldySurface do).
+// MP2_GX_ARRAY_REUSE=0 copies per slot again (A/B).
+struct FrameArrayKey {
+  const void* data;
+  u32 size;
+  bool operator==(const FrameArrayKey&) const = default;
+  template <typename H>
+  friend H AbslHashValue(H h, const FrameArrayKey& key) {
+    return H::combine(std::move(h), key.data, key.size);
+  }
+};
+absl::flat_hash_map<FrameArrayKey, gfx::Range> sFrameArrays;
+
+bool frame_array_reuse() noexcept {
+  static const bool enabled = [] {
+    const char* value = std::getenv("MP2_GX_ARRAY_REUSE");
+    return value == nullptr || std::strcmp(value, "0") != 0;
+  }();
+  return enabled;
+}
+
+// The frame's copy of the array, made now if this frame has none; an overflowed range is not kept.
+gfx::Range frame_array_range(const void* data, u32 size, int attr) noexcept {
+  const bool reuse = frame_array_reuse();
+  if (reuse) {
+    if (const auto it = sFrameArrays.find(FrameArrayKey{data, size}); it != sFrameArrays.end()) {
+      perf::count(AURORA_PERF_ARRAY_REUSE);
+      return it->second;
+    }
+  }
+  // Port diagnostic (see gfx/recording.cpp's push_storage): the frame's storage is bounded, and
+  // this is the upload that usually fills it.
+  static const bool sLog = std::getenv("MP2_GX_STORAGE_LOG") != nullptr;
+  if (sLog) {
+    std::fprintf(stderr, "[gx-storage] vertex array %d: %u bytes at %p\n", attr, size, data);
+  }
+  const gfx::Range range = gfx::push_storage(static_cast<const uint8_t*>(data), size);
+  perf::count(AURORA_PERF_ARRAY_UPLOAD);
+  perf::count(AURORA_PERF_ARRAY_UPLOAD_BYTES, size);
+  if (reuse && range.size != 0 && !gfx::overflowed(range)) {
+    sFrameArrays.emplace(FrameArrayKey{data, size}, range);
+  }
+  return range;
+}
+
+void forget_frame_array(const void* data, u32 size) noexcept {
+  if (data != nullptr) {
+    sFrameArrays.erase(FrameArrayKey{data, size});
+  }
+}
+
 FogRangeLutKey fog_range_lut_key() noexcept {
   const auto& state = g_gxState.fog;
   const f32 logicalWidth = std::max(g_gxState.logicalViewport.width, 1.f);
@@ -820,6 +877,8 @@ ProcessResult process(const u8* data, u32 size) noexcept {
       for (auto& array : g_gxState.arrays) {
         array.cachedRange = {};
       }
+      // sFrameArrays stays: GPUMemory issues this each time its ring wraps (about once a frame),
+      // and the ring holds skinning matrices and line strips, never a POS..TEX7 array.
       g_gxState.dirty |= DirtyImmediates;
       break;
     }
@@ -1253,14 +1312,7 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u32 vtxCount, gfx::Rang
     }
     auto& array = state.arrays[i];
     if (array.cachedRange.size == 0 && !resident::array_range(array.data, array.size, array.cachedRange)) {
-      // Port diagnostic (see gfx/recording.cpp's push_storage): the frame's storage is bounded, and
-      // this is the upload that usually fills it.
-      static const bool sLog = std::getenv("MP2_GX_STORAGE_LOG") != nullptr;
-      if (sLog) {
-        std::fprintf(stderr, "[gx-storage] vertex array %d: %zu bytes at %p\n", i, array.size,
-                     array.data);
-      }
-      array.cachedRange = gfx::push_storage(static_cast<const uint8_t*>(array.data), array.size);
+      array.cachedRange = frame_array_range(array.data, array.size, i);
       if (drop_overflowed_draw(array.cachedRange, "storage")) {
         array.cachedRange = {};
         return;
@@ -2502,6 +2554,10 @@ void handle_aurora(ByteReader& reader) noexcept {
         // Endianness is baked into the shader
         g_gxState.dirty |= DirtyPipeline;
       }
+      if (newData == nullptr) {
+        // CGX::ClearArray: the next bind of the array copies it again, even within the frame.
+        forget_frame_array(array.data, array.size);
+      }
       array.data = newData;
       array.size = arraySize;
       array.le = le;
@@ -3371,6 +3427,8 @@ void handle_aurora(ByteReader& reader) noexcept {
     Log.error("Unknown Aurora subcommand: {:04X}", subCmd);
   }
 }
+
+void clear_frame_arrays() noexcept { sFrameArrays.clear(); }
 
 void clear_draw_cache() noexcept {
   staging_report();

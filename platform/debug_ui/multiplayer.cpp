@@ -42,8 +42,8 @@ float Setting(int player, PlayerSetting key) {
   return player > 0 && o.set ? o.value : GlobalSetting(key);
 }
 
-// Written in place rather than through SetPlayerSetting, which saves the file on every call (a
-// slider drag would save each frame); Changed() saves once the control is let go.
+// Written in place without saving: saving on every call would save each frame of a slider
+// drag; Changed() saves once the control is let go.
 void SetSetting(int player, PlayerSetting key, float value) {
   if (key == PortOverlay::kPlayer_GyroMode) {
     value = std::clamp(value, float(PortOverlay::kGyroModeMin), float(PortOverlay::kGyroModeMax));

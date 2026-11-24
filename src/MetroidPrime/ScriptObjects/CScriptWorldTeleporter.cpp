@@ -22,6 +22,10 @@
 #include "Kyoto/CSimplePool.hpp"
 #include "Kyoto/Math/CTransform4f.hpp"
 
+#ifdef TARGET_PC
+#include "port_overlay.h"
+#endif
+
 CScriptWorldTeleporter::CScriptWorldTeleporter(
     const TUniqueId uid, const rstl::string& name, const CEntityInfo& info, const CAssetId worldId,
     const CAssetId areaId, const CAssetId playerAncs, const int defaultAnim, const int charIdx,
@@ -109,6 +113,10 @@ void CScriptWorldTeleporter::AcceptScriptMsg(CStateManager& mgr, const CScriptMs
         gpGameState->CurrentWorldState().SetDesiredAreaAssetId(mAreaId);
         gpMain->SetRestartMode(CMain::kRM_None);
         mgr.QuitGame();
+#ifdef TARGET_PC
+        // Port: the next world's arrival cutscene is a travel cutscene too (CScriptSequenceTimer).
+        PortOverlay::NoteTravelDeparture();
+#endif
       } else {
         mInTransition = false;
         transMgr->DisableTransition();

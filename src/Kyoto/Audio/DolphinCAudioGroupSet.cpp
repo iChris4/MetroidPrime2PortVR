@@ -16,6 +16,9 @@
 #endif
 
 #include <string.h>
+#ifdef TARGET_PC
+#include <stdio.h>
+#endif
 
 extern "C" {
 u32 sndStackGetSize(void);
@@ -341,6 +344,11 @@ CAudioGrpSetLoc::CAudioGrpSetLoc(const rstl::auto_ptr< uchar >& data, int length
     const int alignedSize = (sampleSize + 31) & ~31;
     mAramAlloc = CARAMManager::Alloc(alignedSize, 1);
     if (mAramAlloc == CARAMManager::GetInvalidAlloc()) {
+#ifdef TARGET_PC
+      // Silent in retail: every sound of the group is then missing.
+      fprintf(stderr, "[audio] group %s (%d bytes of samples) not loaded: sound memory is full\n",
+              name.data(), alignedSize);
+#endif
       return;
     }
 
@@ -367,6 +375,9 @@ CAudioGrpSetLoc::CAudioGrpSetLoc(const rstl::auto_ptr< uchar >& data, int length
     }
 
     if (!sndPushGroup(mProject.get(), groupId, samples, mSampleDir.get(), mPool.get())) {
+#ifdef TARGET_PC
+      fprintf(stderr, "[audio] group %s not loaded: sndPushGroup failed\n", name.data());
+#endif
       CARAMManager::Free(mAramAlloc, 1);
       mAramAlloc = CARAMManager::GetInvalidAlloc();
       sndStackRemove(mStackId);

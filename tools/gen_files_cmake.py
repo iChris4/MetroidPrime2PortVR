@@ -27,24 +27,17 @@ PORT_ONLY = [
     "src/MetroidPrime/HUD/PortRadialHud.cpp",
     "src/Kyoto/Alloc/PortMwccNew.cpp",
     "src/Kyoto/CARAMManagerPort.cpp",
-    "src/Kyoto/CFactoryFunctionsPort.cpp",
     "src/Kyoto/Streams/CLZOSupportPort.cpp",
     "src/Kyoto/Graphics/PortDrawDebug.cpp",
     "src/Kyoto/PortCMemoryCardSys.cpp",
-    "src/MetroidPrime/Player/PortSPersistentOptionsValue.cpp",
-    "src/MetroidPrime/PortBoot.cpp",
-    "src/MetroidPrime/PortCGMSinglePlayer.cpp",
-    "src/MetroidPrime/PortCHintManager.cpp",
     "src/MetroidPrime/PortCMorphBallVtables.cpp",
-    "src/MetroidPrime/PortCPersistentOptionsMap.cpp",
     "src/MetroidPrime/PortCPlayerDynamicsVtables.cpp",
-    "src/MetroidPrime/PortCTweakPlayerControls.cpp",
     "src/MetroidPrime/PortCVisualKnowledge.cpp",
     "src/MetroidPrime/PortDataGlobals.cpp",
     "src/MetroidPrime/PortDefaultFont.cpp",
     "src/MetroidPrime/PortEfbCopy.cpp",
+    "src/MetroidPrime/Player/PortPhazonShotSfx.cpp",
     "src/MetroidPrime/PortFrameTimeHistory.c",
-    "src/MetroidPrime/PortGlobals.cpp",
     "src/MetroidPrime/PortLinkStubs.cpp",
     "src/MetroidPrime/PortMakeMsg.cpp",
     "src/MetroidPrime/PortNonElfStubs.cpp",
@@ -52,11 +45,8 @@ PORT_ONLY = [
     "src/MetroidPrime/PortScanTarget.cpp",
     "src/MetroidPrime/PortSkipFrontEnd.cpp",
     "src/MetroidPrime/PortStateMachineBase.cpp",
-    "src/MetroidPrime/PortStreamNewGameState.cpp",
-    "src/MetroidPrime/PortTenthSyncStubs.cpp",
     "src/MetroidPrime/PortTweakGlobals.cpp",
 ]
-# src/MetroidPrime/PortReachStubs.cpp is diagnostic-only (MP_BOOT_STUBS), never listed.
 
 # The first argument may be a call with its own commas: MatchingFor("G2ME01", "G2MP01").
 OBJ_RE = re.compile(r'Object\(\s*(?:[^,()]|\([^)]*\))+,\s*"([^"]+)"([^)]*)\)')

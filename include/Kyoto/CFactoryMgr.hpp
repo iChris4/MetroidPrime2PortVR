@@ -12,7 +12,7 @@
 class CFactoryFnReturn {
 public:
 #ifdef TARGET_PC
-  // Port: the stub factories in src/Kyoto/CFactoryFunctionsPort.cpp return no object.
+  // Port: lets a factory stand-in return no object.
   CFactoryFnReturn() {}
 #endif
   template < typename T >

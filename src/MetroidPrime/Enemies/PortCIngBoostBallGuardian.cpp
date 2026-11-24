@@ -25,6 +25,12 @@
 #include <cstdlib>
 #include <stdio.h>
 
+// MP2_BG_FSM logs the state machine; read once, these run every frame.
+static bool BgFsmLog() {
+  static const bool enabled = getenv("MP2_BG_FSM") != nullptr;
+  return enabled;
+}
+
 namespace {
 
 // Reports a stand-in the first time it runs, so a log lists what is still a shell.
@@ -341,7 +347,7 @@ CIngBoostBallGuardian::CIngBoostBallGuardian(TUniqueId uid, const rstl::string& 
   mLineOfSight.SetRayFilter(
       CMaterialFilter::MakeIncludeExclude(CMaterialList(kMT_Solid),
                                           CMaterialList(kMT_Player, kMT_CollisionActor)));
-  if (std::getenv("MP2_BG_FSM") != nullptr) {
+  if (BgFsmLog()) {
     // The 'FSM2' asset is loaded with the actor, so the machine is already here. The state
     // machine itself is only set up when the actor is active (CPatterned::Think reaches
     // InitializeStateMachine), which the boss of this area is not yet, so the dump is taken
@@ -405,7 +411,7 @@ void CIngBoostBallGuardian::SetupStateMachine(CStateManager& mgr) {
   // The transitions are only in the actor's 'FSM2' asset, so the probe (MP2_BG_FSM) dumps the
   // machine the asset holds: every state, trigger, code and sub-machine with the target of each
   // of their transitions. Once per process.
-  if (std::getenv("MP2_BG_FSM") != nullptr) {
+  if (BgFsmLog()) {
     DumpBGFsmOnce(this);
   }
 }
@@ -504,7 +510,7 @@ static CEntity* PortLoadIngBoostBallGuardian(CStateManager& mgr, CInputStream& i
   const SLdrIngBoostBallGuardianData& ing = sldrThis.guardianProperties;
   const SLdrBoostBallGuardianData& boostSldr = sldrThis.boostBallGuardian;
 
-  if (std::getenv("MP2_BG_FSM") != nullptr) {
+  if (BgFsmLog()) {
     fprintf(stderr, "[bgfsm] loader: stateMachine=%08x stateMachine2=%08x\n",
             sldrThis.patterned.stateMachine, sldrThis.patterned.stateMachine2);
   }

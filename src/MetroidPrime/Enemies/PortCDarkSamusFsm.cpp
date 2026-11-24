@@ -70,6 +70,12 @@
 
 #include "types.h"
 
+// MP2_DS_FSM logs the state machine; read once, these run every frame.
+static bool DsFsmLog() {
+  static const bool enabled = getenv("MP2_DS_FSM") != nullptr;
+  return enabled;
+}
+
 namespace {
 
 typedef CPatterned::StateMachine::TriggerFunc TriggerFunc;
@@ -387,7 +393,7 @@ void DsDumpFsmOnce(CDarkSamus* darksamus) {
 // The state change itself: the machine sends the state its body the Activate message when it
 // enters it.
 void DsStateEntered(const char* name, EStateMsg msg) {
-  if (msg == kStateMsg_Activate && getenv("MP2_DS_FSM") != nullptr) {
+  if (msg == kStateMsg_Activate && DsFsmLog()) {
     fprintf(stderr, "[dsfsm] state change: %s\n", name);
   }
 }
@@ -404,7 +410,7 @@ void CDarkSamus::InstallStateMachineFunctions() {
   // The transitions are only in the actor's 'FSM2' asset, so the probe (MP2_DS_FSM) dumps the
   // machine the asset holds: every state with the trigger of each of its transitions, the
   // parameter that trigger carries and the state it leads to. Once per process.
-  if (getenv("MP2_DS_FSM") != nullptr) {
+  if (DsFsmLog()) {
     DsDumpFsmOnce(this);
   }
 }

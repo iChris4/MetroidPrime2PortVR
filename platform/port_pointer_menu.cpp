@@ -65,16 +65,6 @@ int RowAt(CGuiTableGroup* table, float gx, float gy, int minRow, int maxRow) {
   return best;
 }
 
-int PeekClickRow(CGuiTableGroup* table, int minRow, int maxRow) {
-  PortPointer::Click click;
-  float gx, gy;
-  if (table == nullptr || !PortPointer::Gestures().PeekClick(click) ||
-      !ClickToGui(click, gx, gy)) {
-    return -1;
-  }
-  return RowAt(table, gx, gy, minRow, maxRow);
-}
-
 Action Table(CGuiTableGroup* table, bool callAdvance, bool hover, int minRow, int maxRow) {
   if (table == nullptr || !table->GetIsActive()) {
     return Action::None;
@@ -235,16 +225,6 @@ int TakeScrollSteps(float stepGui) {
   return steps;
 }
 
-float RowPitch(CGuiTableGroup* table, int a, int b, float fallback) {
-  PortPointerMath::Rect ra, rb;
-  if (table == nullptr || !PortGuiHit::Bounds(table->GetWorkerWidget(a), true, ra) ||
-      !PortGuiHit::Bounds(table->GetWorkerWidget(b), true, rb)) {
-    return fallback;
-  }
-  const float pitch = std::fabs(rb.y0 - ra.y0);
-  return pitch > 4.f ? pitch : fallback;
-}
-
 bool TakeViewMotion(ViewMotion& out) {
   out = ViewMotion();
   if (!PortPointer::Enabled()) {
@@ -276,8 +256,6 @@ bool TakeViewMotion(ViewMotion& out) {
   return out.rotateX != 0.f || out.rotateY != 0.f || out.panX != 0.f || out.panY != 0.f ||
          out.zoom != 0.f || out.twist != 0.f;
 }
-
-void NoteAdvanced() { sLastAdvanced = true; }
 
 void PressA(CFinalInput& input) { input.PortSetA(true, true); }
 void PressB(CFinalInput& input) { input.PortSetB(true, true); }

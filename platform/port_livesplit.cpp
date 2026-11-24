@@ -1,4 +1,5 @@
 #include "port_livesplit.h"
+#include "port_worker.h"
 
 #include "port_env.h"
 
@@ -283,22 +284,7 @@ struct Runtime {
   // Called at exit. A worker stuck resolving a name is left behind rather than
   // holding up the exit (the Runtime is never freed).
   void Shutdown() {
-    {
-      std::lock_guard<std::mutex> lock(mutex);
-      stop = true;
-    }
-    wake.notify_all();
-    if (!worker.joinable())
-      return;
-    bool done;
-    {
-      std::unique_lock<std::mutex> lock(mutex);
-      done = wake.wait_for(lock, std::chrono::seconds(2), [this] { return workerDone; });
-    }
-    if (done)
-      worker.join();
-    else
-      worker.detach();
+    PortWorker::Stop(*this);
   }
 
   void Emit(const std::vector<std::string>& lines) {

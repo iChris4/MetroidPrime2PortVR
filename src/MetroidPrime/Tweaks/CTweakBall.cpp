@@ -4,6 +4,23 @@
 #include "MetroidPrime/CDamageInfo.hpp"
 #include "MetroidPrime/ScriptLoader/SLdrTweakBall.hpp"
 
+#ifdef TARGET_PC
+#include "MetroidPrime/Player/CGameMode.hpp"
+#include "MetroidPrime/Player/CGameState.hpp"
+#include "port_overlay.h"
+#include "port_prime1_tweaks.h"
+
+// Prime 1 boost ball with a Prime 1 disc set (`prime1_disc`): the Boost Ball's charge and speed
+// tweaks, and the ball camera's boost spring, are Prime 1's, read from that disc
+// (port_prime1_tweaks.h), so a boost is as long and as strong as Prime 1's and the camera follows
+// it as Prime 1's does. Single player only, as the rest of Prime 1 boost ball.
+static bool PortPrime1Boost(PortPrime1Tweaks::BoostBall& out) {
+  return PortPrime1Tweaks::EchoesValuesDepth() == 0 && PortOverlay::Prime1BoostBall() &&
+         gpGameState != nullptr &&
+         gpGameState->GetGameMode().GetNumPlayers() <= 1 && PortPrime1Tweaks::Values(out);
+}
+#endif
+
 float CTweakBall::GetMaxBallTranslationAcceleration(int surface) const {
   switch (surface) {
   default:
@@ -264,6 +281,12 @@ float CTweakBall::GetBallCameraBoostSpringMax() const {
 }
 
 float CTweakBall::GetBallCameraBoostSpringTardis() const {
+#ifdef TARGET_PC
+  PortPrime1Tweaks::BoostBall prime1;
+  if (PortPrime1Boost(prime1)) {
+    return prime1.cameraBoostSpringTardis;
+  }
+#endif
   return mData->camera.ballCameraBoostSpringTardis;
 }
 
@@ -301,13 +324,33 @@ float CTweakBall::GetLeanTrackingGain() const { return mData->movement.leanTrack
 
 float CTweakBall::GetBallTouchRadius() const { return mData->misc.ballTouchRadius; }
 
-float CTweakBall::GetBoostBallDrainTime() const { return mData->boostBall.boostBallDrainTime; }
+float CTweakBall::GetBoostBallDrainTime() const {
+#ifdef TARGET_PC
+  PortPrime1Tweaks::BoostBall prime1;
+  if (PortPrime1Boost(prime1)) {
+    return prime1.drainTime;
+  }
+#endif
+  return mData->boostBall.boostBallDrainTime;
+}
 
 float CTweakBall::GetBoostBallMaxChargeTime() const {
+#ifdef TARGET_PC
+  PortPrime1Tweaks::BoostBall prime1;
+  if (PortPrime1Boost(prime1)) {
+    return prime1.maxChargeTime;
+  }
+#endif
   return mData->boostBall.boostBallMaxChargeTime;
 }
 
 float CTweakBall::GetBoostBallMinChargeTime() const {
+#ifdef TARGET_PC
+  PortPrime1Tweaks::BoostBall prime1;
+  if (PortPrime1Boost(prime1)) {
+    return prime1.minChargeTime;
+  }
+#endif
   return mData->boostBall.boostBallMinChargeTime;
 }
 
@@ -400,6 +443,12 @@ CDamageInfo CTweakBall::GetDeathBallDamage() const {
 }
 
 float CTweakBall::GetBoostBallChargeTimeTable(int index) const {
+#ifdef TARGET_PC
+  PortPrime1Tweaks::BoostBall prime1;
+  if (PortPrime1Boost(prime1)) {
+    return prime1.chargeTime[index < 0 || index > 2 ? 0 : index];
+  }
+#endif
   switch (index) {
   default:
   case 0:
@@ -412,6 +461,12 @@ float CTweakBall::GetBoostBallChargeTimeTable(int index) const {
 }
 
 float CTweakBall::GetBoostBallIncrementalSpeedTable(int index) const {
+#ifdef TARGET_PC
+  PortPrime1Tweaks::BoostBall prime1;
+  if (PortPrime1Boost(prime1)) {
+    return prime1.incrementalSpeed[index < 0 || index > 2 ? 0 : index];
+  }
+#endif
   switch (index) {
   default:
   case 0:

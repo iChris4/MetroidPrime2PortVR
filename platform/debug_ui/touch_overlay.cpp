@@ -22,6 +22,7 @@
 // Wheel icons: IconTracer.java is ported below and traces the same outlines; as ImDrawList has no
 // even-odd path fill, each outline is filled once into a texture rather than per draw.
 #include "debug_ui_internal.h"
+#include "port_strings.h"
 
 #if defined(PORT_TOUCH_OVERLAY)
 
@@ -604,28 +605,8 @@ const std::array< std::string, kAllControls >& ControlIds() {
 // button `k<slot>:dx,dy,scale,opacity,hidden,<action key>[,page]`. Unknown ids and actions and
 // malformed entries are skipped, so a layout from another version still loads what this one knows.
 
-std::string Trim(const std::string& s) {
-  const size_t first = s.find_first_not_of(" \t\r\n");
-  if (first == std::string::npos) {
-    return std::string();
-  }
-  const size_t last = s.find_last_not_of(" \t\r\n");
-  return s.substr(first, last - first + 1);
-}
-
-std::vector< std::string > Split(const std::string& s, char sep) {
-  std::vector< std::string > out;
-  size_t start = 0;
-  for (;;) {
-    const size_t at = s.find(sep, start);
-    if (at == std::string::npos) {
-      out.push_back(s.substr(start));
-      return out;
-    }
-    out.push_back(s.substr(start, at - start));
-    start = at + 1;
-  }
-}
+using port::Split;
+using port::Trim;
 
 // Float.parseFloat for one field: the whole trimmed field must be a number.
 bool ParseFloat(const std::string& field, float& out) {

@@ -78,8 +78,8 @@ public:
   float GetAverageDrawTime() const { return mAverageDrawTime; }
 
 #ifdef TARGET_PC
-  // Port. `mGameGlobalObjects` is private and `src/MetroidPrime/PortStreamNewGameState.cpp` is an
-  // `extern "C"` free function, so it needs an accessor. The offset may not be spelled instead:
+  // Port. `mGameGlobalObjects` is private and the savestate code (`platform/port_savestate.cpp`)
+  // needs it, so it gets an accessor. The offset may not be spelled instead:
   // retail reads it as `lwz r3,84(r28)`, a 32-bit GameCube object offset.
   CGameGlobalObjects* GetGameGlobalObjects() const { return mGameGlobalObjects; }
 #endif

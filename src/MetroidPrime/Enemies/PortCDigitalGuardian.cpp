@@ -434,9 +434,9 @@ CDigitalGuardian::CDigitalGuardian(TUniqueId uid, const rstl::string& name, cons
   // flag), enabled, over the model's bounds at fn_14_2578's transform of the actor's (0x24), with
   // the beacon's echo parameters (0x954, the data block's +0x194).
   if (x11EC_.valid()) {
-    CTransform4f xf = CTransform4f::Identity();
-    x2578_(xf, GetTransform());
-    AllocateEchoEmitter(true, x11EC_.data().GetBounds(xf),
+    CTransform4f boundsXf = CTransform4f::Identity();
+    x2578_(boundsXf, GetTransform());
+    AllocateEchoEmitter(true, x11EC_.data().GetBounds(boundsXf),
                         LdrToEchoParameters(mData.mTransmissionBeaconEchoParameters));
   }
 }

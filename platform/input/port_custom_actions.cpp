@@ -99,6 +99,8 @@ constexpr BoolSetting kBoolSettings[] = {
      &PortOverlay::SetWalkSpeedEnabled},
     {"unlock_beam_doors", "Unlock beam doors", "Debug", &PortOverlay::UnlockBeamDoors,
      &PortOverlay::SetUnlockBeamDoors},
+    {"beam_doors_stay_unlocked", "Unlock beam doors once opened", "Game",
+     &PortOverlay::BeamDoorsStayUnlocked, &PortOverlay::SetBeamDoorsStayUnlocked},
     {"stack_beams", "Stack beams", "Game", &PortOverlay::StackBeams,
      &PortOverlay::SetStackBeams},
     {"stack_beams_skip_dark", "Leave out Dark Beam", "Game", &PortOverlay::StackBeamsSkipDark,

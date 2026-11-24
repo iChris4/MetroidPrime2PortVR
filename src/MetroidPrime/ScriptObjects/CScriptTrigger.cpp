@@ -267,7 +267,8 @@ void CScriptTrigger::NotifyInhabitantExited(CActor& actor, CStateManager& mgr) {
 
 void CScriptTrigger::NotifyInhabitantAdded(CActor& actor, CStateManager& mgr) {
 #ifdef TARGET_PC
-  if (std::getenv("MP2_DEBUG_BALL") != nullptr) {
+  static const bool sDebugBall = std::getenv("MP2_DEBUG_BALL") != nullptr;
+  if (sDebugBall) {
     std::fprintf(stderr, "[ball] trigger %04x eid %04x: inhabitant %04x added\n",
                  GetUniqueId().Value(), GetEditorId().Value(), actor.GetUniqueId().Value());
   }

@@ -21,7 +21,8 @@ with a window and no `MP2_FRAMES`/`MP2_HEADLESS`/`MP2_NO_DISC_DIALOG=1` a messag
 another image (blocks a scripted run until killed), otherwise the run exits 1.
 
 Robustness logs: `port: settings:`/`port: env:`/`port: storage:` at start; `watchdog:` after 5 s without
-a frame (`MP2_WATCHDOG_TEST_STALL=<frame>`); `port: crashed:` with the stack (`MP2_CRASH_TEST=segv`).
+a frame, one `watchdog: a frame took` line for a frame of 1 to 5 s (`MP2_WATCHDOG_TEST_STALL=<frame>`, `MP2_WATCHDOG_TEST_STALL_MS`); `MP stall:` for a loop over 250 ms (event pump with its joystick
+update, tick, draw; at most one line per 2 s; `MP2_NO_STALL_LOG=1` off); `port: crashed:` with the stack (`MP2_CRASH_TEST=segv`).
 
 Sample a running boot: `gdb ... -x tools/gdb_interrupt.py -ex run -ex 'thread apply all bt 14'`
 (`MP_SAMPLE_SECS=240`). Screenshot: `ffmpeg -f x11grab -video_size 1280x720 -i :86 -frames:v 1 x.png`.
@@ -223,6 +224,13 @@ to the Xbox layout (Z=rb, L/R=lt/rt, C stick=right stick, D-pad=dpad). `v1.DETAC
 `v1.ATTACH@3600` unplug/replug that pad (a replugged pad is neutral). `v1.GYRO=0.8:0@600` sets the pad's gyro (yaw:pitch
 rad/s, positive yaw turns right; no commas, they separate tokens) and holds it until the next GYRO token;
 the console equivalent is `vpad 1 gyro 0.8 0`. Logged as `[vpad-input]`. Every virtual pad has a gyro (no accel).
+
+Physical-controller and keyboard paths (presets, Aurora mappings, prompts), which virtual pads skip:
+`tools/drivers/uinput_pad.py <log> "800:lt+rt+a;1000:lt+rs+b"` creates an Xbox 360-style uinput pad (needs
+`/dev/uinput` access, the `input` group; SDL sees a real controller, so `padpreset` applies) and holds those
+inputs when the run log shows the console's `[at 800]` line (put a console command at `@f800`).
+`tools/drivers/xtest_keys.py :<display> <log> "700:q+e+z"` does the same with XTEST keys on the run's Xvfb.
+Start them before the run; `HOLD=<s>` sets the hold (0.6). The uinput pad is system-wide while it lives.
 
 ## Area regression sweep (any world, shards, START-free)
 

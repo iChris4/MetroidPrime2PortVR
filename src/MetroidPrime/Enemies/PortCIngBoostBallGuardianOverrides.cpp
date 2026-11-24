@@ -70,6 +70,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// MP2_BG_FSM logs the state machine; read once, these run every frame.
+static bool BgFsmLog() {
+  static const bool enabled = getenv("MP2_BG_FSM") != nullptr;
+  return enabled;
+}
+
 namespace {
 
 // The Ing's own file-scope solid filter helper (the Ing host body's helper) is shared with the
@@ -114,7 +120,7 @@ void CIngBoostBallGuardian::Think(float dt, CStateManager& mgr) {
   // starts it (the console's `objs` lists it as inactive), so the probe wakes it up the way the
   // Sand Boss probe does. Without this the state machine is never set up and the probe's dump
   // never runs.
-  if (getenv("MP2_BG_FSM") != nullptr && !GetActive()) {
+  if (BgFsmLog() && !GetActive()) {
     mgr.SendScriptMsg(this, GetUniqueId(), kSM_Activate);
   }
   if (!GetActive()) {

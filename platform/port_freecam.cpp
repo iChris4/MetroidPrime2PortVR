@@ -127,7 +127,6 @@ void TakeRequests(CStateManager& mgr) {
 }
 
 float FovOverride() { return sActive ? sFov : 0.f; }
-float PresentedFovOverride() { return FovOverride(); }
 void SetTouchMove(float x, float y) {
   sTouchMoveX = std::isfinite(x) ? std::clamp(x, -1.f, 1.f) : 0.f;
   sTouchMoveY = std::isfinite(y) ? std::clamp(y, -1.f, 1.f) : 0.f;

@@ -450,14 +450,6 @@ SPadPortInfo PadPortInfo(unsigned port) {
   return info;
 }
 
-// MP2: the default keyboard layout is PortInputDevices' built-in keyboard profile
-// (MakeKeyboardProfile, MP1's layout), so the defaults are that with no
-// keyboard overrides; port 0 is the only keyboard port.
-void ApplyDefaultKeyBindings(unsigned port) {
-  (void)port;
-  ResetKeyBindings();
-}
-
 bool ApplyKeyPresetNamed(std::string_view name, unsigned port) {
   // Port 0 is the only keyboard port.
   if (port != PAD_CHAN0) return false;

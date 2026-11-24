@@ -21,8 +21,8 @@ namespace {
 bool sMusyxEnabled = true;
 } // namespace
 
-// The two audio paths' switches (declared in port_debug.h; the old platform/debug_ui.cpp that
-// defined them is not built). Neither is saved: a relaunch has sound.
+// The two audio paths' switches (declared in port_debug.h). Neither is saved: a relaunch has
+// sound.
 bool AiAudioEnabled() {
   return AIPortOutputEnabled() != 0;
 }
@@ -41,14 +41,8 @@ void SetMusyxAudioEnabled(bool enabled) {
 }
 
 void DrawAudio() {
-  bool ai = AiAudioEnabled();
-  if (ImGui::Checkbox("Streamed audio (music/movies)", &ai)) {
-    SetAiAudioEnabled(ai);
-  }
-  bool musyx = MusyxAudioEnabled();
-  if (ImGui::Checkbox("MusyX audio (effects/streams)", &musyx)) {
-    SetMusyxAudioEnabled(musyx);
-  }
+  CheckboxFn("Streamed audio (music/movies)", AiAudioEnabled, SetAiAudioEnabled);
+  CheckboxFn("MusyX audio (effects/streams)", MusyxAudioEnabled, SetMusyxAudioEnabled);
 }
 
 void DrawVoices() {

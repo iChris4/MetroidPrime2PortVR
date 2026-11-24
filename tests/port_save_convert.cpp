@@ -5,6 +5,8 @@
 // each copy: the sample carries the legacy signature 37d0412e and the converter writes the
 // console one (44bfc715), so those two words are the documented difference.
 #include "port_save_convert.h"
+#include "Kyoto/CCrc32.hpp"
+#include "port_bytes.h"
 #include "port_test.h"
 
 #include <fstream>
@@ -53,6 +55,25 @@ int main() {
   for (size_t i = 0; i < in.size(); ++i)
     if (in[i] != back[i] && !InSigOrCrc(i)) ++stray;
   CHECK_EQ(stray, size_t(0));
+
+  // Each release's console signature: G2MP01 seeds it with 'EURP', not 'USA>' (#95; d13a209f is a
+  // real PAL console save's).
+  CHECK_EQ(port::ReadBE32(&mp[0x2048]), 0xd13a209fu);
+  CHECK_EQ(port::ReadBE32(&back[0x2048]), 0x44bfc715u);
+
+  // A PAL save from a port build before #95 (USA seed, c13c33f1) still converts.
+  std::vector<uint8_t> oldPal = mp;
+  for (size_t copy : {size_t(0x2040), size_t(0x4040)}) {
+    const bool big = port::ReadBE32(&oldPal[copy]) ==
+                     CCRC32::Calculate(&oldPal[copy + 4], 0x2000 - 4, 0xFFFFFFFFu);
+    port::WriteBE32(&oldPal[copy + 8], 0xc13c33f1u);
+    const uint32_t crc = CCRC32::Calculate(&oldPal[copy + 4], 0x2000 - 4, 0xFFFFFFFFu);
+    big ? port::WriteBE32(&oldPal[copy], crc) : port::WriteLE32(&oldPal[copy], crc);
+  }
+  std::vector<uint8_t> fromOld;
+  Report r3;
+  REQUIRE_MSG(Gci(oldPal, "G2ME", fromOld, r3, err), err);
+  CHECK(fromOld == back);
 
   // The payload really changed in between: not just a relabelled copy.
   size_t changed = 0;

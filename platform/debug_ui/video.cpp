@@ -6,12 +6,17 @@
 
 #include "port_gpu_driver.h"
 #include "port_input_remap_ui.h"
+#include "port_mouse.h"
 #include "port_overlay.h"
 #include "port_savestate.h"
 #include "port_suit_colours.h"
+#include "port_play_options.h"
 #include "port_third_person.h"
 #include "port_build_info.h"
 #include "port_update_check.h"
+#include "port_note_toast.h"
+#include "port_shader_toast.h"
+#include "port_update_toast.h"
 #include "port_video.h"
 
 #include <SDL3/SDL.h>
@@ -45,8 +50,7 @@ void DrawVideoDisplay() {
     PortOverlay::SetFullscreen(fullscreen);
   }
   // Applied by PortOverlay::Draw through aurora_enable_vsync, every frame it changes.
-  Changed(ImGui::Checkbox("Vsync", &sVsync));
-  ImGui::SetItemTooltip("Waits for the display's refresh before presenting a frame.");
+  CheckboxTip("Vsync", &sVsync, "Waits for the display's refresh before presenting a frame.");
   // Applied by ApplyAspect on the next loop iteration: the render mode is widened and the world and
   // GUI cameras follow its viewport.
   int aspect = sAspectMode;
@@ -189,36 +193,31 @@ void DrawVideoDisplay() {
                           "reticle's model does not load there. GameCube: on a Trilogy disc, the\n"
                           "GameCube crosshair in place of Trilogy's aiming cursor (Classic on a\n"
                           "GameCube disc).");
-    Changed(ImGui::Checkbox("Custom crosshair colour", &sCrosshairCustomColor));
-    ImGui::SetItemTooltip("Off: the game's own colour.");
+    CheckboxTip("Custom crosshair colour", &sCrosshairCustomColor,
+                    "Off: the game's own colour.");
     ImGui::SameLine();
     ImGui::BeginDisabled(!sCrosshairCustomColor);
     Changed(ImGui::ColorEdit3("##crosshair_color", sCrosshairColor,
                               ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel));
     ImGui::EndDisabled();
   }
-  Changed(ImGui::Checkbox("Hide helmet", &sHideHelmet));
-  bool thirdPerson = PortThirdPerson::Enabled();
-  if (Changed(ImGui::Checkbox("Third-person camera", &thirdPerson))) {
-    PortThirdPerson::SetEnabled(thirdPerson);
-  }
-  ImGui::SetItemTooltip(
-      "Plays from behind Samus's shoulder (single player; not the morph ball or cutscenes),\n"
-      "showing her body and hiding the arm cannon and helmet. Distance, shoulder and height:\n"
-      "console `thirdperson`, or third_person_* in the settings file.");
-  Changed(ImGui::Checkbox("Hide visor effects", &sHideVisorEffects));
-  ImGui::SetItemTooltip("The scan visor's window and edges are what a visor effect draws here.");
-  Changed(ImGui::Checkbox("Cutscene black bars", &sCinemaBars));
-  ImGui::SetItemTooltip("Off lets a cutscene fill the screen instead of the game's letterbox.");
-  Changed(ImGui::Checkbox("Morph ball black bars", &sBallBars));
-  ImGui::SetItemTooltip("Off: the world fills the screen in morph ball.\nOn: the game's narrowed ball view.");
-  Changed(ImGui::Checkbox("Crosshair in Dark Visor", &sCrosshairDark));
-  ImGui::SetItemTooltip("Off hides the aiming crosshair in the Dark Visor. On under Original experience.");
+  // The play options' own rows (port_play_options.h), as the special menu's Game page lists them;
+  // their setters save the change.
+  using PortPlayOptions::Option;
+  EntryCheckbox(PortPlayOptions::Get(Option::HideHelmet));
+  EntryCheckbox(PortPlayOptions::Get(Option::ThirdPerson));
+  EntryCheckbox(PortPlayOptions::Get(Option::HideVisorEffects));
+  CheckboxTip("Cutscene black bars", &sCinemaBars,
+                  "Off lets a cutscene fill the screen instead of the game's letterbox.");
+  CheckboxTip("Morph ball black bars", &sBallBars,
+                  "Off: the world fills the screen in morph ball.\nOn: the game's narrowed ball view.");
+  CheckboxTip("Crosshair in Dark Visor", &sCrosshairDark,
+                  "Off hides the aiming crosshair in the Dark Visor. On under Original experience.");
   ImGui::SameLine();
-  Changed(ImGui::Checkbox("Crosshair in Echo Visor", &sCrosshairEcho));
-  ImGui::SetItemTooltip("Off hides the aiming crosshair in the Echo Visor. On under Original experience.");
-  Changed(ImGui::Checkbox("Secondary crosshairs", &sSecondaryCrosshairs));
-  ImGui::SetItemTooltip("Off hides the next-target reticle; the lock-on reticle and the scan box stay.");
+  CheckboxTip("Crosshair in Echo Visor", &sCrosshairEcho,
+                  "Off hides the aiming crosshair in the Echo Visor. On under Original experience.");
+  CheckboxTip("Secondary crosshairs", &sSecondaryCrosshairs,
+                  "Off hides the next-target reticle; the lock-on reticle and the scan box stay.");
   // Applied by CCameraManager::UpdateCameras: the first-person camera takes its FOV when it is
   // built, so the live change goes through CCameraManager::mFirstPersonFov. 0 is the game's own 55.
   float fov = sFirstPersonFov > 0.f ? sFirstPersonFov : 55.f;
@@ -234,11 +233,15 @@ void DrawVideoDisplay() {
   }
   ImGui::EndDisabled();
   ImGui::SetItemTooltip("Back to the retail 55 deg.");
-  Changed(ImGui::Checkbox("Arm cannon follows FOV", &sGunFollowsFov));
-  ImGui::SetItemTooltip("Off: the arm cannon is drawn at its own FOV (below) whatever the field\n"
-                        "of view, so it keeps its size and place. On: it shares the world's\n"
-                        "perspective, so a wider FOV draws it smaller and further into the corner.\n"
-                        "Off under Original experience.");
+  CheckboxTip("Morph ball follows FOV", &sBallFollowsFov,
+                  "On: the morph ball's cameras widen or narrow in step with the field of\n"
+                  "view (retail 60 at FOV 55). Off: they keep their retail FOVs.\n"
+                  "Off under Original experience.");
+  CheckboxTip("Arm cannon follows FOV", &sGunFollowsFov,
+                  "Off: the arm cannon is drawn at its own FOV (below) whatever the field\n"
+                  "of view, so it keeps its size and place. On: it shares the world's\n"
+                  "perspective, so a wider FOV draws it smaller and further into the corner.\n"
+                  "Off under Original experience.");
   ImGui::BeginDisabled(sGunFollowsFov);
   float gunFov = sGunFov;
   if (ImGui::SliderFloat("Arm cannon FOV", &gunFov, PortOverlay::kGunFovMin, PortOverlay::kGunFovMax,
@@ -288,13 +291,14 @@ void DrawVideoQuality() {
     sMsaa = msaa == 1 ? 4 : 1;
     Changed(true);
   }
-  // The two toasts are drawn by DrawUI (overlays.cpp), with the panel open or closed.
-  Changed(ImGui::Checkbox("Show shader compilation", &sShowShaderCompilation));
-  ImGui::SetItemTooltip("A small progress bar while the shader cache compiles at startup (longest on the first\n"
-                        "start after an install or update). Draws whose shader isn't ready yet are skipped.");
-  Changed(ImGui::Checkbox("Show F1 hint at launch", &sShowMenuHint));
-  ImGui::SetItemTooltip("A note in the top left corner for the first seconds of each launch saying how to\n"
-                        "open this panel.");
+  // The shader count and the F1 hint are drawn in the game's own box and text (port_shader_toast.h,
+  // port_menu_hint.h), with the panel open or closed.
+  CheckboxTip("Show shader compilation", &sShowShaderCompilation,
+                  "A count at the top of the screen while the shader cache compiles at startup (longest on the first\n"
+                  "start after an install or update). Draws whose shader isn't ready yet are skipped.");
+  CheckboxTip("Show F1 hint at launch", &sShowMenuHint,
+                  "A note in the top left corner for the first seconds of each launch saying how to\n"
+                  "open this panel.");
   // A max, so the combo shows the smallest offered step that covers it (a hand-written MP2_ANISO=3
   // reads as 4x); picking a row sets that step.
   static const int kAnisoSteps[] = {1, 2, 4, 8, 16};
@@ -310,9 +314,9 @@ void DrawVideoQuality() {
     Changed(true);
   }
   // Applied by PortVideo::Frame through aurora_set_per_pixel_lighting, on change.
-  Changed(ImGui::Checkbox("Per-pixel lighting", &sPerPixelLighting));
-  ImGui::SetItemTooltip("Sums the game's lights per pixel instead of per vertex, like Dolphin: smoother\n"
-                        "on low-poly models, not the original look.");
+  CheckboxTip("Per-pixel lighting", &sPerPixelLighting,
+                  "Sums the game's lights per pixel instead of per vertex, like Dolphin: smoother\n"
+                  "on low-poly models, not the original look.");
   // Applied by ApplyRenderScale from Draw, through PortVideo::DrawScale (dynamic resolution's while
   // it has lowered the scale).
   // Dynamic resolution's mode is the two saved settings together: Auto draws up to the window's own
@@ -324,7 +328,7 @@ void DrawVideoQuality() {
     if (dynMode == 1) {
       sRenderScale = 0.f;
     } else if (dynMode == 2 && sRenderScale <= 0.f) {
-      sRenderScale = std::clamp(std::round(PortVideo::BaseRenderScale() * 4.f) / 4.f, 1.f, 4.f);
+      sRenderScale = std::clamp(std::round(PortVideo::BaseRenderScale() * 4.f) / 4.f, 1.f, PortOverlay::kRenderScaleMax);
     }
     PortVideo::ResetDynamicRes();
     Changed(true);
@@ -351,8 +355,8 @@ void DrawVideoQuality() {
     float scale = sPendingScale > 0.f ? sPendingScale : sRenderScale;
     char label[32];
     std::snprintf(label, sizeof(label), "%.2fx (%dp)", scale, PortVideo::DrawnLines(scale));
-    if (ImGui::SliderFloat(dynMode == 2 ? "Maximum resolution scale" : "Resolution scale", &scale, 1.f, 4.f,
-                           label)) {
+    if (ImGui::SliderFloat(dynMode == 2 ? "Maximum resolution scale" : "Resolution scale", &scale, 1.f,
+                           PortOverlay::kRenderScaleMax, label, ImGuiSliderFlags_AlwaysClamp)) {
       sPendingScale = scale;
     }
     if (sPendingScale > 0.f && !ImGui::IsItemActive()) {
@@ -363,7 +367,8 @@ void DrawVideoQuality() {
     }
     ImGui::SetItemTooltip("The resolution the game draws at, as a multiple of the GameCube's 480 lines;\n"
                           "higher values use more GPU memory. Above 2x it supersamples, and each step\n"
-                          "costs much more GPU time.");
+                          "costs much more GPU time; 8x with MSAA needs about 2 GB of video memory.\n"
+                          "Ctrl+click to type a value.");
   } else if (sRenderScale <= 0.f) {
     ImGui::TextDisabled("Window resolution: %.2fx (%dp)", PortVideo::BaseRenderScale(), PortVideo::DrawnLines(0.f));
   }
@@ -665,10 +670,10 @@ void DrawVideoCompatibility() {
   size_t backendCount = 0;
   const AuroraBackend* backends = aurora_get_available_backends(&backendCount);
   if (std::find(backends, backends + backendCount, BACKEND_OPENGLES) != backends + backendCount) {
-    Changed(ImGui::Checkbox("Use OpenGL ES", &sOpenGles));
-    ImGui::SetItemTooltip("Renders through OpenGL ES instead of Vulkan. Try it if the world draws black\n"
-                          "or untextured (some Adreno drivers). Takes effect after a restart; if the\n"
-                          "driver crashes starting it, the next start goes back to Vulkan.");
+    CheckboxTip("Use OpenGL ES", &sOpenGles,
+                    "Renders through OpenGL ES instead of Vulkan. Try it if the world draws black\n"
+                    "or untextured (some Adreno drivers). Takes effect after a restart; if the\n"
+                    "driver crashes starting it, the next start goes back to Vulkan.");
     if (sOpenGles != sOpenGlesAtStart) {
       ImGui::SameLine();
       ImGui::TextColored(ThemeWarnColor(), "Restart to apply");
@@ -695,9 +700,9 @@ void DrawVideoCompatibility() {
     }
   }
   // Aurora reads MP2_GPU_POWER=low when it picks the adapter; MP1 has only the variable.
-  Changed(ImGui::Checkbox("Low-power GPU", &sLowPowerGpu));
-  ImGui::SetItemTooltip("Asks for the integrated GPU on a machine that also has a discrete one (longer\n"
-                        "battery, less heat, lower frame rate). Restart to apply.");
+  CheckboxTip("Low-power GPU", &sLowPowerGpu,
+                  "Asks for the integrated GPU on a machine that also has a discrete one (longer\n"
+                  "battery, less heat, lower frame rate). Restart to apply.");
   if (sLowPowerGpu != sLowPowerGpuAtStart) {
     ImGui::SameLine();
     ImGui::TextColored(ThemeWarnColor(), "Restart to apply");
@@ -770,7 +775,18 @@ namespace {
 float sTopToastNextY = 0.f;
 } // namespace
 
-void BeginTopToastStack() { sTopToastNextY = 16.f; }
+void BeginTopToastStack() {
+  sTopToastNextY = 16.f;
+  // Below the top toasts the game draws (the shader count, the update toast, a note), which were
+  // drawn earlier this frame.
+  float bottom = std::max(PortShaderToast::Bottom(), PortNoteToast::Bottom());
+  if (const PortGameUi::ScreenRect r = PortUpdateToast::LastRect(); PortUpdateToast::Showing() && r.valid) {
+    bottom = std::max(bottom, r.y1);
+  }
+  if (bottom > 0.f) {
+    sTopToastNextY = std::max(sTopToastNextY, bottom * ImGui::GetMainViewport()->Size.y + 8.f);
+  }
+}
 
 void PlaceTopToast(const ImGuiViewport* viewport) {
   ImGui::SetNextWindowPos(ImVec2(viewport->Pos.x + viewport->Size.x * 0.5f, viewport->Pos.y + sTopToastNextY),
@@ -782,99 +798,18 @@ void TopToastPlaced(const ImGuiViewport* viewport) {
   sTopToastNextY = ImGui::GetWindowPos().y - viewport->Pos.y + ImGui::GetWindowSize().y + 8.f;
 }
 
-// While the startup compile runs (the pipeline cache, queued before the first frame): after half a
-// second, a count and a bar since the toast opened. Once that queue has drained, shaders met in
-// game compile without it. From MP1's overlays.cpp, top centre.
-void DrawShaderCompilationToast() {
-  static double sQueuedSince = -1.0;
-  static uint32_t sBase = 0; // createdPipelines when the toast opened
-  static bool sStartupDone = false;
-  const AuroraStats* stats = aurora_get_stats();
-  if (stats != nullptr && stats->queuedPipelines == 0) {
-    sStartupDone = true;
-  }
-  if (!PortOverlay::ShowShaderCompilation() || stats == nullptr || sStartupDone) {
-    sQueuedSince = -1.0;
-    return;
-  }
-  const double now = ImGui::GetTime();
-  if (sQueuedSince < 0.0) {
-    sQueuedSince = now;
-    sBase = stats->createdPipelines;
-  }
-  if (now - sQueuedSince < 0.5) {
-    return;
-  }
-  const uint32_t done = stats->createdPipelines >= sBase ? stats->createdPipelines - sBase : 0;
-  const uint32_t total = done + stats->queuedPipelines;
-  const ImGuiViewport* viewport = ImGui::GetMainViewport();
-  PlaceTopToast(viewport);
-  ImGui::SetNextWindowBgAlpha(0.7f);
-  if (ImGui::Begin("##shader-compilation-toast", nullptr,
-                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
-                       ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings |
-                       ImGuiWindowFlags_AlwaysAutoResize)) {
-    TopToastPlaced(viewport);
-    char label[64];
-    std::snprintf(label, sizeof(label), "Compiling shaders %u / %u", total, total); // widest, so the count doesn't jitter
-    const float width = ImGui::CalcTextSize(label).x;
-    std::snprintf(label, sizeof(label), "Compiling shaders %u / %u", done, total);
-    ImGui::TextUnformatted(label);
-    ImGui::ProgressBar(total != 0 ? static_cast< float >(done) / static_cast< float >(total) : 0.f,
-                       ImVec2(width, std::max(6.f, ImGui::GetFontSize() * 0.4f)), "");
-  }
-  ImGui::End();
-}
-
-// Once per launch, for 8 s, until the window is first opened: how to open it. Top left.
-void DrawMenuHintToast() {
-  static double sShownAt = -1.0;
-  static bool sDone = false;
-  if (sDone || !PortOverlay::ShowMenuHint()) {
-    return;
-  }
-  if (sVisible) {
-    sDone = true;
-    return;
-  }
-  const double now = ImGui::GetTime();
-  if (sShownAt < 0.0) {
-    sShownAt = now;
-  }
-  const double age = now - sShownAt;
-  if (age > 8.0) {
-    sDone = true;
-    return;
-  }
-  const ImGuiViewport* viewport = ImGui::GetMainViewport();
-  ImGui::SetNextWindowPos(ImVec2(viewport->Pos.x + 16.f, viewport->Pos.y + 16.f), ImGuiCond_Always);
-  ImGui::SetNextWindowBgAlpha(0.7f);
-  // Fades out over the last second.
-  ImGui::PushStyleVar(ImGuiStyleVar_Alpha, static_cast< float >(std::clamp(8.0 - age, 0.0, 1.0)));
-  if (ImGui::Begin("##menu-hint-toast", nullptr,
-                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
-                       ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings |
-                       ImGuiWindowFlags_AlwaysAutoResize)) {
-    const std::string keys = PortInputRemap::BindingsText(PortInput::Action::PortMenu);
-    if (keys.empty()) {
-      ImGui::TextUnformatted("Open settings from the Port menu binding in Remap");
-    } else {
-      ImGui::Text("Press %s for settings", keys.c_str());
-    }
-  }
-  ImGui::End();
-  ImGui::PopStyleVar();
-}
-
-// Once per launch, for 12 s: a newer release than this build is out (MP1's DrawUpdateToast).
-// Taps arrive on Android's UI thread (TouchControlsView), so the rect is shared under a lock and
-// a hit only sets a flag; the page opens on the game thread.
+// Once per launch, for 12 s: a newer release than this build is out (MP1's DrawUpdateToast). The
+// game draws it (port_update_toast.h); this only takes a click on it, and keeps where it is for a
+// tap: taps arrive on Android's UI thread (TouchControlsView), so the rect is shared under a lock
+// and a hit only sets a flag; the page opens on the game thread.
 namespace {
-bool sUpdateToastDone = false;
 std::mutex sUpdateToastMutex;
 bool sUpdateToastShowing = false;
 ImVec4 sUpdateToastRect; // last drawn: x0, y0, x1, y1 as fractions of the window
 std::atomic< bool > sUpdateToastTapped{false};
+// The cursor is over it: the game drew it, so ImGui doesn't know, and a press there would also be
+// the game's (aim, fire). PortOverlay::PointerBlocked keeps it from the game.
+bool sUpdateToastHovered = false;
 
 void SetUpdateToastShowing(bool showing, const ImVec4& rect = ImVec4()) {
   std::lock_guard lock(sUpdateToastMutex);
@@ -884,54 +819,41 @@ void SetUpdateToastShowing(bool showing, const ImVec4& rect = ImVec4()) {
 
 void OpenUpdateToastRelease() {
   SDL_OpenURL(PortUpdateCheck::Latest().url.c_str());
-  sUpdateToastDone = true;
+  PortUpdateToast::Dismiss();
   SetUpdateToastShowing(false);
 }
 } // namespace
 
 void DrawUpdateToast() {
-  static double sShownAt = -1.0;
   SetUpdateToastShowing(false);
-  if (sUpdateToastDone || PortUpdateCheck::Status() != PortUpdateCheck::kStatus_Available) {
-    return;
-  }
+  sUpdateToastHovered = false;
   if (sUpdateToastTapped.exchange(false)) {
     OpenUpdateToastRelease();
     return;
   }
-  const double now = ImGui::GetTime();
-  if (sShownAt < 0.0) {
-    sShownAt = now;
-  }
-  if (now - sShownAt > 12.0) {
-    sUpdateToastDone = true;
+  const PortGameUi::ScreenRect r = PortUpdateToast::LastRect();
+  if (!PortUpdateToast::Showing() || !r.valid) {
     return;
   }
-  const ImGuiViewport* viewport = ImGui::GetMainViewport();
-  PlaceTopToast(viewport);
-  ImGui::SetNextWindowSize(ImVec2(std::min(viewport->Size.x - 32.f, 560.f), 0.f));
-  ImGui::SetNextWindowBgAlpha(0.8f);
-  if (ImGui::Begin("##update-toast", nullptr,
-                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoNav |
-                       ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings)) {
-    ImGui::TextWrapped("Version %s is out (this is %s). Click or tap here to open its release page.",
-                       PortUpdateCheck::Latest().version.c_str(), MP_BUILD_VERSION);
-    TopToastPlaced(viewport);
-    const ImVec2 pos = ImGui::GetWindowPos();
-    const ImVec2 size = ImGui::GetWindowSize();
-    if (viewport->Size.x > 0.f && viewport->Size.y > 0.f) {
-      SetUpdateToastShowing(true, ImVec4((pos.x - viewport->Pos.x) / viewport->Size.x,
-                                         (pos.y - viewport->Pos.y) / viewport->Size.y,
-                                         (pos.x + size.x - viewport->Pos.x) / viewport->Size.x,
-                                         (pos.y + size.y - viewport->Pos.y) / viewport->Size.y));
-    }
-    // A mouse click; taps go through PortDebug::TapUpdateToast.
-    if (ImGui::IsWindowHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-      OpenUpdateToastRelease();
-    }
+  SetUpdateToastShowing(true, ImVec4(r.x0, r.y0, r.x1, r.y1));
+  // A mouse click on the text, grown by half its height all round: easier to hit. Not while the
+  // game holds the cursor (aiming) or an ImGui window is over it. Taps go through
+  // PortDebug::TapUpdateToast.
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  const ImGuiIO& io = ImGui::GetIO();
+  if (vp->Size.x <= 0.f || vp->Size.y <= 0.f || PortMouse::Captured() || io.WantCaptureMouse ||
+      !ImGui::IsMousePosValid(&io.MousePos)) {
+    return;
   }
-  ImGui::End();
+  const float x = (io.MousePos.x - vp->Pos.x) / vp->Size.x, y = (io.MousePos.y - vp->Pos.y) / vp->Size.y;
+  const float pad = 0.5f * (r.y1 - r.y0), padX = pad * vp->Size.y / vp->Size.x;
+  sUpdateToastHovered = x >= r.x0 - padX && x <= r.x1 + padX && y >= r.y0 - pad && y <= r.y1 + pad;
+  if (sUpdateToastHovered && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+    OpenUpdateToastRelease();
+  }
 }
+
+bool UpdateToastHovered() { return sUpdateToastHovered; }
 
 bool TapUpdateToast(float x, float y) {
   std::lock_guard lock(sUpdateToastMutex);

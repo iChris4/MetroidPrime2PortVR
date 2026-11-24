@@ -474,6 +474,10 @@ int32_t PADGetIndexForPort(const u32 port) {
   return index;
 }
 
+BOOL PADTakeFirstPort(const u32 instance) { return aurora::input::take_first_port(instance); }
+
+void PADRestoreSavedPorts() { aurora::input::restore_saved_ports(); }
+
 void PADClearPort(const u32 port) {
   aurora::input::persist_controller_for_player(port, nullptr);
   const auto* ctrl = aurora::input::get_controller_for_player(port);

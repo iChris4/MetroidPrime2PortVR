@@ -198,7 +198,8 @@ enum class ActionKind : uint8_t {
   X(MapPanLeft, HalfAxis, "map_pan_left", "Map pan left")                                          \
   X(MapPanRight, HalfAxis, "map_pan_right", "Map pan right")                                      \
   X(TargetNext, Digital, "target_next", "Next target (locked on)") /* appended: IDs persist */     \
-  X(TargetPrev, Digital, "target_prev", "Previous target (locked on)")
+  X(TargetPrev, Digital, "target_prev", "Previous target (locked on)")                            \
+  X(SpecialMenu, Digital, "special_menu", "Special menu") /* appended: IDs persist */
 
 enum class Action : uint16_t {
 #define PORT_INPUT_ACTION_ENUM(id, kind, key, label) id,

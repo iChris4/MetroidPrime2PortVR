@@ -1,4 +1,5 @@
 #include "port_utf8_path.h"
+#include "port_strings.h"
 #include "port_settings.h"
 
 #include "port_env.h"
@@ -16,22 +17,8 @@ namespace {
 std::string sPath; // empty: no file
 std::atomic< bool > sInitialized{false};
 
-std::string Trim(const std::string& s) {
-  size_t a = 0;
-  size_t b = s.size();
-  while (a < b && std::isspace(static_cast< unsigned char >(s[a])))
-    ++a;
-  while (b > a && std::isspace(static_cast< unsigned char >(s[b - 1])))
-    --b;
-  return s.substr(a, b - a);
-}
-
-bool ParseBool(const std::string& value) {
-  std::string lower;
-  for (char c : value)
-    lower += static_cast< char >(std::tolower(static_cast< unsigned char >(c)));
-  return !(lower.empty() || lower == "0" || lower == "false" || lower == "off" || lower == "no");
-}
+using port::ParseBool;
+using port::Trim;
 
 } // namespace
 

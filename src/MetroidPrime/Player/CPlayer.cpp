@@ -113,6 +113,7 @@
 #include "port_overlay.h"
 #include "port_photo.h"
 #include "port_touch.h"
+#include "port_pipeline_context.h"
 #endif
 
 // NonMatching structure pass; incomplete behavior is explicit below.
@@ -1182,6 +1183,7 @@ void CPlayer::Update(float dt, CStateManager& mgr) {
     PortTouch::SetOrbitLocked(mOrbitState == kOS_OrbitObject || mOrbitState == kOS_ForcedOrbitObject ||
                                   mOrbitState == kOS_Grapple,
                               mOrbitState == kOS_OrbitObject, GetPlayerIndex());
+    PortTouch::SetRezbitInfected(GetRezbitState() == kRS_Infected, GetPlayerIndex());
   }
 #endif
   if (!mBeamParticleDescriptionsInitialized && NWeaponTypes::are_tokens_ready(mBeamEffectTokens)) {
@@ -3267,6 +3269,9 @@ void CPlayer::PreRender(CStateManager& mgr) {
 
   if (mMorphBallState != kMS_Unmorphed && !mCameraManager->IsInCinematicCamera() &&
       !mgr.IsMultiplayer() && mDeathTime <= 0.f) {
+#ifdef TARGET_PC
+    CPortPipelineContextScope globalPipelines(AURORA_PIPELINE_CONTEXT_GLOBAL);
+#endif
     mMorphBall->CreateBallShadow();
     mMorphBall->RenderToShadowTex(mgr);
   } else {
@@ -3343,6 +3348,11 @@ rstl::pair< bool, CColor > CPlayer::GetHackedEffectColor() const {
 }
 
 void CPlayer::Render(const CStateManager& mgr) const {
+#ifdef TARGET_PC
+  // Samus (suit, morph ball, its effects) is drawn in every area, so her pipelines are GLOBAL:
+  // pinned against memory trims, which otherwise rebuilt the ball's on each morph (issue #98).
+  CPortPipelineContextScope globalPipelines(AURORA_PIPELINE_CONTEXT_GLOBAL);
+#endif
   if (mgr.GetCurrentRenderPlayer()->GetUniqueId() != GetUniqueId() &&
       mPlayerState->GetItemAmount(CPlayerState::kIT_Invisibility) != 0 &&
       mgr.GetPlayerState()->GetActiveVisor(mgr) != CPlayerState::kPV_Dark) {

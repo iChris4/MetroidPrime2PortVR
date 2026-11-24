@@ -4,6 +4,12 @@
 #include "MetroidPrime/CMapWorldInfo.hpp"
 #include "rstl/rc_ptr.hpp"
 
+#ifdef TARGET_PC
+// Complete types for the smart-pointer members (-Werror=delete-incomplete).
+#include "MetroidPrime/CScriptMailbox.hpp"
+#include "MetroidPrime/CWorldLayerState.hpp"
+#endif
+
 class CScriptMailbox;
 class CWorldLayerState;
 class CBitStreamReader;

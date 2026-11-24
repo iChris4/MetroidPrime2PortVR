@@ -10,6 +10,7 @@
 #include "port_input_remap_ui.h"
 #include "port_freecam.h"
 #include "port_gyro_motion.h"
+#include "port_steam_triton.h"
 #include "port_harness.h"
 #include "port_input_map.h"
 #include "port_mouse.h"
@@ -19,6 +20,8 @@
 #include "port_prompts.h"
 #include "port_pointer.h"
 #include "port_savestate.h"
+#include "port_game_ui_page.h"
+#include "port_special_menu.h"
 #include "port_touch.h"
 #include "MetroidPrime/Player/CGameState.hpp"
 #include "MetroidPrime/Player/CPlayerState.hpp"
@@ -45,10 +48,6 @@
 #include <memory>
 #include <mutex>
 #include <sstream>
-
-namespace aurora {
-void request_screenshot() noexcept;
-}
 
 namespace PortInputDevices {
 namespace {
@@ -421,6 +420,20 @@ void BindPortControls(Profile& p) {
   Bind(p, Action::LoadState, Make(Device::Key, SDL_SCANCODE_F9));
   Bind(p, Action::PrevStateSlot, Make(Device::Key, SDL_SCANCODE_F4));
   Bind(p, Action::NextStateSlot, Make(Device::Key, SDL_SCANCODE_F6));
+  // The special menu (port_special_menu.h): F2, and both stick clicks on a pad, either first.
+  Bind(p, Action::SpecialMenu, Make(Device::Key, SDL_SCANCODE_F2));
+  const Input l3 = NativeInput(SDL_GAMEPAD_BUTTON_LEFT_STICK);
+  const Input r3 = NativeInput(SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+  if (l3.Valid() && r3.Valid()) {
+    for (int order = 0; order < 2; ++order) {
+      Binding b;
+      b.action = Action::SpecialMenu;
+      b.inputs[0] = order == 0 ? l3 : r3;
+      b.inputs[1] = order == 0 ? r3 : l3;
+      b.count = 2;
+      p.bindings.push_back(b);
+    }
+  }
   // Gyro aim's hold / pause / toggle button (F1 > Controls, the gyro Mode row), as in MP1.
   Bind(p, Action::GyroAim, NativeInput(SDL_GAMEPAD_BUTTON_RIGHT_STICK));
   Bind(p, Action::GyroAim, Make(Device::Key, SDL_SCANCODE_LCTRL));
@@ -447,9 +460,29 @@ void BindPortControls(Profile& p) {
   }
 }
 
-float StickValue(s16 raw, u16 deadZone, bool useDeadZones) {
-  if (useDeadZones && std::abs(static_cast<int>(raw)) <= deadZone) return 0.f;
+// `rescale` (Precise stick deadzones, #131): tilt past the deadzone runs from 0, not from the
+// deadzone's edge, so the stick doesn't jump when it leaves it.
+float StickValue(s16 raw, u16 deadZone, bool useDeadZones, bool rescale = false) {
+  const int magnitude = std::abs(static_cast<int>(raw));
+  if (useDeadZones && magnitude <= deadZone) return 0.f;
+  if (useDeadZones && rescale) {
+    const float past = static_cast<float>(magnitude - deadZone) / static_cast<float>(std::max(32767 - deadZone, 1));
+    return std::copysign(std::min(past, 1.f), static_cast<float>(raw));
+  }
   return std::clamp(static_cast<float>(raw) / 32767.f, -1.f, 1.f);
+}
+
+// Precise stick deadzones (#131): the game's PADClamp drops the first 15 of 127 units of each
+// stick axis, and its integer scaling the 16th, before Samus moves or aims. A value past the
+// port's own deadzone reaches the game from 17 up instead, so the slider is the only deadzone.
+// Tilt under kPreciseFloor stays 0 even with the slider at 0% or deadzones off: lifted to 17 it
+// would be a resting stick's noise walking Samus.
+constexpr float kPreciseFloor = 0.02f;
+float PastGameClamp(float v) {
+  if (v == 0.f || !PortOverlay::PreciseStickDeadZones()) return v;
+  if (std::fabs(v) < kPreciseFloor) return 0.f;
+  // StickX/StickY truncate v * 32767 / 256; the half unit keeps 17 and 127 exact.
+  return std::copysign((17.5f + std::min(std::fabs(v), 1.f) * 110.f) / 128.f, v);
 }
 
 uint16_t GameContexts(int player = 0);
@@ -488,13 +521,14 @@ void FillPadState(PortInput::RawState& raw, u32 port) {
     raw.padButtons = pad.buttons;
     const PADDeadZones* dz = PADGetDeadZones(port);
     const bool useDz = dz != nullptr && dz->useDeadzones;
+    const bool precise = PortOverlay::PreciseStickDeadZones();
     for (int a = 0; a < PAD_RAW_AXIS_COUNT; ++a) {
       if (a == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || a == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
         raw.padAxes[a] = std::max(0.f, static_cast<float>(pad.axes[a]) / 32767.f);
       } else {
         const bool left = a == SDL_GAMEPAD_AXIS_LEFTX || a == SDL_GAMEPAD_AXIS_LEFTY;
         raw.padAxes[a] = StickValue(pad.axes[a], dz == nullptr ? 0 : left ? dz->stickDeadZone : dz->substickDeadZone,
-                                    useDz);
+                                    useDz, precise);
       }
     }
     // Flick stick turns by the right stick's angle: a dead zone per axis zeroes the minor axis
@@ -504,8 +538,12 @@ void FillPadState(PortInput::RawState& raw, u32 port) {
       const float y = static_cast<float>(pad.axes[SDL_GAMEPAD_AXIS_RIGHTY]);
       const float dzr = static_cast<float>(dz->substickDeadZone);
       const bool inside = x * x + y * y <= dzr * dzr;
-      raw.padAxes[SDL_GAMEPAD_AXIS_RIGHTX] = inside ? 0.f : StickValue(pad.axes[SDL_GAMEPAD_AXIS_RIGHTX], 0, false);
-      raw.padAxes[SDL_GAMEPAD_AXIS_RIGHTY] = inside ? 0.f : StickValue(pad.axes[SDL_GAMEPAD_AXIS_RIGHTY], 0, false);
+      // Rescaled, the tilt runs from the round dead zone's edge (PublishFlickStick then skips it).
+      const float length = std::sqrt(x * x + y * y);
+      const float scale = !inside && precise ? std::min((length - dzr) / std::max(32767.f - dzr, 1.f), 1.f) / length
+                                             : 1.f / 32767.f;
+      raw.padAxes[SDL_GAMEPAD_AXIS_RIGHTX] = inside ? 0.f : std::clamp(x * scale, -1.f, 1.f);
+      raw.padAxes[SDL_GAMEPAD_AXIS_RIGHTY] = inside ? 0.f : std::clamp(y * scale, -1.f, 1.f);
     }
   }
 }
@@ -518,6 +556,8 @@ void FillRawState(PortInput::RawState& raw, unsigned mouseHeld, bool focused) {
     }
   }
   FillPadState(raw, kPort);
+  // The back buttons of the controller behind Steam Input's virtual pad, which has none (Player 1).
+  raw.padButtons |= PortSteamTriton::Paddles();
 
   // Explicit console harness only. Real/default/custom bindings still arbitrate the raw pad.
   PortRadial::Point simulated;
@@ -555,7 +595,7 @@ void FillRawState(PortInput::RawState& raw, unsigned mouseHeld, bool focused) {
     return PortSaveState::ResumePromptShown(info, yes);
   };
   const bool menuLive =
-      PortMouse::Enabled() && (contexts & PortInput::kCtxGameplay) == 0 && !PortOverlay::Visible() &&
+      PortMouse::Enabled() && (contexts & PortInput::kCtxGameplay) == 0 && !PortOverlay::Visible() && !PortGameUi::PageOpen() &&
       !(PortPointer::Enabled() && PortPointer::ScreenActive()) && focused && !ResumePromptUp();
   mouse |= (sMenuGate.Poll(menuLive, mouseHeld & menuMask) & PortInputMap::kMouseButtonMask) << kMouseMenu;
   mouse |= (ReadMouseButtons(mouseHeld) & PortInputMap::kMouseButtonMask) << kMouseGameplay;
@@ -616,6 +656,9 @@ CPlayerState* PlayerInPlay(int player = 0) {
 // rather than menu, so the Map rows and Map-only bindings apply there (#31).
 // Players 2-4 read their own visor and morph state; the scan text is Player 1's.
 uint16_t GameContexts(int player) {
+  // A page of the port's own (the special menu) reads the pad as a menu: under a preset that moves
+  // A and B in gameplay (Remastered: fire on RT, jump on south), south must still confirm.
+  if (PortGameUi::PageOpen()) return PortInput::kCtxMenu;
   if (PortHarness::MapScreenOpen() && PortHarness::FlowState() == 2 /* CMFGame::kFS_Paused */) {
     return PortInput::kCtxMap;
   }
@@ -812,7 +855,8 @@ void RoutePlayerActions(const PortInput::Output& out, int player) {
 bool IsPortAction(Action a) {
   return a == Action::PortMenu || a == Action::Screenshot || a == Action::PhotoMode || a == Action::GyroAim ||
          a == Action::ResetAim || a == Action::ToggleTexturePack || a == Action::SaveState ||
-         a == Action::LoadState || a == Action::NextStateSlot || a == Action::PrevStateSlot;
+         a == Action::LoadState || a == Action::NextStateSlot || a == Action::PrevStateSlot ||
+         a == Action::SpecialMenu;
 }
 
 // Keys pressed since the last PollPortActions, added by an SDL event watch: a short
@@ -1061,6 +1105,8 @@ void ReadRaw(PortInput::RawState& raw, int port) {
       raw.padAxes[a] = std::clamp(static_cast<float>(pad.axes[a]) / 32767.f, -1.f, 1.f);
     }
   }
+  // The back buttons of the controller behind Steam Input's virtual pad, which has none.
+  raw.padButtons |= PortSteamTriton::Paddles();
   raw.mouseButtons = (SDL_GetMouseState(nullptr, nullptr) & PortInputMap::kMouseButtonMask) << kMouseKeySlot;
   raw.touch = TouchBits(sTouchControls);
 }
@@ -1310,6 +1356,23 @@ static void UpdatePromptBindings(const Profile& p) {
   sPromptBindings = std::move(singles);
 }
 
+// Set by PromptBoxScope: resolve as the scan box's own button reads.
+static thread_local bool sPromptAsBox = false;
+
+PromptBoxScope::PromptBoxScope() : mPrev(sPromptAsBox) { sPromptAsBox = true; }
+PromptBoxScope::~PromptBoxScope() { sPromptAsBox = mPrev; }
+
+// A box's button dismisses the box, which under the scan visor is the scan text's job, but a
+// rescanned object's box fades in while the scan is still running, before the scan text
+// context is up: read as gameplay there, its A showed Fire's button for a moment (#127).
+static uint16_t PromptGameContexts() {
+  const uint16_t contexts = GameContexts();
+  if (sPromptAsBox && (contexts & PortInput::kCtxScan) != 0) {
+    return contexts | PortInput::kCtxScanText;
+  }
+  return contexts;
+}
+
 // The first of `actions` with a single input from `family`: one that applies in
 // the current context, else one that applies anywhere outside the user layers;
 // never one blocked in the current context (its input does something else here).
@@ -1319,7 +1382,7 @@ static bool PromptInputFor(std::initializer_list<Action> actions, PortInput::Fam
   const auto face = [](const Input& in) {
     return in.device == Device::PadButton && in.code >= SDL_GAMEPAD_BUTTON_SOUTH && in.code <= SDL_GAMEPAD_BUTTON_NORTH;
   };
-  const uint16_t contexts = GameContexts();
+  const uint16_t contexts = PromptGameContexts();
   std::lock_guard lock(sPromptMutex);
   for (const uint16_t want : {contexts, static_cast<uint16_t>(~PortInput::kCtxLayers)}) {
     for (const Action a : actions) {
@@ -1354,7 +1417,7 @@ bool PromptButtonInput(unsigned padButton, PortInput::Family family, Input& out)
   // In Morph Ball a bound Morph Ball row comes first.
   const Action game = PadBitAction(padButton);
   const PortInput::BallRow* ball = PortInput::BallRowForGame(game);
-  if (ball != nullptr && (GameContexts() & PortInput::kCtxMorphBall) != 0 &&
+  if (ball != nullptr && (PromptGameContexts() & PortInput::kCtxMorphBall) != 0 &&
       PromptInputFor({ball->row}, family, out)) {
     return true;
   }
@@ -1367,6 +1430,20 @@ bool PromptButtonInput(unsigned padButton, PortInput::Family family, Input& out)
                           family, out);
   }
   return PromptInputFor({menu->menu, game}, family, out);
+}
+
+uint16_t PromptContexts() { return GameContexts(); }
+
+std::string DescribePromptBindings(unsigned padButton) {
+  const Action game = PadBitAction(padButton);
+  std::string out = "contexts " + PortInput::ContextsToText(GameContexts());
+  std::lock_guard lock(sPromptMutex);
+  for (const Binding& b : sPromptBindings) {
+    if (b.action != game) continue;
+    out += "; " + PortInput::InputToText(b.inputs[0]) + " in " + PortInput::ContextsToText(b.contexts);
+    if (b.blocked != 0) out += " blocked " + PortInput::ContextsToText(b.blocked);
+  }
+  return out;
 }
 
 bool PromptAxisInput(PADAxis axis, PortInput::Family family, Input& out) {
@@ -1401,10 +1478,10 @@ static PADStatus SynthesizeStatus(const PortInput::Output& out, bool radial) {
     }
     return v;
   };
-  s.stickX = StickX(stick(Action::MainRight), stick(Action::MainLeft));
-  s.stickY = StickY(stick(Action::MainDown), stick(Action::MainUp));
-  s.substickX = StickX(stick(Action::CRight), stick(Action::CLeft));
-  s.substickY = StickY(stick(Action::CDown), stick(Action::CUp));
+  s.stickX = StickX(PastGameClamp(stick(Action::MainRight) - stick(Action::MainLeft)), 0.f);
+  s.stickY = StickY(PastGameClamp(stick(Action::MainDown) - stick(Action::MainUp)), 0.f);
+  s.substickX = StickX(PastGameClamp(stick(Action::CRight) - stick(Action::CLeft)), 0.f);
+  s.substickY = StickY(PastGameClamp(stick(Action::CDown) - stick(Action::CUp)), 0.f);
   if (radial && (PortRadial::Capturing() || sConsumeRadialPoll)) s.substickX = s.substickY = 0;
   s.triggerLeft = Trigger(std::max(out.Value(Action::LAnalog), out.Value(Action::MenuLAnalog)),
                           (s.button & PAD_TRIGGER_L) != 0);
@@ -1446,16 +1523,37 @@ static void AddExtButtons(PADStatus& status, uint32_t padButtons) {
 // gets in the way, most of all with Fire moved onto RT (issue #12): out of the Morph Ball, where R
 // is the Spider Ball, the controller's R trigger stops pressing R and pulling the R analog. Free
 // look on any other input (the presets' right stick click, a key) stays.
+static bool RightTrigger(const Input& in) {
+  if (in.device == Device::PadAxis) return in.code == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
+  return in.device == Device::PadButton &&
+         (in.code == PAD_RAW_BUTTON_TRIGGER_RIGHT || in.code == PAD_RAW_BUTTON_TRIGGER_RIGHT_CLICK);
+}
+
+// The Rezbit virus breaks on L + R + B (CHintState's kBHT_TriggersAndB) and its memo draws R's
+// prompt. While the suit is infected the pad's R trigger presses R whatever the layout does with it:
+// Twin Stick Aim's block below would leave R with no input at all (the memo still drew RT), and the
+// dual-stick presets' R on the right stick click can't be held with Jump on a face button (#111).
+// The row goes first, so the memo's R prompt shows the trigger. The gun is off meanwhile, so the
+// trigger's own action (Fire there) does nothing.
+static void ApplyRezbitReboot(Profile& p, int player) {
+  if (!PortTouch::RezbitInfected(player)) return;
+  for (const Binding& b : p.bindings) {
+    if (b.action == Action::PadR && b.count == 1 && RightTrigger(b.inputs[0])) return;
+  }
+  Binding r;
+  r.action = Action::PadR;
+  r.inputs[0] = Make(Device::PadButton, PAD_RAW_BUTTON_TRIGGER_RIGHT_CLICK);
+  r.count = 1;
+  r.contexts = PortInput::kCtxAll;
+  p.bindings.insert(p.bindings.begin(), r);
+}
+
 static void ApplyTwinStickFreeAim(Profile& p, uint16_t contexts, int player = 0) {
   if (!PortMouse::StickEnabled(player) || (contexts & PortInput::kCtxMorphBall) != 0) return;
-  const auto rTrigger = [](const Input& in) {
-    if (in.device == Device::PadAxis) return in.code == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
-    return in.device == Device::PadButton &&
-           (in.code == PAD_RAW_BUTTON_TRIGGER_RIGHT || in.code == PAD_RAW_BUTTON_TRIGGER_RIGHT_CLICK);
-  };
+  if (PortTouch::RezbitInfected(player)) return; // ApplyRezbitReboot
   for (Binding& b : p.bindings) {
     if (b.action != Action::PadR && b.action != Action::RAnalog) continue;
-    if (std::any_of(b.inputs.begin(), b.inputs.begin() + b.count, rTrigger)) b.blocked |= PortInput::kCtxGameplay;
+    if (std::any_of(b.inputs.begin(), b.inputs.begin() + b.count, RightTrigger)) b.blocked |= PortInput::kCtxGameplay;
   }
 }
 
@@ -1486,8 +1584,10 @@ static void PublishFlickStick(const PortInput::Output& out, int port) {
     return;
   }
   const PADDeadZones* zones = PADGetDeadZones(static_cast<u32>(port));
-  const float inner =
-      zones != nullptr && zones->useDeadzones ? static_cast<float>(zones->substickDeadZone) / 32767.f : 0.f;
+  // Precise stick deadzones already start the tilt at the dead zone's edge.
+  const float inner = zones != nullptr && zones->useDeadzones && !PortOverlay::PreciseStickDeadZones()
+                          ? static_cast<float>(zones->substickDeadZone) / 32767.f
+                          : 0.f;
   const float span = std::max(1.f - PortMouse::FlickOuterDeadZone() / 100.f - inner, 0.05f);
   const float scale = std::clamp((length - inner) / span, 0.f, 1.f) / length;
   PortMouse::SetFlickRawStick(port, x * scale, y * scale);
@@ -1508,6 +1608,7 @@ SPoll Poll(unsigned mouseHeld, bool focused) {
   PortInput::ApplyTargetRows(next);
   const uint16_t contexts = GameContexts();
   ApplyTwinStickFreeAim(next, contexts);
+  ApplyRezbitReboot(next, 0);
   if (!sInit || next != sProfile) {
     UpdatePromptBindings(next);
     sProfile = std::move(next);
@@ -1533,10 +1634,11 @@ SPoll Poll(unsigned mouseHeld, bool focused) {
     // The F1 Controls page is recording an input: it reaches no direct action (a bound
     // PortMenu would close the page mid-capture). The pad still reads it, as before the engine.
     r.status = Synthesize(out);
-  } else if (PortOverlay::Visible()) {
-    // The F1 overlay owns the keyboard and pad: the direct actions (beam/visor picks, the
-    // radial selectors, Spring Ball) reach the game outside the pad, so they wait too. The
-    // status is still synthesized so the held state tracks, and PortPumpEvents blocks the pad.
+  } else if (PortOverlay::Visible() || PortGameUi::PageOpen()) {
+    // The F1 overlay (or a page of the port's own) owns the keyboard and pad: the direct actions
+    // (beam/visor picks, the radial selectors, Spring Ball) reach the game outside the pad, so they
+    // wait too. The status is still synthesized so the held state tracks, and PortPumpEvents
+    // blocks the pad.
     PortRadial::Transport().SetAvailable(false);
     PortRadial::Cancel();
     sConsumeRadialPoll = false;
@@ -1552,6 +1654,21 @@ SPoll Poll(unsigned mouseHeld, bool focused) {
   // MP1 also adjusts A and Escape while the scan text is up: that context needs the scan
   // soft-pause (above) and Escape is no pointer-menu key here.
   return r;
+}
+
+namespace {
+bool InMatch() { return gpGameState != nullptr && gpGameState->GetGameMode().GetNumPlayers() > 1; }
+} // namespace
+
+void NotePadUsed(u32 instance) {
+  if (!InMatch()) PADTakeFirstPort(instance);
+}
+
+void MatchPortsTick() {
+  static bool sMatch = false;
+  const bool match = InMatch();
+  if (match && !sMatch) PADRestoreSavedPorts();
+  sMatch = match;
 }
 
 bool PollPlayer(int port, PADStatus& status) {
@@ -1572,6 +1689,7 @@ bool PollPlayer(int port, PADStatus& status) {
   PortInput::ApplyTargetRows(next);
   const uint16_t contexts = GameContexts(port);
   ApplyTwinStickFreeAim(next, contexts, port);
+  ApplyRezbitReboot(next, port);
   if (!sInit[port] || next != profile) {
     profile = std::move(next);
     runtime.SetProfile(&profile);
@@ -1587,7 +1705,9 @@ bool PollPlayer(int port, PADStatus& status) {
   const PortInput::Output& out = runtime.Poll(raw, contexts, nowMs, 0);
   PublishFlickStick(out, port);
   // While F1 is open the picks wait, as Player 1's do; PortPumpEvents blocks the pads.
-  if (!PortOverlay::Visible() && !PortInputRemap::Capturing()) RoutePlayerActions(out, port);
+  if (!PortOverlay::Visible() && !PortGameUi::PageOpen() && !PortInputRemap::Capturing()) {
+    RoutePlayerActions(out, port);
+  }
   status = SynthesizeStatus(out, false);
   AddExtButtons(status, raw.padButtons);
   return true;
@@ -1631,10 +1751,8 @@ void PollPortActions() {
       raw.keys.set(w * 64 + static_cast<size_t>(bit));
     }
   }
-  // F12 already has Aurora's window screenshot key, so this path takes it only when the user
-  // bound it to something else and leaves the default to that handler rather than firing twice.
-  // F1 is the Port menu's default binding and has no other handler.
-  raw.keys.reset(SDL_SCANCODE_F12);
+  // F12 (the Screenshot default) and F1 (the Port menu's) have no other handler: Aurora's own F12
+  // capture went with the 2026-10-23 re-vendor, as in MP1.
   const uint16_t contexts = GameContexts();
   const PortInput::Output& out = sRuntime.Poll(raw, contexts, static_cast<double>(SDL_GetTicksNS()) / 1e6, 0);
   // The F1 Controls page is recording an input: a bound PortMenu would close it.
@@ -1646,6 +1764,11 @@ void PollPortActions() {
   if (out.Pressed(Action::ResetAim)) PortMouse::RequestResetAim(PortOverlay::ResetAimBoth());
   // MP1 also routes the Original toggle here.
   if (out.Pressed(Action::PortMenu)) PortOverlay::Toggle();
+  // It opens only in single-player gameplay with F1 shut (its cheats and items are Player 1's);
+  // closing works anywhere.
+  if (out.Pressed(Action::SpecialMenu) && (PortSpecialMenu::Open() || !PortOverlay::Visible())) {
+    PortSpecialMenu::Toggle((contexts & PortInput::kCtxGameplay) != 0 && !InMatch());
+  }
   if (PortOverlay::SaveStateHotkeys()) {
     if (out.Pressed(Action::SaveState)) PortSaveState::RequestSave(PortSaveState::SelectedSlot(), true);
     if (out.Pressed(Action::LoadState)) PortSaveState::RequestLoad(PortSaveState::SelectedSlot(), true);
@@ -1676,7 +1799,7 @@ void PollPortActions() {
   };
   out.ForEachCustomPressed([&](Action action) { runCustom(action, false); });
   out.ForEachCustomReleased([&](Action action) { runCustom(action, true); });
-  if (out.Pressed(Action::Screenshot)) aurora::request_screenshot();
+  if (out.Pressed(Action::Screenshot)) PortPhoto::RequestScreenshot();
   if (out.Pressed(Action::PhotoMode)) {
     PortPhoto::RequestToggle();
   }
@@ -1699,7 +1822,7 @@ struct GyroPort {
   const char* status = "off";
   bool calibrating = false;
   // The source the motion state belongs to: a pad's joystick instance id (never reused, unlike its
-  // pointer after a replug), or kPhoneSource; 0 for none.
+  // pointer after a replug), kPhoneSource or kSteamTritonSource; 0 for none.
   uint32_t motionSource = 0;
   bool hasAccel = false;
   uint64_t lastNs = 0;
@@ -1754,6 +1877,7 @@ constexpr double kManualCalibrationSeconds = 3.0;
 uint64_t sRecalibrateAtNs = 0;
 uint64_t sManualCalibrationEndNs = 0;
 constexpr uint32_t kPhoneSource = 0xFFFFFFFFu;
+constexpr uint32_t kSteamTritonSource = 0xFFFFFFFEu;
 SDL_Sensor* sPhoneGyro = nullptr;
 SDL_Sensor* sPhoneAccel = nullptr;
 // The phone sensors are searched again after a miss (a sensor can appear late), once a second.
@@ -1808,6 +1932,15 @@ bool ReadGyroRates(int port, const GyroSettings& cfg, float& pitch, float& yaw, 
         }
       }
     }
+  }
+
+  // The controller behind Player 1's Steam Input pad (a Steam Controller, a Deck, a Sony or
+  // Nintendo one): read from its own reports (PortSteamTriton::Update opens it), not through SDL,
+  // whose drivers for them fight Steam.
+  if (source == 0 && wantController && port == 0 && PortSteamTriton::Motion(gyro, accel)) {
+    source = kSteamTritonSource;
+    haveAccel = true;
+    st.status = "controller (behind Steam Input, read directly)";
   }
 
   if (source == 0 && wantPhone) {
@@ -1972,6 +2105,15 @@ void PollGyroPort(int port, uint64_t nowNs) {
   // Read before the button's check, as MP1 does, so calibration keeps learning while paused.
   if (!ReadGyroRates(port, cfg, pitch, yaw, dt)) {
     st.status = "no gyro found";
+    // A controller behind Steam Input that is open but gives no motion says why.
+    if (port == 0 && (cfg.source == 0 || cfg.source == 1)) {
+      const PortSteamTriton::Stats sc = PortSteamTriton::GetStats();
+      if (sc.open && sc.notPlayerOne) {
+        st.status = "no gyro found (the controller behind Steam Input is not Player 1's)";
+      } else if (sc.open && sc.imuOff) {
+        st.status = "motion sensor behind Steam Input off (turning it on)";
+      }
+    }
     st.calibrating = false;
     return;
   }

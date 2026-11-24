@@ -3,6 +3,218 @@
 The Status section of AGENTS.md links here: this is the per-session detail, rewritten rather than
 appended, dated as in the heading there.
 
+## 2026-11-11: #126 clicks dead on a message box after F1
+
+- Cause: F1 releases the mouse-aim grab; only `PortMouse::UpdateAim` (a player tick) re-takes it, and a paused
+  game (message box, save station prompt) ticks no player. `mouse:aim:<btn>` rows read only while grabbed, so with
+  a keyboard-family Fire row that lacks `mouse:menu:left` (any `controls.toml` that overrides `pad_a`, e.g. one
+  saved before the menu rows existed) no click reaches A. Defaults do not reproduce: `mouse:menu:left` covers it.
+- Fix: `SetUiActive` remembers the grab it took (and what each player tick under the window would have asked
+  for) and hands it back on close. Xvfb harness: override `pad_a` with `mouse:aim:left` + a key, F1 open, `memo
+  pause`, F1 close, click: PAUSED forever before, dismissed on the first click after; control and defaults pass.
+- Not checked: Windows, the reporter's actual bindings (not in the report), their "aim came back only after a
+  click" (would fit a connected controller: the mouse yields to the pad until a click).
+
+## 2026-11-11: #98 pipeline cache "disk I/O error"
+
+- The reporter's log (Huawei Y7a, Android 10, Mali-G51, 3678 MiB, 0.12.0) has `Failed to read pipeline cache rows:
+  disk I/O error` right after the seed merge: the lazy loader's sorted queries spill to a SQLite temp file and the
+  app has no temp directory. The cache then stays closed for the session and records nothing, so every launch
+  compiles every pipeline on first use (500 compiles in 119 s in that log). f8a5ade03 could not help: it pins rows
+  that never load.
+- Fix: `PRAGMA temp_store=MEMORY` on both cache DBs and the seed (GOTCHAS "Cache DBs keep temp data in memory");
+  the error line now carries the extended code.
+- Checked: desktop repro under a read-only bwrap root (before: the reporter's exact line; after: `lazy, 1236 rows
+  known; queued 810 global (pinned) and 273 frontend`), ctest 45/45. Not checked on an Android 10 device; the
+  Poco (Android 16) never had the error. No reply posted.
+- The same log flips texture pressure between moderate and off 35 times around 1024 MiB of headroom. Harmless
+  there: the reporter has no texture pack (8 button icons), moderate frees only idle unheld replacements and
+  reloads nothing, and the Dawn heap release runs only after a free. Left as is.
+
+## 2026-11-10: release 0.15.0
+
+- v0.15.0 = `3831637c2`, published as latest with 12 assets (CI runs 42892270317 linux, 42892275907 windows,
+  42892281524 macos, 42892287746 android, 42892293328 ios; Flatpak local). Soak 96/96 ok on the local build of
+  `73c4fe7b4` (`build/s-release-20261110`). Notes: `docs/release-notes/0.15.0.md`. No issue replies posted.
+
+## 2026-11-10: review of v0.14.0..085b959c2 and MP1 package 36
+
+- Review of the 22 commits since v0.14.0: no bug found (diff read in full; pad port swap, Prime 1 air
+  physics, toasts, title save-state refusal, Phazon shot audio checked against their call sites).
+- MP1 `1618ab8da..2b1aaa4f3` (`docs/MP1_SYNC.md` package 36): area PreRender once per update and player,
+  `DrawArm` at steep pitch, Fast Morph FOV blend, watchdog line for 1 to 5 s frames, mouse name bound.
+- Checked: build, headless new game 4500 frames with `MP2_WATCHDOG_TEST_STALL=3000` + `_MS=2000` (the
+  `a frame took 2.2 s` line). Not seen in play: doors above 60 fps, the arm, the morph zoom.
+- To decide: MP1 `7abaaf360` crosshair target colour, `6bb3722dd` translatable port strings.
+
+## 2026-11-10: Phazon shot cheat (#100) had no sound outside the final fight
+
+- Cause: the charge loop, fire and hit sounds (`SamusPhazonGun.h`, samples 3766-3771) are in the AGSC
+  `SamusPhazonGun` (0x6D318F8C), which only `Metroid1.pak` holds and only the final Dark Samus area lists.
+- Fix: `PortPhazonShotSfx` (`src/MetroidPrime/Player/`) holds the group while the cheat is on, through the
+  pool where the mounted paks have it, else read straight from `Metroid1.pak`; released with the cheat or the gun.
+- Checked: Agon `0b_sand_hall` new game, `phazon 1` + `press a 200`: log `[audio] Phazon shot cheat: ... read
+  from Metroid1.pak`, console `sfx` shows voices 3771 (charge), 3769 (fire), 3767 (hit). Temple Grounds (pool
+  path) boots and toggles clean. Not listened to; Trilogy/PAL discs unrun (silent as before if the id is absent).
+
+## 2026-11-10: PR #122 merged (BubbleTea033) + follow-up fixes
+
+- PR: #107 lock-on release aim sync at the end of `CFirstPersonCamera::UpdateTransform`; custom FOV re-applied
+  after cinematics (`CCameraManager::UpdateCameras`); #97 follow-up, widescreen helmet map through the lagged
+  edges (`CGuiFrame.cpp`); opt-in `prime1_air_physics` (`CPlayerDynamics.cpp`); opt-in `prime1_boost_ball` +
+  `prime1_boost_falloff` + `prime1_disc`, reading Prime 1's CTWK "Ball" from the player's own GM8* disc
+  (`platform/port_prime1_tweaks.cpp`, `port_prime1_tweaks.h`, `tests/port_prime1_tweaks.cpp`).
+- Fixes on top: Tweaks.pak read capped at 16 MB and the compressed Ball's inflated size checked before it is
+  allocated (`BallSizeOk`); `ParseBall` refuses negative or non-finite values and a zero drain or full charge time
+  (`CMorphBall` divides by both); `PortPrime1BoostBall` is off inside an `EchoesValuesScope`, so Spider Ball
+  tracks and half-pipes keep Echoes' recharge wait along with Echoes' values; the disc dialog's open flag is
+  atomic; the air-friction comments said "once the jump is released" where the code (and Prime 1) skips friction
+  while the jump is held and rising.
+- Left as is: `Values()` takes a mutex and copies the disc path per getter call (a few per frame, option on
+  only), and the first use reads the disc on the game thread. The Prime 1 air path drops Echoes'
+  `GetAcceleration()` scaling of friction and cap, as Prime 1 has none.
+- Checked: build, `port_prime1_tweaks_tests`, settings index, console docs. No gameplay run and no Prime 1 disc
+  here: the disc read, the boost feel and the air physics are unrun on this side.
+
+## 2026-11-10: #123, echo lock stuck after leaving the room part-solved (retail bug)
+
+- Main Research (`04_cliff_contraption`) and Aerie (`10_cliff_rooftop`), NTSC and PAL: each shot sonic emitter is
+  kept by a memory relay ('Store Destroyed State'), but the counter that opens the lock (100b0315 / 204100be) is
+  incremented by the shot relay only and restarts at 0 on a room reload. Staging Area and Hive Dynamo Access have
+  the relays increment the counter themselves and are fine. Main Gyro Chamber (the room the reporter names) has
+  no such state: its echo gate keeps nothing until solved and needs the Annihilator Beam.
+- Fix: `PortRecountEchoLocks` in `CScriptMailbox::SendMsgs` re-increments the counter once per kept emitter relay
+  on area load, unless the lock's own solved relay is kept. A save already stuck (3 relays, lock closed) opens on
+  entering the room.
+- Checked in Main Research by console (`send e100b02e6 Activate`/`SetToZero`, `warp 0`, `warp 914f1381`): two shots
+  + reload + third shot solves; three kept relays with no solved relay solve at load. Aerie not run.
+
+## 2026-11-10: #121, mouse aim leaves Samus facing the wrong way after an elevator cutscene
+
+- An arrival cutscene ends with a `CScriptSequenceTimer` sending SetToZero to a spawn point, whose
+  `CPlayer::Teleport` runs after that tick's `UpdateMouseAim` synced the locked aim to the old heading; the next
+  tick the aim owns the view and turns the body back. Fix: `PortMouse::Place` from `CPlayer::Teleport` turns the
+  aim of any direct source (mouse, twin stick, touch) with the placement. Test in `port_radial_mouse_tests`.
+- Repro (Temple Grounds `00_elev_temple_sand_a`, `MP2_SKIP_CINEMATICS=0`, console `aim 137 0`, then
+  `send e00180053 Start`): yaw after the cutscene -137 before, 0 after (0 with aim off). Not checked on Windows.
+  Unpushed, no reply posted.
+
+## 2026-11-09: #120, touch/controller swap blocked by a saved player-1 controller
+
+- Reporter's log: `Xbox 360 Controller ... port -1` beside the touch pad on port 0. Aurora's
+  `prefer_real_controller_on_first_port` returned whenever `controller_ports.dat` held a choice for port 0, and the
+  F1 Player 1 combo saves one for any pick, the touch pad included. Then the saved pad kept the port, the other
+  got -1, and unplugging the saved pad left player 1 empty (same code in MP1; MP1's users rarely open that combo).
+- Fix (`extern/aurora/lib/input_first_port.hpp` `choose_first_port`, `input.cpp`): a real pad without a configured
+  port takes port 0 from a fallback pad whatever is saved; a fallback pad fills an empty port 0 (also under
+  "None"); "None" keeps real pads off; pads the user put on ports 1-3 are never taken; picking a fallback pad for
+  port 0 saves Unset. Existing files heal by themselves. Test `input_first_port_tests` (11), headless check with
+  `MP2_VPADS=1`: `padport clear 0`, reboot -> `Virtual Pad 1 moved to port 0`; `padport 0 0` writes state 0.
+- Not checked on a device (needs a real pad + the touch overlay). No reply posted (user: do not post).
+- Follow-up (user: every pad must work in single-player without picking one): the pad used last (button, or axis
+  past 16000; touch pad and `MP2_VPADS` pads included) takes pad port 0 while `GetNumPlayers() <= 1`
+  (`port_events.cpp` -> `PortInputDevices::NotePadUsed` -> `PADTakeFirstPort`), unsaved; the old holder gets the
+  taker's port or the first empty one. A saved None for player 1 still keeps real pads off. When a match starts
+  (`MatchPortsTick`) `PADRestoreSavedPorts` reapplies the Player combos' saved choices. The front end counts as
+  single-player, so in the multiplayer setup menus the pad pressed last is player 1 unless a choice is saved.
+
+## 2026-11-09: #96, Hunter Ing doesn't fade out on death
+
+- `CMediumIng::UpdateMistState` (port-only, fn_41_6078) returned at once for a dead Ing; retail's `!mAlive` branch
+  (0x60AC beq 0x64A8) skips only the mist state switch and the visor flags, so the mist decay, light and model
+  alpha (`255 * (1 - 0.65 mist) * mFD0`) still run and Dead's mFD0 (-0.33/s) fades the model. Before: alpha stayed
+  255 until DeathDelete at LieOnGround (~5.5 s, then a pop); after: 255 -> 123 in 1.6 s. Console `var <id> ming.alpha`.
+- Repro (reporter's save state, slot 6 = Crypt Tunnel): `state load 6`, `warp 42` (Undertemple Shaft), `tp -167.6
+  -125 -70`, `send u0895 Activate`, after ~200 updates `damage u0895 140` then `damage u0895 20` (one 2000 hit
+  is a massive death: instant explode + delete). `tp` doesn't change the player's area; `warp` does.
+
+## 2026-11-08: #86 item 5, Elevator and light beam cutscenes Original/Fast
+
+- New `travel_cutscenes` (Enhancements > Pace; env `MP2_TRAVEL_CUTSCENES`, console `travel`): Fast doubles dt and
+  the camera's dt under a cinematic camera while a travel sequence runs, as Rotating rooms does. Departure = a
+  running CScriptSequenceTimer that sends to a CScriptWorldTeleporter directly (elevators) or through one
+  CScriptRelay (light beams' DoTeleportToChosenWorld). Arrival = the first camera SQTR started within 3 s after
+  the teleporter's world change (light-beam arrivals start from SPWN -> SRLY and reach no TEL1). No member on
+  CScriptSequenceTimer (it would change the save-state schema hash); the arrival is kept by packed uid.
+- Verified (MP2_NEW_GAME, SKIP_INTRO=0, console-driven): 00_elev_temple_sand_a departure, world change ~150
+  updates after the trigger vs ~310 Original, arrival window 193 updates; 00_sand_generator "Teleport In"
+  (`layer 6`, send SRLY 1827013d SetToZero): cinematic camera ~260 vs ~540 updates. Log: `[travel] ... runs|ended`.
+- #86 items 1-4 reported only, not implemented. No reply posted.
+
+## 2026-11-08: #111 Rezbit virus reboot unreachable (Twin Stick Aim, dual-stick presets)
+
+- Retail breaks the virus on L + R + B (`CHintState.cpp` kBHT_TriggersAndB). Two port causes:
+  Twin Stick Aim (#12, `ApplyTwinStickFreeAim`) blocks the R trigger from pressing R in gameplay, so with R on RT
+  the memo showed RT but nothing pressed R (the reporter's "LT + RT + A": R on RT, Jump moved to A); and the
+  Modern/Remastered presets put R on the right stick click, unholdable with Jump on A.
+- Fix: CPlayer::Update publishes `PortTouch::RezbitInfected`; while infected the input layer skips the Twin Stick
+  block and puts a first PadR row on the R trigger (`ApplyRezbitReboot`), so the memo shows RT and it works.
+  The first attempt (a9b68323f: Fire stands in for R, memo image swap) is reverted by this commit.
+- Checked with the uinput pad: default + Twin Stick LT+RT+B, Modern and Remastered LT+RT+A recover; GameCube
+  preset without Twin Stick stays retail (LT+RT+A doesn't, LT+RT+B does). Keyboard (Q+E+Z, Mouse preset
+  RMB+Alt+Space) recovers without a WM; on a desktop Alt+Space may be a WM shortcut (unverified).
+- Debug: console `prompticon <hexid...>` (a prompt image's binding and icon), `strg <tbl> <idx> raw` (tags).
+  Gotcha: pressing X to wake the uinput pad morphs Samus (use `ls`).
+
+## 2026-11-07: AGENTS.md Status snapshot (moved here when it was trimmed)
+
+
+- Latest release 0.12.0 (tag v0.12.0 = 36dd3dc52, published 2026-11-06, 12 assets, soak 96/96 ok; notes commit
+  5252270a3 pushed; PRs #90 #91 merged + pushed d8ebc5777, #88 #89 merged + 9ec12fe36 (RGBA-mask check) pushed, no PR comments; APK not installed on the Poco; winbuild laptop not updated). No GitHub issue
+  replies posted (#36 #44 #46 #50-#52 #54 #58-#61 #64 #65 #67 #68 #72 fixed; #67 = ae822d752, #68 = 6d90dfc2f, #72 = 7f540a0d3): post only when the user asks.
+- Pushed e6a30090c (2026-11-04): 5732abbcd restores #44's per-pixel-lighting call (b28e27b38 dropped it), d2b98e021 Android
+  data-folder move continues after the All-files grant, e6a30090c seed 1560 rows (24 fight/boss spots, `record --jobs`;
+  no Chykka/Boost/Emperor Ing). APK with all three installed on the Poco, not yet run. Then pushed 6311d2d8a: MP1
+  package 32 (docs/MP1_SYNC.md; beam switch speed, target next/prev, arm cannon FOV, toggle-L; build only).
+- Pushed 37339ec66: 8d74762c6 seed 1584 rows (Chykka/Boost/Emperor Ing + combos/PB/seekers/screw), 37339ec66 data-folder
+  panel compares folders with fs::equivalent (/data/user/0 vs /data/data showed "Move back"); APK installed on the Poco, not yet run.
+- Pushed c9c201bb9: 18e87df43 merges PR #75 (heap lock vs DVD-thread music buffer, GitHub shows merged) + c9c201bb9
+  follow-up (TARGET_PC includes, OOM callback only on its own thread); no PR comment posted.
+- #76 reopened by reporter on 0.11.0: b28e27b38's default-disc check compared /data/user/0 vs /data/data as text; fixed
+  a78f3663d (fs::equivalent) + e00cd5f6d (F1 disc version line, next-start line only on change); pushed e00cd5f6d, APK
+  with a78f3663d installed on the Poco but not run, e00cd5f6d APK built not installed, no reply posted. ca17fd0a8 #44 pipeline-cache per-pixel lighting.
+- 2026-11-05 #76 follow-up (reporter on Trilogy lost GC progress): c99964646 G2ME<->R3ME card conversion
+  (import/`gci restore`/boot offer; verified 100% save identical in game) + 8c5de9433 F1 card import no longer
+  greyed out on title/file select; pushed 8c5de9433, APK zip on the Poco's Download (not installed), no reply. Boot offer won't re-show (0.11.0 marker): user's call.
+  efaedaf80 (pushed; zip on the Poco's Download + /tmp/opencode/issue-apk, not installed, no reply): reporter is PAL (G2MP -> R3MP); R3MP tables = R3ME's, conversion enabled, verified in game
+  on the PAL rvz (114/114). Reporter has .restore-offered-R3MP: use F1 Restore (or gci restore).
+  8ccdeea23 (pushed): GC title screen + title music on Trilogy (docs/TRILOGY.md), verified on Xvfb USA + PAL; 6d81ae426 + cfd8ad731 (pushed) fix the music being held after a multiplayer-menu return.
+- 2026-11-06 #76 comment (Trilogy MP match end closes the game): 728709f53 SetSelection on unbuilt menu list; verified USA+PAL Trilogy on Xvfb; pushed fae347e15 (on PR #85 merge bc5f3fc1f), no reply; Poco has fae347e15's APK (not run).
+- 2026-11-05 #84 cde146255 (pushed, no reply): savestates keep CScriptSequenceTimer state + restore waits for the load's skip; mid-cutscene load plays on (Xvfb).
+  3c644dcbd (pushed): kTagFields now saves every script object (denylist in SavedField); `statecheck --gaps --cinematics`.
+- 2026-11-05 #80 Exit Game on the main menu (hold Z or a finger on it 1.5 s; `menu_exit`, default on everywhere):
+  7dd061324 + a9e7d4800 pushed; Poco has a9e7d4800's APK (not run); no reply (docs/STATUS.md top). #74 (2c69718c0) pushed earlier, no reply posted.
+- 2026-11-05 #78 lagoon water flicker: fluid dead alpha (8b961cf59) + Aurora keys dstAlpha as off/0/0xFF and the
+  Poco's 327 missing configs merged (seed 1744 rows; a re-record must `merge` the old seed); pushed 8455db08e (+ F1 System help texts dropped), no reply.
+  Poco has 08747c842's APK (not run); 8455db08e APK at /tmp/opencode/issue-apk for the user to attach.
+  1adb46776 pushed: key audit, `gx::pipeline_unused_inputs`. 0569c2d54 (pushed) fog on/off out of the key; 7e7a65de5 (pushed with PR #82/#83 merges, 4167a6858; #83 include fix 564b4f452 pushed; PR #79 skip polish merged + follow-up b7de2648b pushed, no PR comments)
+  texgen matrix via uniform + dstAlpha 0 as on, seed 1233 GX rows; left vs phone: alphaUpdate (write mask), lighting variants (~19 rows). Tried and dropped 2026-11-06: drawing each area's models under every
+  model-flag combo (Temple Grounds: 0 of 42 phone rows, +1288 unused rows); phone gaps need real-play recording.
+- 2026-11-06 third-person camera (MP1 package 33, docs/STATUS.md top): 9038a8f6a + 9c4f563de (morph handoff, body charge/muzzle fx, pointer aim, console saves) pushed with fae347e15 (ctest 505/505).
+  Pushed 480c4ecfe: 91c2e3b89 (body animates), 18fcb4b79 (jump arc + double-jump flip: MP body FSM and anims borrowed from character 0),
+  480c4ecfe (dash/grapple/knockback borrowing, third-person grapple crash fix). Poco has 480c4ecfe's APK (not run).
+  Pushed 957a06d64 (Poco has its APK, not run): exact-match borrow rule + locomotion changes enabled in third person (user: anims stuck/missing); single player has no flinch/knockback state, only hurled (retail; MP chars have all).
+- 2026-11-06 MP1 package 34 (docs/MP1_SYNC.md, reviewed through MP1 b601be339), pushed: 1e44f03e3 texture pressure +
+  user_textures, 4b6f85f3e damage sliders, 71f3fbe28 Shoot in Scan Visor, 7efb40368 movement cheats + freecam here, 48f1014a4 doc.
+  Open: 59e55a8ad beam colours (maybe). Winbuild laptop unreachable (ssh timeout), not updated.
+- 2026-11-07 #97 helmet distortion: 2cdc78666 (pushed with #98's f8a5ade03, no reply) stretches the helmet frame evenly
+  (SetSpreadSplit negative cut, every model, also vertically in portrait); checked 16:9 vs emulator, 21:9, portrait.
+  PR #92 (Steam Input gyro/back buttons) merged d6a734fe9 + a2eb3060b + 4c5184355, then 25726963f (pushed): SDL no longer opens Sony/Nintendo pads (LED clash); PortSteamTriton reads DualSense/Edge/DS4/Switch Pro/Joy-Cons via hidraw (only write: Switch IMU-on). No PR comment; untested on hardware.
+- 2026-11-07 cleanup (pushed through 75cec32b2): old-tree files, 67 dead functions, shared byte/CRC/bitstream,
+  strings + UTF-8 paths, settings accessors in platform/port_overlay_accessors.inc. Local, not pushed: 93e5100f4
+  settings FN_BOOL_KEY/RANGE_KEY rows, af0385d95 console Usage() from help rows + ArgFloat/ArgInt, 330f61aee
+  MP_BOOT_STUBS chain retired. Not done: debug_ui checkbox/slider helpers (needs a visual check).
+- Retail-vs-port audits: geometry done except CStateManager ~1493; asm done for DOL call targets, texture binds,
+  literal state-setter args. Not done: field-offset checks. #65 bug 2 (white bomb-slot smoke, Windows/D3D12?)
+  not reproduced on Linux.
+- Unmerged: `gfx/remaster-render` (wt-mp2-remaster; Poco MSAA fix 068261f04, APK built, not installed: ask).
+  #44 remaining: TEV alphaPass content variants only the pipeline seed covers (ubershader declined).
+- Open: per-player Spider toggle/aim lock-on/hand-on-cannon are global; retail Puffer has no engaged state;
+  `build-port` (headers-only) fails on SDL3 headers, use build-port-link. Lane slots free.
+  Rando terrain (tools/rando_terrain.py) models water/GB/Spider/Boost/bombs/Screw (PBs don't bomb-jump); next: Grapple,
+  platform motion (docs/STATUS.md top entry has the per-item loop).
+- Ask before removing wt-mp2-sc-harness, wt-mp2-sc-los or any `wt-mp2-*` worktree.
+
 ## 2026-11-06: third-person camera (MP1 package 33)
 
 - `platform/port_third_person.cpp` (MP1's camera minus its body module; Echoes draws the real

@@ -16,7 +16,8 @@ keyboard) in use. The keyboard icons label the keys the port binds by default
 The bindings/ set holds one icon per key and pad input, which the port swaps
 in when an action is rebound.
 
-Icons come from Kenney's "Input Prompts" pack, which is CC0; the ones used are
+Icons come from Kenney's "Input Prompts" pack, which is CC0, and the Steam Deck
+set from Xelu's "Free Controllers & Keyboard Prompts", also CC0; the ones used are
 vendored in tools/prompt_icons/ (see the README there). Run with an output
 directory, usually the `textures` folder beside the executable:
 
@@ -41,6 +42,9 @@ import os
 import re
 import struct
 import sys
+from collections import deque
+
+import numpy as np
 from PIL import Image
 
 SIZE = 32
@@ -100,6 +104,17 @@ DEVICE_ICONS = {
                "l": "switch_button_zl.png", "r": "switch_button_zr.png",
                "z": "switch_button_r.png",
                **pad_sticks_and_dpad("switch")},
+    # Valve's controllers (the Steam Deck, the Steam Controller): Xbox-positioned face buttons, so
+    # A is A. The pack has no per-direction stick art; those are built (deck_stick_direction).
+    "steamdeck": {"a": "steamdeck_a.png", "b": "steamdeck_b.png",
+                  "x": "steamdeck_x.png", "y": "steamdeck_y.png",
+                  "start": "steamdeck_menu.png",
+                  "l": "steamdeck_l2.png", "r": "steamdeck_r2.png", "z": "steamdeck_r1.png",
+                  "stick": "steamdeck_left_stick.png", "cstick": "steamdeck_right_stick.png",
+                  "dpad": "steamdeck_dpad.png",
+                  **{f"stick_{d}": f"steamdeck_left_stick_{d}.png" for d in DIRECTIONS},
+                  **{f"cstick_{d}": f"steamdeck_right_stick_{d}.png" for d in DIRECTIONS},
+                  **{f"dpad_{d}": f"steamdeck_dpad_{d}.png" for d in DIRECTIONS}},
     # The sticks and the D-pad on their default keys: WASD, IJKL and the arrows.
     "keyboard": {"a": "keyboard_x.png", "b": "keyboard_z.png", "x": "keyboard_c.png",
                  "y": "keyboard_v.png", "start": "keyboard_enter.png",
@@ -165,6 +180,24 @@ PAD_ICONS = {
         "leftstick": "switch_stick_l_press.png", "rightstick": "switch_stick_r_press.png",
         "lt": "switch_button_zl.png", "rt": "switch_button_zr.png",
         **pad_icons_for_axes("switch"),
+    },
+    # The Steam Deck / Steam Controller set (tools/prompt_icons/steamdeck_*, from Xelu's pack). Menu
+    # and View are Start and Back; the back grips are SDL's paddles (L4/R4 the first pair).
+    "steamdeck": {
+        "south": "steamdeck_a.png", "east": "steamdeck_b.png",
+        "west": "steamdeck_x.png", "north": "steamdeck_y.png",
+        "start": "steamdeck_menu.png", "back": "steamdeck_inventory.png",
+        "leftshoulder": "steamdeck_l1.png", "rightshoulder": "steamdeck_r1.png",
+        "leftstick": "steamdeck_left_stick_click.png",
+        "rightstick": "steamdeck_right_stick_click.png",
+        "lt": "steamdeck_l2.png", "rt": "steamdeck_r2.png",
+        "leftpaddle1": "steamdeck_l4.png", "rightpaddle1": "steamdeck_r4.png",
+        "leftpaddle2": "steamdeck_l5.png", "rightpaddle2": "steamdeck_r5.png",
+        "stick_l": "steamdeck_left_stick.png", "stick_r": "steamdeck_right_stick.png",
+        "dpad": "steamdeck_dpad.png",
+        **{f"stick_l_{d}": f"steamdeck_left_stick_{d}.png" for d in DIRECTIONS},
+        **{f"stick_r_{d}": f"steamdeck_right_stick_{d}.png" for d in DIRECTIONS},
+        **{f"dpad_{d}": f"steamdeck_dpad_{d}.png" for d in DIRECTIONS},
     },
     # Keyed by the GameCube button rather than the SDL one: the port names a GC
     # pad's button after the action its default mapping gives it (see
@@ -262,8 +295,182 @@ def write_dds(img, path):
         f.write(header + pf + caps + img.tobytes())
 
 
+# The boxes' button disc (platform/port_prompts.cpp DiscVariant) draws the bound icon's symbol in
+# white. Cut out of a 64px icon at run time a two-letter symbol (R2, RT, ZR) is a few texels tall and
+# came out soft and stepped once enlarged onto the disc, so each icon's symbol is cut here once, from
+# the source art, and written large and sharp beside it as <stem>_symbol.dds: one 8-bit channel, its
+# coverage. SYMBOL_HEIGHT is its height, SYMBOL_WIDTH the most a wide one may take.
+SYMBOL_HEIGHT = 96
+SYMBOL_WIDTH = 132
+
+
+def symbol_coverage(icon):
+    """The icon's symbol as coverage 0..1, as DiscVariant finds it: what stands out from the face
+    (the commonest shade) inside the icon's own outline by more than its rim, light, dark or cut
+    out. None when the icon has no inside."""
+    px = np.asarray(icon.convert("RGBA"), dtype=np.float32)
+    h, w = px.shape[:2]
+    alpha = px[..., 3] / 255.0
+    opaque = px[..., 3] >= 128
+    luma = (px[..., 0] * 77 + px[..., 1] * 150 + px[..., 2] * 29) / 256.0
+    far = 1 << 20
+    dist = np.full((h, w), far, dtype=np.int32)
+    queue = deque()
+    def seed(x, y):
+        if dist[y, x] != 0 and not opaque[y, x]:
+            dist[y, x] = 0
+            queue.append((x, y))
+    for x in range(w):
+        seed(x, 0)
+        seed(x, h - 1)
+    for y in range(h):
+        seed(0, y)
+        seed(w - 1, y)
+    outside = []
+    while queue:  # the outside, through clear texels
+        x, y = queue.popleft()
+        outside.append((x, y))
+        for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if 0 <= nx < w and 0 <= ny < h:
+                seed(nx, ny)
+    queue = deque(outside)
+    while queue:  # then inwards, a step of one texel either way
+        x, y = queue.popleft()
+        d = dist[y, x] + 1
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < w and 0 <= ny < h and dist[ny, nx] > d:
+                    dist[ny, nx] = d
+                    queue.append((nx, ny))
+    inside = np.argwhere(dist > 0)
+    if inside.size == 0:
+        return None
+    (y0, x0), (y1, x1) = inside.min(axis=0), inside.max(axis=0)
+    rim = max(2, int(round(0.12 * min(x1 - x0 + 1, y1 - y0 + 1))))
+    core = dist > rim
+    hist = np.bincount((luma[core & opaque] / 8).astype(int).clip(0, 31), minlength=32)
+    face = int(hist.argmax()) * 8 + 4
+    cover = np.maximum(np.clip((np.abs(luma - face) - 40) / 64.0, 0, 1) * alpha, 1 - alpha)
+    return np.where(core, cover, 0.0).astype(np.float32)
+
+
+def make_symbol(icon):
+    """The symbol, cropped and enlarged to SYMBOL_HEIGHT (or SYMBOL_WIDTH), its edge sharpened back
+    to about one texel; an 8-bit coverage image, or None."""
+    cover = symbol_coverage(icon)
+    if cover is None:
+        return None
+    ys, xs = np.nonzero(cover > 0.25)
+    if ys.size == 0:
+        return None
+    pad = 2
+    y0, y1 = max(0, ys.min() - pad), min(cover.shape[0], ys.max() + 1 + pad)
+    x0, x1 = max(0, xs.min() - pad), min(cover.shape[1], xs.max() + 1 + pad)
+    crop = cover[y0:y1, x0:x1]
+    sh, sw = ys.max() - ys.min() + 1, xs.max() - xs.min() + 1
+    fit = min(SYMBOL_HEIGHT / sh, SYMBOL_WIDTH / sw)
+    size = (max(1, round(crop.shape[1] * fit)), max(1, round(crop.shape[0] * fit)))
+    big = np.asarray(Image.fromarray(crop, mode="F").resize(size, Image.BICUBIC), dtype=np.float32)
+    if fit > 1:
+        # Enlarged, the edge is `fit` texels soft: back to one, about the middle (as an enlarged font
+        # glyph's).
+        big = (big - 0.5) * fit + 0.5
+    return Image.fromarray((np.clip(big, 0, 1) * 255 + 0.5).astype(np.uint8), mode="L")
+
+
+def write_coverage_dds(img, path):
+    """An 8-bit, one-channel DDS (rows bottom up, as write_dds's)."""
+    img = img.convert("L").transpose(Image.FLIP_TOP_BOTTOM)
+    w, h = img.size
+    header = b"DDS " + struct.pack("<7I44x", 124, 0x1 | 0x2 | 0x4 | 0x1000, h, w, 0, 0, 1)
+    pf = struct.pack("<2I4s5I", 32, 0x20000, b"\0\0\0\0", 8, 0xFF, 0, 0, 0)  # LUMINANCE
+    caps = struct.pack("<5I", 0x1000, 0, 0, 0, 0)
+    with open(path, "wb") as f:
+        f.write(header + pf + caps + img.tobytes())
+
+
+def write_symbol(icon_name, path):
+    symbol = make_symbol(load_icon(icon_name))
+    if symbol is not None:
+        write_coverage_dds(symbol, path)
+    return symbol is not None
+
+
 def load_icon(name):
+    stem = name[:-4] if name.endswith(".png") else name
+    m = re.fullmatch(r"(steamdeck_(?:left|right)_stick)_(up|down|left|right)", stem)
+    if m:
+        return deck_stick_direction(m.group(1), m.group(2))
     return Image.open(os.path.join(ICONS_DIR, name)).convert("RGBA")
+
+
+def kenney_arrow():
+    """Kenney's direction arrow, lifted out of xbox_stick_l_left (the pack draws it into each
+    stick-direction icon rather than on its own): the connected shape holding the icon's leftmost
+    texel, which is the arrow, standing clear of the stick. It points left, cropped. The left one
+    is used because up and down touch the stick's outline in the Xbox art."""
+    pushed = load_icon("xbox_stick_l_left.png")
+    pp = pushed.load()
+    w, h = pushed.size
+    start = min(((x, y) for y in range(h) for x in range(w) if pp[x, y][3] > 0))
+    shape, stack = {start}, [start]
+    while stack:
+        x, y = stack.pop()
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                q = (x + dx, y + dy)
+                if 0 <= q[0] < w and 0 <= q[1] < h and q not in shape and pp[q][3] > 0:
+                    shape.add(q)
+                    stack.append(q)
+    arrow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ap = arrow.load()
+    for q in shape:
+        ap[q] = pp[q]
+    return arrow.crop(arrow.getbbox()), w
+
+
+# The Steam Deck art's colours: the grey of a stick or button face and its dark rim.
+DECK_FACE = (79, 79, 79)
+DECK_RIM = (21, 21, 21)
+
+
+def deck_arrow(arrow):
+    """Kenney's white arrow in the Deck art's colours: the face grey, with a dark rim around it
+    as the Deck icons have."""
+    from PIL import ImageFilter
+    rim = max(1, round(min(arrow.size) / 6))
+    pad = rim + 1
+    canvas = Image.new("RGBA", (arrow.width + 2 * pad, arrow.height + 2 * pad), (0, 0, 0, 0))
+    canvas.alpha_composite(arrow, (pad, pad))
+    alpha = canvas.getchannel("A")
+    outline = alpha.filter(ImageFilter.MaxFilter(2 * rim + 1))
+    out = Image.new("RGBA", canvas.size, DECK_RIM + (0,))
+    out.putalpha(outline)
+    face = Image.new("RGBA", canvas.size, DECK_FACE + (0,))
+    face.putalpha(alpha)
+    out.alpha_composite(face)
+    return out
+
+
+def deck_stick_direction(stick, direction):
+    """A Steam Deck stick pushed one way: the stick at the size of its plain icon, as the other
+    sets keep theirs, with Kenney's arrow (kenney_arrow, in the Deck's colours) at the canvas
+    edge on that side. The Deck art fills its canvas, so the arrow sits over the stick's rim
+    rather than in a margin; its own dark rim keeps it apart from the stick."""
+    ARROW_SCALE = 1.1
+    out = load_icon(stick + ".png")
+    size = out.width
+    arrow, kenney_size = kenney_arrow()
+    scale = size / kenney_size * ARROW_SCALE
+    arrow = arrow.resize((max(1, round(arrow.width * scale)), max(1, round(arrow.height * scale))),
+                         Image.LANCZOS)
+    arrow = deck_arrow(arrow)
+    arrow = arrow.rotate({"left": 0, "down": 90, "right": 180, "up": 270}[direction], expand=True)
+    pos = {"left": (0, (size - arrow.height) // 2), "right": (size - arrow.width, (size - arrow.height) // 2),
+           "up": ((size - arrow.width) // 2, 0), "down": ((size - arrow.width) // 2, size - arrow.height)}
+    out.alpha_composite(arrow, pos[direction])
+    return out
 
 
 def make_cluster(stems):
@@ -330,6 +537,7 @@ def main():
     # The prompt textures bound by asset id (kAssets) come in these sizes; kKeys
     # now holds only the few matched by hash, so it no longer lists them all.
     sizes = sorted({(SIZE, SIZE), (64, 32), (64, 64)} | {(w, h) for _, w, h, _, _ in keys})
+    symbolCount = 0
     for device, icons in PAD_ICONS.items():
         for key, icon in icons.items():
             for w, h in sizes:
@@ -337,6 +545,7 @@ def main():
                 write_dds(make_icon(icon, w, h),
                           os.path.join(bindings, f"{device}_{key}{suffix}.dds"))
                 padCount += 1
+            symbolCount += write_symbol(icon, os.path.join(bindings, f"{device}_{key}_symbol.dds"))
     missing = []
     for stem in BINDING_ICONS:
         src = os.path.join(ICONS_DIR, stem + ".png")
@@ -352,7 +561,10 @@ def main():
             suffix = "" if (w, h) == (SIZE, SIZE) else f"_{w}x{h}"
             write_dds(make_icon(stem + ".png", w, h),
                       os.path.join(bindings, f"{stem}{suffix}.dds"))
-    print(f"bindings: {len(BINDING_ICONS) - len(missing)} key icons, {padCount} pad icons -> {bindings}")
+        if stem not in COMPOSITES:
+            symbolCount += write_symbol(stem + ".png", os.path.join(bindings, f"{stem}_symbol.dds"))
+    print(f"bindings: {len(BINDING_ICONS) - len(missing)} key icons, {padCount} pad icons, "
+          f"{symbolCount} disc symbols -> {bindings}")
     if missing:
         print("  missing from tools/prompt_icons: " + ", ".join(missing))
 

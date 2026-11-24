@@ -181,7 +181,6 @@ void DrawActors(const CGameArea& area) {
 
 Mode GetMode() { return sMode; }
 void SetMode(Mode mode) { sMode = mode; }
-const char* ModeName(Mode mode) { return kNames[int(mode)]; }
 bool ParseMode(const char* name, Mode& mode) {
   for (int i = 0; i < 3; ++i) {
     if (std::strcmp(name, kNames[i]) == 0) {

@@ -160,6 +160,46 @@ TEST_F(GXResidentTest, DisplayListIsRemadeForNewVertexSizes) {
   EXPECT_EQ(aurora::gx::resident::used_bytes(), 0u);
 }
 
+TEST_F(GXResidentTest, UpdateTakesTheArrayAgain) {
+  // The game edits a retained array (the drawn button ring moves a box's frame line) and says so:
+  // the next draw uploads what it holds now, and the count is kept.
+  std::array<u8, 64> positions{};
+  GXPortRetainResident(positions.data(), static_cast<u32>(positions.size()));
+  const auto draw = [&] {
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_INDEX8);
+    GXSetArray(GX_VA_POS, positions.data(), static_cast<u32>(positions.size()), 3, false);
+    GXBegin(GX_TRIANGLES, GX_VTXFMT0, 3);
+    GXPosition1x8(0);
+    GXPosition1x8(1);
+    GXPosition1x8(2);
+    GXEnd();
+    aurora::gx::fifo::drain();
+  };
+  draw();
+  EXPECT_EQ(aurora::gfx::g_testResidentUploads, 1u);
+  positions[0] = 0x42;
+  GXPortUpdateResident(positions.data());
+  aurora::gx::fifo::drain();
+  const auto* entry = aurora::gx::resident::find(positions.data());
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ((*entry->bytes)[0], 0x42);
+  draw();
+  EXPECT_EQ(aurora::gfx::g_testResidentUploads, 2u);
+  // One release still frees it: the update kept the single retain.
+  GXPortReleaseResident(positions.data());
+  aurora::gx::fifo::drain();
+  EXPECT_EQ(aurora::gx::resident::find(positions.data()), nullptr);
+}
+
+TEST_F(GXResidentTest, UpdateOfDataNotRetainedDoesNothing) {
+  std::array<u8, 16> data{};
+  GXPortUpdateResident(data.data());
+  aurora::gx::fifo::drain();
+  EXPECT_EQ(aurora::gx::resident::find(data.data()), nullptr);
+  EXPECT_EQ(aurora::gx::resident::used_bytes(), 0u);
+}
+
 TEST_F(GXResidentTest, ArrayReadsItsResidentCopy) {
   std::array<u8, 64> positions{};
   GXPortRetainResident(positions.data(), static_cast<u32>(positions.size()));

@@ -3,6 +3,8 @@
 // result with Aurora's DVD overlays.
 
 #include "port_mods.h"
+#include "port_utf8_path.h"
+#include "port_strings.h"
 
 #include "port_entry.h"
 #include "port_mods_disc.h"
@@ -39,21 +41,8 @@ std::string PathString(const fs::path& path) {
   return std::string(u8.begin(), u8.end());
 }
 
-fs::path PathFromString(const std::string& text) { return fs::path(std::u8string(text.begin(), text.end())); }
-
-std::string Lower(std::string text) {
-  for (char& c : text) {
-    if (c >= 'A' && c <= 'Z') {
-      c = char(c - 'A' + 'a');
-    }
-  }
-  return text;
-}
-
-bool EndsWith(const std::string& text, const char* suffix) {
-  const size_t length = std::strlen(suffix);
-  return text.size() >= length && text.compare(text.size() - length, length, suffix) == 0;
-}
+using port::EndsWith;
+using port::Lower;
 
 // --- Base disc access -------------------------------------------------------
 
@@ -119,7 +108,7 @@ bool ReadPakHeader(const std::string& hostPath, int32_t entry, std::vector<uint8
   Segment whole;
   if (!hostPath.empty()) {
     std::error_code ec;
-    size = fs::file_size(PathFromString(hostPath), ec);
+    size = fs::file_size(PortUtf8::FromUtf8(hostPath), ec);
     if (ec) {
       return false;
     }
@@ -249,10 +238,10 @@ void Initialize(const std::string& userPath) {
 
   std::error_code ec;
   // Created on first start so the user has somewhere to drop mods.
-  fs::create_directories(PathFromString(sStatus.folder), ec);
+  fs::create_directories(PortUtf8::FromUtf8(sStatus.folder), ec);
   ec.clear();
   std::vector<fs::path> modDirs;
-  for (fs::directory_iterator it(PathFromString(sStatus.folder), ec), end; !ec && it != end; it.increment(ec)) {
+  for (fs::directory_iterator it(PortUtf8::FromUtf8(sStatus.folder), ec), end; !ec && it != end; it.increment(ec)) {
     const std::string name = PathString(it->path().filename());
     if (!name.empty() && name[0] != '.' && it->is_directory(ec)) {
       modDirs.push_back(it->path());
@@ -387,7 +376,7 @@ void Initialize(const std::string& userPath) {
       if (used.count(key) != 0) {
         ++sStatus.mods[looseMod[key]].resources;
       } else {
-        Message(resource.mod + ": " + PathString(PathFromString(resource.hostPath).filename()) + " is in no PAK; ignored");
+        Message(resource.mod + ": " + PathString(PortUtf8::FromUtf8(resource.hostPath).filename()) + " is in no PAK; ignored");
       }
     }
   }

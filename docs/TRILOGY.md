@@ -37,9 +37,8 @@ Missing paks read as empty bytes (guarded), so the absent ones don't fail the mo
   `FrontEnd.pak` (139 resources, 1/5 of the GC size) drops the multiplayer menu connections the GC front-end layout expects, so an
   `invertIds[i]` index runs out of range. Needs a guard (or a Trilogy-specific front end) in a later milestone
   (superseded: the `TARGET_PC` guards in "Front end on Trilogy data" and "Multiplayer and used save slot" below).
-- `PortReadDolResource` (`platform/disc.cpp`, fixed DOL addresses) has no callers in the tree today; if one is added,
-  Trilogy's `rs5mp2_p.dol` is a different binary and needs its own address table. DOL-embedded data is otherwise
-  unverified (the port compiles all code natively).
+- Nothing reads DOL-embedded data at fixed addresses (the old `PortReadDolResource` had no callers and was deleted);
+  if that comes back, Trilogy's `rs5mp2_p.dol` is a different binary and needs its own address table.
 - Not checked: audio (`AudioGrp`/`Strings.pak` differences), PAL Trilogy, Wii-only features, RVZ load time.
 
 ## Regression (2026-10-26)

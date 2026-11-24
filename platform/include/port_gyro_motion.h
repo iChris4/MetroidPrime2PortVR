@@ -67,7 +67,6 @@ public:
   bool ManualCalibrating() const { return mManual; }
   // How sure the drift calibration is, 0..1, and whether the pad was last seen still.
   float Confidence() const;
-  bool Steady() const;
 
 private:
   std::unique_ptr< GamepadMotion > mMotion;

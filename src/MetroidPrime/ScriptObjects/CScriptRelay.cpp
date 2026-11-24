@@ -15,7 +15,8 @@ CScriptRelay::CScriptRelay(TUniqueId uid, const rstl::string& name, const CEntit
 void CScriptRelay::AcceptScriptMsg(CStateManager& mgr, const CScriptMsg& msg) {
   CEntity::AcceptScriptMsg(mgr, msg);
 #ifdef TARGET_PC
-  if (std::getenv("MP2_DEBUG_BALL") != nullptr) {
+  static const bool sDebugBall = std::getenv("MP2_DEBUG_BALL") != nullptr;
+  if (sDebugBall) {
     std::fprintf(stderr, "[ball] relay %04x eid %04x got %08x active %d\n", GetUniqueId().Value(),
                  GetEditorId().Value(), unsigned(msg.GetMessage()), int(GetActive()));
   }

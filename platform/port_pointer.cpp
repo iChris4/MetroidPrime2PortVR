@@ -110,7 +110,6 @@ bool SynthesizedMouse(SDL_MouseID which) { return which == SDL_TOUCH_MOUSEID || 
 
 bool Enabled() { return PortOverlay::PointerMenus(); }
 bool MapSwapFingers() { return PortOverlay::MapSwapFingers(); }
-void SetMapSwapFingers(bool swap) { PortOverlay::SetMapSwapFingers(swap); }
 void SetEnabled(bool enabled) {
   if (Enabled() != enabled) {
     sGestures.Reset();

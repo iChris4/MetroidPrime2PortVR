@@ -91,7 +91,6 @@ std::atomic< bool > sEditRequested{false};
 std::atomic< bool > sPhysicalInput{false};
 PortTouch::Activity sActivity;
 std::atomic< bool > sRealPad{false};
-std::atomic< bool > sDeviceXbox{false};
 
 // What the UI thread asks of the game; BeginFrame applies it on the game thread.
 std::atomic< int > sWheelState{0};
@@ -99,6 +98,7 @@ std::atomic< int > sWheelState{0};
 // through these too ([0] is Player 1's, the overlay's).
 constexpr int kPlayers = 4;
 std::atomic< bool > sMorphed[kPlayers]{};
+std::atomic< bool > sRezbitInfected[kPlayers]{};
 std::atomic< bool > sOrbitLocked[kPlayers]{};
 std::atomic< bool > sLockedOnObject[kPlayers]{};
 std::atomic< bool > sScanTextUp{false};
@@ -764,6 +764,12 @@ void SetMorphed(bool morphed, int player) {
   if (ValidPlayer(player)) sMorphed[player].store(morphed, std::memory_order_release);
 }
 bool Morphed(int player) { return ValidPlayer(player) && sMorphed[player].load(std::memory_order_acquire); }
+void SetRezbitInfected(bool infected, int player) {
+  if (ValidPlayer(player)) sRezbitInfected[player].store(infected, std::memory_order_release);
+}
+bool RezbitInfected(int player) {
+  return ValidPlayer(player) && sRezbitInfected[player].load(std::memory_order_acquire);
+}
 void SetOrbitLocked(bool locked, bool onObject, int player) {
   if (!ValidPlayer(player)) return;
   sOrbitLocked[player].store(locked, std::memory_order_release);
@@ -1008,11 +1014,8 @@ bool OverlayVisible() { return PortOverlay::Visible() || PortPhoto::Active(); }
 void NoteDevice(bool xboxLayout) {
   sActivity.Touch();
   // The prompt icons follow the on-screen layout while touch is the active input.
-  sDeviceXbox.store(xboxLayout, std::memory_order_release);
   PortPrompts::NoteTouchInput(xboxLayout);
 }
-
-bool DeviceIsXbox() { return sDeviceXbox.load(std::memory_order_acquire); }
 
 bool Active() {
 #if defined(PORT_TOUCH_CONTROLS)

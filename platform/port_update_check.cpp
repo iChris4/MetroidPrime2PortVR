@@ -1,4 +1,6 @@
 #include "port_update_check.h"
+#include "port_worker.h"
+#include "port_utf8_path.h"
 
 #include "port_json.h"
 #include <cstdio>
@@ -21,11 +23,6 @@
 
 namespace PortUpdateCheck {
 namespace {
-
-// The state file's name is UTF-8; a narrow path is the ANSI code page on Windows.
-std::filesystem::path Utf8Path(const std::string& text) {
-  return std::filesystem::path(std::u8string(text.begin(), text.end()));
-}
 
 bool SplitVersion(const std::string& text, std::vector<uint32_t>& parts) {
   parts.clear();
@@ -84,7 +81,7 @@ struct Runtime {
 
   // checked=<unix time>, latest=<version>, url=<release page>.
   void LoadState() {
-    std::ifstream in(Utf8Path(stateFile));
+    std::ifstream in(PortUtf8::FromUtf8(stateFile));
     std::string line;
     while (std::getline(in, line)) {
       const size_t eq = line.find('=');
@@ -104,7 +101,7 @@ struct Runtime {
   }
 
   void SaveState() const {
-    const std::filesystem::path file = Utf8Path(stateFile);
+    const std::filesystem::path file = PortUtf8::FromUtf8(stateFile);
     std::filesystem::path temp = file;
     temp += ".tmp";
     {
@@ -188,25 +185,8 @@ struct Runtime {
   }
 
   void Shutdown() {
-    {
-      std::lock_guard<std::mutex> lock(mutex);
-      stop = true;
-    }
     cancel = true;
-    wake.notify_all();
-    if (!worker.joinable()) {
-      return;
-    }
-    bool done;
-    {
-      std::unique_lock<std::mutex> lock(mutex);
-      done = wake.wait_for(lock, std::chrono::seconds(2), [this] { return workerDone; });
-    }
-    if (done) {
-      worker.join();
-    } else {
-      worker.detach();
-    }
+    PortWorker::Stop(*this);
   }
 };
 

@@ -7,8 +7,7 @@
 // was running the tests. It is all platform-independent, so it lives here and
 // tests/touch_pad.cpp drives it on the host.
 //
-// In MP2 the Android caller is platform/port_touch.cpp; the copy still left in
-// platform/debug_ui.cpp is MP1's and is not built in this tree.
+// In MP2 the Android caller is platform/port_touch.cpp.
 // What is NOT here is the state-sampling limitation of SDL's virtual joystick
 // (a tap that begins and ends between two updates is never seen by the game).
 // That is a property of SDL, not of this code, and it is documented where the

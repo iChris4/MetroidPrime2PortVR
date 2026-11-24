@@ -32,10 +32,6 @@ int RowAt(CGuiTableGroup* table, float gx, float gy, int minRow = 0, int maxRow 
 Action Table(CGuiTableGroup* table, bool callAdvance = true, bool hover = true, int minRow = 0,
              int maxRow = -1);
 
-// The row of table under the pending click, without taking it, or -1. Works
-// on an inactive table (a click there usually means "go back to it").
-int PeekClickRow(CGuiTableGroup* table, int minRow = 0, int maxRow = -1);
-
 // Press or drag on an active slider sets its value from the pointer's x.
 // True while the slider holds the pointer (the caller skips other handlers).
 bool Slider(CGuiSliderGroup* slider);
@@ -55,10 +51,6 @@ bool TakeBack();
 // stepGui is the drag distance in EFB pixels that makes one step.
 int TakeScrollSteps(float stepGui);
 
-// The vertical distance in EFB pixels between rows a and b of table, or
-// fallback when either isn't drawn.
-float RowPitch(CGuiTableGroup* table, int a, int b, float fallback);
-
 // Pointer motion for a 3D view this frame. rotate is a left drag (one finger
 // on touch); pan is a right or middle drag or a two-finger pan; both in EFB
 // pixels. zoom is wheel notches plus pinch (one notch per 41% spread),
@@ -73,10 +65,6 @@ struct ViewMotion {
 bool TakeViewMotion(ViewMotion& out);
 
 // Merge a confirm or cancel into a copy of the frame's input.
-// The caller turned a Table Advance (callAdvance off) into a confirm: the
-// click's double-click partner is swallowed like Table's own advances.
-void NoteAdvanced();
-
 void PressA(CFinalInput& input);
 void PressB(CFinalInput& input);
 void PressX(CFinalInput& input);

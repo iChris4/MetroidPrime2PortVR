@@ -246,7 +246,10 @@ void UpdateUiScale(float userScale) {
   if (window == nullptr) {
     return;
   }
-  float displayScale = SDL_GetWindowDisplayScale(window);
+  // The overlay works in window coordinates, which on iOS and macOS are points already scaled up by
+  // the pixel density (ImGui's framebuffer scale), so take only the remaining content scale.
+  const float pixelDensity = SDL_GetWindowPixelDensity(window);
+  float displayScale = SDL_GetWindowDisplayScale(window) / (pixelDensity > 0.f ? pixelDensity : 1.f);
   if (!(displayScale > 0.f)) {
     displayScale = 1.f;
   }
@@ -360,6 +363,30 @@ ImVec4 ThemeGoodColor(const ImVec4& plain) {
 
 ImVec4 ThemeBadColor(const ImVec4& plain) {
   return ResolveTheme() != kThemePlain ? ImVec4(1.f, 0.42f, 0.35f, 1.f) : plain;
+}
+
+bool EntryCheckbox(const PortMenuEntry::Switch& entry, bool inlineHelp) {
+  ImGui::BeginDisabled(PortMenuEntry::Blocked(entry));
+  bool on = entry.get();
+  const bool changed = ImGui::Checkbox(entry.name, &on);
+  if (changed) {
+    entry.set(on);
+  }
+  ImGui::EndDisabled();
+  if (inlineHelp) {
+    ItemHelp(entry.details);
+  } else {
+    ImGui::SetItemTooltip("%s", entry.details);
+  }
+  return changed;
+}
+
+bool EntryButton(const PortMenuEntry::Action& entry) {
+  ImGui::BeginDisabled(!PortMenuEntry::Available(entry));
+  const bool pressed = ImGui::Button(entry.name);
+  ImGui::EndDisabled();
+  ImGui::SetItemTooltip("%s", entry.help);
+  return pressed && entry.run();
 }
 
 // What a setting does (kInlineHelp: printed under it on Android, a tooltip elsewhere).

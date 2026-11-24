@@ -1,5 +1,9 @@
 #include "MetroidPrime/CMappableObject.hpp"
 
+#ifdef TARGET_PC
+#include "port_overlay.h"
+#endif
+
 #include "MetroidPrime/CMapWorldInfo.hpp"
 #include "MetroidPrime/Tweaks/CTweakAutoMapper.hpp"
 #include "MetroidPrime/Tweaks/CTweakPlayerRes.hpp"
@@ -116,8 +120,15 @@ CMappableObject::GetDoorColors(int curAreaId, const CMapWorldInfo& mwInfo, float
   bool doorVisited = mwInfo.IsDoorVisited(mObjId);
 
   if (mwInfo.IsAreaVisited(mObjId.AreaNum())) {
+#ifdef TARGET_PC
+    // Unlock beam doors once opened (#129): an opened beam door is a blue door on the map too.
+    if (doorVisited && (PortOverlay::BeamDoorsStayUnlocked() ||
+                        (mType != kMOT_DarkBeamDoor && mType != kMOT_AnnihilatorBeamDoor &&
+                         mType != kMOT_LightBeamDoor))) {
+#else
     if (doorVisited && mType != kMOT_DarkBeamDoor && mType != kMOT_AnnihilatorBeamDoor &&
         mType != kMOT_LightBeamDoor) {
+#endif
       firstColor = gpTweakAutoMapper->GetDoorColor(kMOT_BlueDoor);
     } else {
       firstColor = gpTweakAutoMapper->GetDoorColor(mType);
@@ -127,7 +138,11 @@ CMappableObject::GetDoorColors(int curAreaId, const CMapWorldInfo& mwInfo, float
   }
 
   firstColor = firstColor.WithAlphaModulatedBy(alpha);
+#ifdef TARGET_PC
+  if (mType == kMOT_DarkBeamDoor && !(doorVisited && PortOverlay::BeamDoorsStayUnlocked())) {
+#else
   if (mType == kMOT_DarkBeamDoor) {
+#endif
     return rstl::pair< CColor, CColor >(
         firstColor, gpTweakAutoMapper->GetDarkBeamDoorOutlineColor().WithAlphaModulatedBy(alpha));
   }

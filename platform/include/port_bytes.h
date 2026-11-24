@@ -81,6 +81,11 @@ inline void WriteBE32(uint8_t* p, uint32_t value) {
   p[3] = uint8_t(value);
 }
 
+inline void WriteBE64(uint8_t* p, uint64_t value) {
+  WriteBE32(p, uint32_t(value >> 32));
+  WriteBE32(p + 4, uint32_t(value));
+}
+
 inline void WriteBEFloat(uint8_t* p, float value) {
   uint32_t bits;
   std::memcpy(&bits, &value, sizeof(bits));

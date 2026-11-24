@@ -230,91 +230,92 @@ bool CMediumIng::IsBlocked(CStateManager& mgr, const CVector3f& offset) {
 
 // @ fn_41_6078
 void CMediumIng::UpdateMistState(CStateManager& mgr, float dt) {
-  if (!mAlive) {
-    return;
-  }
-  bool want = false;
-  if (!mC6) {
-    if (mI74 != 0) {
-      want = true;
-    } else {
-      // Host guard: an area without a path area reads as no region.
-      CPFArea* area = GetPathArea(mgr);
-      if (area != nullptr) {
-        rstl::reserved_vector< CPFRegion*, 8 > regions;
-        const CAABox box =
-            GetBoundingBox().GetTransformedAABox(area->GetTransform().GetQuickInverse());
-        if (area->FindRegions(regions, box, 8, mPathFindSearch.GetCreatureMask(), false) != 0) {
+  // A dead Ing (0x60AC beq 0x64A8) skips only the mist state and the visor flags: the decay,
+  // the light and the alpha below still run, so Dead's mFD0 fades the model out.
+  if (mAlive) {
+    bool want = false;
+    if (!mC6) {
+      if (mI74 != 0) {
+        want = true;
+      } else {
+        // Host guard: an area without a path area reads as no region.
+        CPFArea* area = GetPathArea(mgr);
+        if (area != nullptr) {
+          rstl::reserved_vector< CPFRegion*, 8 > regions;
+          const CAABox box =
+              GetBoundingBox().GetTransformedAABox(area->GetTransform().GetQuickInverse());
+          if (area->FindRegions(regions, box, 8, mPathFindSearch.GetCreatureMask(), false) != 0) {
+            want = true;
+          }
+        }
+        if (!want && (mgr.GetSafeZoneManager()->IsObjectInSafeZone(*this, mgr) || mD5 || mD7)) {
           want = true;
         }
       }
-      if (!want && (mgr.GetSafeZoneManager()->IsObjectInSafeZone(*this, mgr) || mD5 || mD7)) {
-        want = true;
+    }
+    if (mC7) {
+      want = true;
+    }
+
+    switch (mMistState) {
+    case 0:
+      if (!mSfx2) {
+        mSfx2 = AddLoop(kSfxMistIdle, *this);
+      } else {
+        UpdateLoop(mSfx2, *this);
       }
-    }
-  }
-  if (mC7) {
-    want = true;
-  }
-
-  switch (mMistState) {
-  case 0:
-    if (!mSfx2) {
-      mSfx2 = AddLoop(kSfxMistIdle, *this);
-    } else {
-      UpdateLoop(mSfx2, *this);
-    }
-    if (IsMistDecayed() && want) {
-      mMistState = 1;
-    }
-    break;
-  case 1:
-    mC5 = true;
-    mMistState = 2;
-    mF60 = 0.f;
-    CSfxManager::AddEmitter(kSfxMistIn, GetTranslation(), GetCurrentAreaId().Value(), true, false,
-                            CSfxManager::kMedPriority);
-    SetMistCollision(false);
-    break;
-  case 2:
-    mD7 = false;
-    RemoveLoop(mSfx2);
-    if (!mSfx1) {
-      mSfx1 = AddLoop(kSfxMistLoop, *this);
-    } else {
-      UpdateLoop(mSfx1, *this);
-    }
-    if (!want) {
+      if (IsMistDecayed() && want) {
+        mMistState = 1;
+      }
+      break;
+    case 1:
+      mC5 = true;
+      mMistState = 2;
       mF60 = 0.f;
-      mMistState = 3;
+      CSfxManager::AddEmitter(kSfxMistIn, GetTranslation(), GetCurrentAreaId().Value(), true, false,
+                              CSfxManager::kMedPriority);
+      SetMistCollision(false);
+      break;
+    case 2:
+      mD7 = false;
+      RemoveLoop(mSfx2);
+      if (!mSfx1) {
+        mSfx1 = AddLoop(kSfxMistLoop, *this);
+      } else {
+        UpdateLoop(mSfx1, *this);
+      }
+      if (!want) {
+        mF60 = 0.f;
+        mMistState = 3;
+      }
+      break;
+    case 3:
+      mF60 += dt;
+      if (mF60 > 2.f || mC6) { // rodata_10
+        mMistState = 4;
+      }
+      break;
+    case 4:
+      if (!IsBlocked(mgr, CVector3f::Zero())) {
+        RemoveLoop(mSfx1);
+        CSfxManager::AddEmitter(kSfxMistOut, GetTranslation(), GetCurrentAreaId().Value(), true,
+                                false, CSfxManager::kMedPriority);
+        mSfx2 = AddLoop(kSfxMistIdle, *this);
+        mC5 = false;
+        mMistState = 0;
+        SetMistCollision(true);
+      }
+      break;
+    default:
+      break;
     }
-    break;
-  case 3:
-    mF60 += dt;
-    if (mF60 > 2.f || mC6) { // rodata_10
-      mMistState = 4;
-    }
-    break;
-  case 4:
-    if (!IsBlocked(mgr, CVector3f::Zero())) {
-      RemoveLoop(mSfx1);
-      CSfxManager::AddEmitter(kSfxMistOut, GetTranslation(), GetCurrentAreaId().Value(), true,
-                              false, CSfxManager::kMedPriority);
-      mSfx2 = AddLoop(kSfxMistIdle, *this);
-      mC5 = false;
-      mMistState = 0;
-      SetMistCollision(true);
-    }
-    break;
-  default:
-    break;
-  }
 
-  if (HasMist()) {
-    SetVisorOrbitableFlags(CVisorParameters::kVOF_All, false);
-    SetVisorOrbitableFlags(CVisorParameters::kVOF_Scan, true);
-  } else {
-    SetVisorOrbitableFlags(CVisorParameters::kVOF_All, true);
+    if (HasMist()) {
+      SetVisorOrbitableFlags(CVisorParameters::kVOF_All, false);
+      SetVisorOrbitableFlags(CVisorParameters::kVOF_Scan, true);
+    } else {
+      SetVisorOrbitableFlags(CVisorParameters::kVOF_All, true);
+    }
   }
 
   // Mist amount at rodata_1C (4)/s to 1, the decay timer at rodata_38 (0.5)/s to rodata_10 (2).
@@ -844,6 +845,10 @@ bool CMediumIng::PortConsoleVar(CEntity& ent, const char* name, const int* value
 #undef MING_B
   if (strcmp(n, "los") == 0) { // read-only: the line-of-sight tracker's last result
     current = ing->mLineOfSightTracker.HasLineOfSight() ? 1 : 0;
+    return true;
+  }
+  if (strcmp(n, "alpha") == 0) { // read-only: the model alpha UpdateMistState wrote (0..255)
+    current = ing->mColor.GetAlphau8();
     return true;
   }
   if (strcmp(n, "safezone") == 0) { // mSafeZoneId (-1 = none)

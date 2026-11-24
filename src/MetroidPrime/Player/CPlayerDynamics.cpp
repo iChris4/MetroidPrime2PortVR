@@ -68,6 +68,20 @@ static const float skOrbitForwardDistances[] = {11.8f, 11.8f, 11.8f, 5.f, 6.f, 5
 // factor is exactly 1.
 static float WalkScale() { return static_cast< float >(PortOverlay::WalkSpeed()) / 100.f; }
 
+// Prime 1 air physics (PortOverlay::Prime1AirPhysics), set by ComputeMovement for the player it
+// moves: airborne, GetDampedClampedVelocityWR takes Prime 1's (GM8E01_00) rule instead of Echoes'
+// drag. Single player only, so one flag serves the one player.
+static bool sPrime1Air = false;
+// Under direct aim, the direction of the movement keys in the body's frame (right, forward), kept
+// while no key is held. As in the Prime 1 port, the air friction is taken along it, so a diagonal
+// slows as straight ahead does; the speed cap stays on the facing.
+static bool sStickFrame = false;
+static float sStickRight = 0.f;
+static float sStickForward = 1.f;
+
+static bool Prime1Air(const CStateManager& mgr) {
+  return PortOverlay::Prime1AirPhysics() && !mgr.IsMultiplayer();
+}
 // The Dodge action (MP1 issue #236): retail's sideways dash, also without a lock-on target. Not
 // locked on, a press on the ground while strafing starts a jump (kDodgeHop); the next tick starts
 // the dash as a tapped jump does in ComputeDash, and it moves in a straight line along the body's
@@ -92,6 +106,44 @@ CVector3f CPlayer::GetDampedClampedVelocityWR() const {
   const float acceleration = GetAcceleration();
   CVector3f localVelocity = GetTransform().TransposeRotate(GetVelocityWR());
 #ifdef TARGET_PC
+  if (sPrime1Air && mMovementState != NPlayer::kMS_OnGround) {
+    // Prime 1 in the air: no friction while the jump is still held and rising (ApplyJump) or while orbiting,
+    // and the tweak's friction, not Echoes' 3.5|v|/mass drag, otherwise. Only the speed along
+    // the facing is capped, so speed turned sideways (an R-jump, or arcing the view under mouse
+    // aim) and a scan dash's momentum carry.
+    const bool stickFrame = sStickFrame && mOrbitState == kOS_NoOrbit;
+    if (stickFrame) {
+      const float right = localVelocity.GetX();
+      const float forward = localVelocity.GetY();
+      localVelocity.SetX(right * sStickForward - forward * sStickRight);
+      localVelocity.SetY(right * sStickRight + forward * sStickForward);
+    }
+    if ((mMovementState != NPlayer::kMS_ApplyJump || GetSurfaceRestraint() != kSR_Air) &&
+        mOrbitState == kOS_NoOrbit) {
+      const float friction =
+          GetTweakPlayer()->GetPlayerTranslationFriction(GetSurfaceRestraint()) * WalkScale();
+      if (localVelocity.GetY() > 0.f) {
+        localVelocity.SetY(rstl::max_val(localVelocity.GetY() - friction, 0.f));
+      } else {
+        localVelocity.SetY(rstl::min_val(localVelocity.GetY() + friction, 0.f));
+      }
+      if (localVelocity.GetX() > 0.f) {
+        localVelocity.SetX(rstl::max_val(localVelocity.GetX() - friction, 0.f));
+      } else {
+        localVelocity.SetX(rstl::min_val(localVelocity.GetX() + friction, 0.f));
+      }
+    }
+    if (stickFrame) {
+      const float across = localVelocity.GetX();
+      const float along = localVelocity.GetY();
+      localVelocity.SetX(across * sStickForward + along * sStickRight);
+      localVelocity.SetY(along * sStickForward - across * sStickRight);
+    }
+    const float maxSpeed =
+        GetTweakPlayer()->GetPlayerTranslationMaxSpeed(GetSurfaceRestraint()) * WalkScale();
+    localVelocity.SetY(CMath::Limit(localVelocity.GetY(), maxSpeed));
+    return GetTransform().Rotate(localVelocity);
+  }
   if (PortDirectAimControls() && mOrbitState == kOS_NoOrbit) {
     float friction = GetTweakPlayer()->GetPlayerTranslationFriction(GetSurfaceRestraint()) * WalkScale();
     if (GetSurfaceRestraint() == kSR_Air) {
@@ -257,7 +309,13 @@ bool CPlayer::SidewaysDashAllowed(float strafeInput, float forwardInput, const C
 void CPlayer::FinishSidewaysDash(CStateManager& mgr) {
   if (mSidewaysDashing) {
     mDoneSidewaysDashing = true;
+#ifdef TARGET_PC
+    // Prime 1 air physics: Prime 1 ends a dash without slowing it, so a scan dash whose lock
+    // breaks mid-air keeps the dash's speed.
+    if (mMovementState != NPlayer::kMS_OnGround && !Prime1Air(mgr)) {
+#else
     if (mMovementState != NPlayer::kMS_OnGround) {
+#endif
       const CVector3f vel = GetVelocityWR();
       const CVector3f& velocity = vel;
       const CVector3f flatVelocity(CVector2f(velocity.GetX(), velocity.GetY()), 0.f);
@@ -505,6 +563,15 @@ void CPlayer::ComputeMovement(const CFinalInput& input, CStateManager& mgr, floa
     vrMove = PortVr::VrDirectionalMove(flatSpeed, mMovementState == NPlayer::kMS_OnGround, dt,
                                        static_cast< uint32_t >(mgr.GetUpdateFrameIdx()));
   }
+  sPrime1Air = Prime1Air(mgr);
+  sStickFrame = portAimMovement;
+  if (sStickFrame) {
+    const float length = CMath::SqrtF(strafeInput * strafeInput + forwardInput * forwardInput);
+    if (length > 1e-5f) {
+      sStickRight = strafeInput / length;
+      sStickForward = forwardInput / length;
+    }
+  }
 #else
   float turnInput = TurnInput(input, mgr);
   const float forwardInput = ForwardInput(input, turnInput);
@@ -645,6 +712,17 @@ void CPlayer::ComputeMovement(const CFinalInput& input, CStateManager& mgr, floa
         GetMass(), dt, GetTweakPlayer()->GetMaxTranslationalAcceleration(GetSurfaceRestraint()) * WalkScale());
     strafeForce = force.right * GetAcceleration();
     forwardForce = force.forward * GetAcceleration();
+    // Prime 1 air physics: Prime 1 has no sideways force, so moving the way momentum already
+    // carries Samus past the top speed must not brake it back (the Prime 1 port's issue #30).
+    if (sPrime1Air && mMovementState != NPlayer::kMS_OnGround) {
+      const float along = sStickRight * velocity.GetX() + sStickForward * velocity.GetY();
+      const float forceAlong = sStickRight * strafeForce + sStickForward * forwardForce;
+      if (along > GetTweakPlayer()->GetPlayerTranslationMaxSpeed(GetSurfaceRestraint()) * WalkScale() &&
+          forceAlong < 0.f) {
+        strafeForce = 0.f;
+        forwardForce = 0.f;
+      }
+    }
   }
 #endif
   if (mOrbitState != kOS_NoOrbit && gkFreeLookPreventsOrbitMovement && mLookButtonHeld) {
@@ -1294,6 +1372,10 @@ void CPlayer::Teleport(const CTransform4f& transform, CStateManager& mgr,
     mGravityBoostUsed = false;
     mGravityBoostDuration = 0.f;
     mGravityBoostSfx = CSfxHandle();
+#ifdef TARGET_PC
+    // Port: mouse, twin-stick and touch aim face the way the placement does (issue #121).
+    PortMouse::Place(direction.GetX(), direction.GetY(), direction.GetZ(), mPlayerIndex);
+#endif
   } else {
     SetTranslation(transform.GetTranslation());
   }

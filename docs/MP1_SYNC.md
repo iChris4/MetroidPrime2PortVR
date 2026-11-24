@@ -200,6 +200,26 @@ Each needs MP2 game-side hooks found fresh; a row with no possible MP2 backend i
     Shoot in Scan Visor (`71f3fbe28`, Xvfb); `d2187f77a` + `6e921f77f` moon jump, Boost Ball
     speed/duration/anywhere/steer, move Samus to the free camera (`7efb40368`, Xvfb). Open (maybe):
     `59e55a8ad` beam colours. The rest: releases, MP1-only fixes, remastered, decomp.
+35. **Range `b601be339..1618ab8da`** (2026-11-08). Taken: `1618ab8da` Screenshot binding and F1 >
+    Game save a PNG photo mode's way, with a toast (also unmasks F12, whose Aurora handler left in
+    the 10-23 re-vendor, so the default key did nothing); `51f96ed7e` + `e8ac74f0d` morph ball
+    cameras follow the FOV (`ball_follows_fov`, `fov ball`; no pause row: MP2 has none for FOV);
+    `d650c7a9e` overlay scale not doubled by pixel density (iOS/macOS); `d0c5cce42` system font
+    merged into the overlay's for non-Latin text. Checked on Xvfb: ball FOV 60 -> 85.9 at 80 and
+    live toggles, F12 PNG + `[photo] Saved`, DejaVu loaded; density fix build only. Skipped: suit
+    colours on the transition body (MP2 lists them), Dark Samus ball, remastered, `memo hint`,
+    beam colours' ID scope (beam colours not taken); the rest came from MP2.
+36. **Range `1618ab8da..2b1aaa4f3`** (2026-11-10). Taken: `2b1aaa4f3` area PreRender once per
+    update and player (open doors' occluded neighbour reloaded its textures above 60 fps; keyed
+    on `mUpdateFrameIdx`), `97d13bc39` left arm kept at steep direct-aim pitch (`DrawArm`
+    compares headings), `f9075c4ae` Fast Morph FOV blend over the morph's duration,
+    `7deb9d869` watchdog line for frames of 1 to 5 s (`MP2_WATCHDOG_TEST_STALL_MS`),
+    `7e6e7c03d` mouse name lower bound. Built and unit-tested only, no gameplay run. Not
+    needed: `20bb892e0` (MP2 water tracks the camera by its fluid id list, saved with the
+    trigger's inhabitants), `e65a57436`/`da0347b33` (no Seen mode or map dots here),
+    `f1051515a`. Not taken, features to decide: `7abaaf360` crosshair colour over enemies the
+    beam hurts, `6bb3722dd` port strings from a translatable STRG. Skipped: remastered, the
+    maze, releases, cleanup; the rest came from MP2.
 
 Skipped from this range: Phazon Beam cheat and stacked beam rate (MP1 items), mods page/import
 fixes (wait for package 8), decomp matches.
@@ -209,9 +229,9 @@ set differs; the approach can be reused), Archipelago, MP1 randomizer logic.
 
 ## Status
 
-Packages 1-34 are merged; the dated per-merge log moved verbatim to
+Packages 1-36 are merged; the dated per-merge log moved verbatim to
 `docs/history/MP1_SYNC-to-2026-10-29.md`. MP1 was last reviewed through `e3d8c8940`
-(2026-10-29), then through `5e1a88514` (2026-11-02, package 30), then through `16eb691fe` (2026-11-03, package 31), then through `ed1fb93c7` (2026-11-04, package 32), then through `b601be339` (2026-11-06, package 34); take later commits by `git -C ../MetroidPrimePort log --no-merges b601be339..HEAD`.
+(2026-10-29), then through `5e1a88514` (2026-11-02, package 30), then through `16eb691fe` (2026-11-03, package 31), then through `ed1fb93c7` (2026-11-04, package 32), then through `b601be339` (2026-11-06, package 34), then through `1618ab8da` (2026-11-08, package 35), then through `2b1aaa4f3` (2026-11-10, package 36); take later commits by `git -C ../MetroidPrimePort log --no-merges 2b1aaa4f3..HEAD`.
 
 Still unrun/unverified per that log (no device or hardware available then):
 

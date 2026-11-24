@@ -1,6 +1,9 @@
 #include "port_save_convert.h"
 
 #include "Kyoto/CCrc32.hpp"
+#include "port_bitstream.h"
+#include "port_bytes.h"
+#include "port_save_layout.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -17,81 +20,12 @@ namespace {
 // The .gci / save-data layout; the same numbers as port_save.cpp (they describe the same file).
 constexpr size_t kDirEntry = 0x40;
 constexpr size_t kBlock = 0x2000;
-constexpr size_t kSlotsStart = 15 + 192 + 3 * 32 + 32;
-constexpr size_t kSlotStride = 0xa38;
+using PortSaveLayout::kSlotsStart;
+using PortSaveLayout::kSlotStride;
 constexpr size_t kUserDataSize = 0x1ff8;
 
-constexpr uint32_t Fourcc(char a, char b, char c, char d) {
-  return (uint32_t(uint8_t(a)) << 24) | (uint32_t(uint8_t(b)) << 16) | (uint32_t(uint8_t(c)) << 8) |
-         uint32_t(uint8_t(d));
-}
-
-uint32_t Be32(const uint8_t* p) {
-  return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | uint32_t(p[3]);
-}
-uint32_t Le32(const uint8_t* p) {
-  return (uint32_t(p[3]) << 24) | (uint32_t(p[2]) << 16) | (uint32_t(p[1]) << 8) | uint32_t(p[0]);
-}
-void PutBe32(uint8_t* p, uint32_t v) {
-  p[0] = uint8_t(v >> 24);
-  p[1] = uint8_t(v >> 16);
-  p[2] = uint8_t(v >> 8);
-  p[3] = uint8_t(v);
-}
-void PutLe32(uint8_t* p, uint32_t v) {
-  p[3] = uint8_t(v >> 24);
-  p[2] = uint8_t(v >> 16);
-  p[1] = uint8_t(v >> 8);
-  p[0] = uint8_t(v);
-}
-
-// MSB-first, as CBitStreamReader/Writer. Reading past the end sets `bad` and yields zeros.
-struct BitReader {
-  const uint8_t* data;
-  size_t bits;
-  size_t pos = 0;
-  bool bad = false;
-
-  BitReader(const uint8_t* d, size_t byteCount) : data(d), bits(byteCount * 8) {}
-  uint32_t Get(int n) {
-    uint32_t v = 0;
-    for (int i = 0; i < n; ++i) {
-      uint32_t bit = 0;
-      if (pos >= bits) {
-        bad = true;
-      } else {
-        bit = (data[pos >> 3] >> (7 - (pos & 7))) & 1;
-      }
-      v = (v << 1) | bit;
-      ++pos;
-    }
-    return v;
-  }
-  void Align() { pos = (pos + 7) & ~size_t(7); }
-};
-
-struct BitWriter {
-  std::vector<uint8_t> bytes;
-  size_t pos = 0;
-
-  void Put(uint32_t v, int n) {
-    for (int i = n - 1; i >= 0; --i) {
-      if ((pos >> 3) >= bytes.size()) {
-        bytes.push_back(0);
-      }
-      if ((v >> i) & 1) {
-        bytes[pos >> 3] |= uint8_t(0x80 >> (pos & 7));
-      }
-      ++pos;
-    }
-  }
-  void Align() {
-    pos = (pos + 7) & ~size_t(7);
-    if ((pos >> 3) > bytes.size()) {
-      bytes.resize(pos >> 3, 0);
-    }
-  }
-};
+using port::BitReader;
+using port::BitWriter;
 
 void Copy(BitReader& r, BitWriter& w, int n) {
   while (n > 0) {
@@ -264,7 +198,7 @@ bool Slot(const SConvDirection& d, const uint8_t* in, size_t size, std::vector<u
   BitReader r(in, size);
   BitWriter w;
 
-  if (!Expect(r, w, Fourcc('G', 'M', 'S', 'T'), "GMST", error)) {
+  if (!Expect(r, w, port::FourCC('G', 'M', 'S', 'T'), "GMST", error)) {
     return false;
   }
   Copy(r, w, 32 + 3); // time, hard, init powerups, dark world
@@ -279,15 +213,15 @@ bool Slot(const SConvDirection& d, const uint8_t* in, size_t size, std::vector<u
   Copy(r, w, 64); // play time
 
   for (int p = 0; p < 4; ++p) {
-    if (!Expect(r, w, Fourcc('P', 'L', 'S', 'T'), "PLST", error)) {
+    if (!Expect(r, w, port::FourCC('P', 'L', 'S', 'T'), "PLST", error)) {
       return false;
     }
     Copy(r, w, 32 + 32 + 3 + 2 + 3 + 3 + 2);
-    if (!Expect(r, w, Fourcc('P', 'R', 'S', 'T'), "PRST", error)) {
+    if (!Expect(r, w, port::FourCC('P', 'R', 'S', 'T'), "PRST", error)) {
       return false;
     }
     Copy(r, w, 186);
-    if (!Expect(r, w, Fourcc('P', 'O', 'W', 'R'), "POWR", error)) {
+    if (!Expect(r, w, port::FourCC('P', 'O', 'W', 'R'), "POWR", error)) {
       return false;
     }
     Copy(r, w, 4 * 2); // the four fixed scan entries
@@ -311,7 +245,7 @@ bool Slot(const SConvDirection& d, const uint8_t* in, size_t size, std::vector<u
       }
     }
     Copy(r, w, 18); // scan completion rates
-    if (!Expect(r, w, Fourcc('S', 'C', 'A', 'N'), "SCAN", error)) {
+    if (!Expect(r, w, port::FourCC('S', 'C', 'A', 'N'), "SCAN", error)) {
       return false;
     }
   }
@@ -331,7 +265,7 @@ bool Slot(const SConvDirection& d, const uint8_t* in, size_t size, std::vector<u
     w.Put(h.time, 32);
   }
 
-  if (!Expect(r, w, Fourcc('P', 'R', 'E', 'V'), "PREV", error)) {
+  if (!Expect(r, w, port::FourCC('P', 'R', 'E', 'V'), "PREV", error)) {
     return false;
   }
   Copy(r, w, 32 + 1 + 8 + 3 + 4 * (2 + 16 + 16));
@@ -381,7 +315,7 @@ bool Slot(const SConvDirection& d, const uint8_t* in, size_t size, std::vector<u
     w.Align();
     r.pos += bytes * 8;
   }
-  if (!Expect(r, w, Fourcc('G', 'M', 'N', 'D'), "GMND", error)) {
+  if (!Expect(r, w, port::FourCC('G', 'M', 'N', 'D'), "GMND", error)) {
     return false;
   }
   if (r.bad) {
@@ -401,9 +335,9 @@ bool Slot(const SConvDirection& d, const uint8_t* in, size_t size, std::vector<u
 uint32_t NewestTimestamp(const uint8_t* user, size_t size) {
   uint32_t newest = 0;
   for (int i = 0; i < 3; ++i) {
-    const size_t at = kSlotsStart + size_t(i) * kSlotStride;
+    const size_t at = PortSaveLayout::SlotOffset(user, i);
     if (user[8 + i] != 0 && at + 8 <= size) {
-      newest = std::max(newest, Be32(user + at + 4));
+      newest = std::max(newest, port::ReadBE32(user + at + 4));
     }
   }
   return newest;
@@ -450,11 +384,13 @@ bool UserData(const uint8_t* in, size_t size, const std::string& from, const std
     error = "the save data has no SAVH header, or is too short";
     return false;
   }
-  const uint32_t signature = Be32(in);
-  if (signature != d->from->signature && signature != d->from->legacySignature) {
-    char buf[112];
-    std::snprintf(buf, sizeof buf, "signature %08x is not a %s save's (%08x, or older builds' %08x)",
-                  signature, from.c_str(), d->from->signature, d->from->legacySignature);
+  const uint32_t signature = port::ReadBE32(in);
+  if (signature != d->from->signature && signature != d->from->portSignature &&
+      signature != d->from->legacySignature) {
+    char buf[128];
+    std::snprintf(buf, sizeof buf,
+                  "signature %08x is not a %s save's (%08x, or older builds' %08x or %08x)", signature,
+                  from.c_str(), d->from->signature, d->from->portSignature, d->from->legacySignature);
     error = buf;
     return false;
   }
@@ -462,12 +398,12 @@ bool UserData(const uint8_t* in, size_t size, const std::string& from, const std
   report.from = from;
   report.to = to;
   out.assign(in, in + size);
-  PutBe32(out.data(), d->to->signature);
+  port::WriteBE32(out.data(), d->to->signature);
   for (int i = 0; i < 3; ++i) {
     if (in[8 + i] == 0) {
       continue;
     }
-    const size_t at = kSlotsStart + size_t(i) * kSlotStride;
+    const size_t at = PortSaveLayout::SlotOffset(in, i);
     if (at + kSlotStride > size) {
       error = "slot " + std::to_string(i + 1) + " runs past the save data";
       return false;
@@ -514,15 +450,15 @@ bool Gci(const std::vector<uint8_t>& in, const std::string& targetCode, std::vec
   for (int i = 0; i < 2; ++i) {
     const uint8_t* block = in.data() + kDirEntry + kBlock + size_t(i) * copyBytes;
     const uint32_t crc = CCRC32::Calculate(block + 4, uint(copyBytes - 4), 0xFFFFFFFFu);
-    const bool little = crc == Le32(block);
-    const bool big = crc == Be32(block);
+    const bool little = crc == port::ReadLE32(block);
+    const bool big = crc == port::ReadBE32(block);
     const size_t user = std::min(copyBytes - 8, kUserDataSize);
     if ((!little && !big) || !ValidHeader(block + 8, user)) {
       continue;
     }
     copies[i].ok = true;
     copies[i].little = little;
-    copies[i].generation = little ? Le32(block + 4) : Be32(block + 4);
+    copies[i].generation = little ? port::ReadLE32(block + 4) : port::ReadBE32(block + 4);
     copies[i].newest = NewestTimestamp(block + 8, user);
   }
   int chosen = -1;
@@ -550,9 +486,9 @@ bool Gci(const std::vector<uint8_t>& in, const std::string& targetCode, std::vec
     std::memcpy(block, src, copyBytes); // the chosen copy's generation, trailing bytes and all
     std::memcpy(block + 8, converted.data(), user);
     const bool little = copies[chosen].little;
-    (little ? PutLe32 : PutBe32)(block + 4, copies[chosen].generation);
+    (little ? port::WriteLE32 : port::WriteBE32)(block + 4, copies[chosen].generation);
     const uint32_t crc = CCRC32::Calculate(block + 4, uint(copyBytes - 4), 0xFFFFFFFFu);
-    (little ? PutLe32 : PutBe32)(block, crc);
+    (little ? port::WriteLE32 : port::WriteBE32)(block, crc);
   }
   return true;
 }

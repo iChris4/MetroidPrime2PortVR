@@ -17,6 +17,11 @@
 #include "rstl/pair.hpp"
 #include "rstl/string.hpp"
 
+#ifdef TARGET_PC
+// Complete types for the smart-pointer members (-Werror=delete-incomplete).
+#include "MetroidPrime/CAnimData.hpp"
+#endif
+
 class CAABox;
 class CActorLights;
 class CAnimData;

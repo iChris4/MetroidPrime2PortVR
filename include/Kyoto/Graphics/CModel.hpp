@@ -11,6 +11,11 @@
 #include "rstl/single_ptr.hpp"
 #include "rstl/vector.hpp"
 
+#ifdef TARGET_PC
+// Complete types for the smart-pointer members (-Werror=delete-incomplete).
+#include "Kyoto/Graphics/CCubeModel.hpp"
+#endif
+
 class CAABox;
 class CCubeModel;
 class CModelFlags;

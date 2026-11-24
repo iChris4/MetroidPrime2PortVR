@@ -253,5 +253,22 @@ int main() {
   PortRadial::CancelAllTouches();
   PortRadial::ServiceTouchCancellation();
   REQUIRE(!PortRadial::Capturing());
+  // Issue #121: a placement (CPlayer::Teleport) after the tick's UpdateAim turns the aim with it,
+  // so the next unlocked update keeps the placed heading instead of the one tracked before.
+  Start(.0035f);
+  SetAimAngles(137.f, 20.f);
+  Apply();
+  REQUIRE(!Near(Yaw(), 0.f) && !Near(Pitch(), 0.f));
+  Place(1.f, 0.f, 0.f);
+  Apply();
+  REQUIRE(std::fabs(std::fabs(Yaw()) - kPi / 2.f) < 1e-4f && Near(Pitch(), 0.f));
+  // With no direct source the aim is not the game's to place.
+  Reset();
+  SetEnabled(false);
+  SetStickEnabled(false);
+  SetTouchEnabled(false);
+  const float unplaced = Yaw();
+  Place(0.f, -1.f, 0.f);
+  REQUIRE(Near(Yaw(), unplaced));
   std::puts("port_mouse: scaling, gyro, lock-on, radial tick/pointer/edge-turn/interpolation passed");
 }

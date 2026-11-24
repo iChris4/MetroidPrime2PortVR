@@ -453,13 +453,29 @@ void DrawIcon(ImDrawList* dl, ImVec2 p, float s, Icon icon, ImU32 col) {
 }
 
 // An input's name without its "kind:" (the icon says it).
-// Pad buttons by raw bit (SDL_GamepadButton, then the triggers' pulls and clicks).
+// Pad buttons by raw bit (SDL_GamepadButton, then the triggers' pulls and clicks). The paddles get
+// a Steam Controller's or Deck's back-button names too (PaddleLabel).
 constexpr const char* kPadButtonLabels[] = {
     "A",       "B",        "X",        "Y",        "Back",     "Guide",    "Start",     "Left stick",
     "Right stick", "LB",   "RB",       "D-pad up", "D-pad down", "D-pad left", "D-pad right", "Share",
     "Paddle 1", "Paddle 2", "Paddle 3", "Paddle 4", "Touchpad", "Misc 2",   "Misc 3",    "Misc 4",
     "Misc 5",  "Misc 6",   "LT",       "RT",       "LT click", "RT click",
 };
+
+// SDL's four paddles (right paddle 1, left paddle 1, right paddle 2, left paddle 2), with the back
+// buttons' names (R4, L4, R5, L5) when the edited player's controller is a Steam Controller or a
+// Steam Deck. A Steam Input virtual pad reports the real controller's vendor (SDL reads it from
+// Steam's slot info).
+std::string PaddleLabel(unsigned paddle) {
+  static constexpr const char* kValve[] = {"R4", "L4", "R5", "L5"};
+  const std::string plain = "Paddle " + std::to_string(paddle + 1);
+  const s32 index = PADGetIndexForPort(static_cast< u32 >(EditPort()));
+  SDL_Gamepad* pad = index >= 0 ? PADGetSDLGamepadForIndex(static_cast< u32 >(index)) : nullptr;
+  if (pad == nullptr || paddle >= 4 || SDL_GetGamepadVendor(pad) != 0x28de) {
+    return plain;
+  }
+  return plain + " (" + kValve[paddle] + ")";
+}
 
 // An axis or half of one, as on the controller.
 std::string PadAxisName(const Input& in) {
@@ -480,6 +496,10 @@ std::string InputName(const Input& in, bool includeMouseMode = false) {
   const std::string text = PortInput::InputToText(in);
   const size_t at = text.find('@');
   const std::string threshold = at == std::string::npos ? std::string() : " " + text.substr(at + 1) + "%";
+  if (in.device == Device::PadButton && in.code >= SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1 &&
+      in.code <= SDL_GAMEPAD_BUTTON_LEFT_PADDLE2) {
+    return PaddleLabel(in.code - SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1) + threshold;
+  }
   if (in.device == Device::PadButton && in.code < std::size(kPadButtonLabels)) {
     return kPadButtonLabels[in.code] + threshold;
   }
@@ -1280,7 +1300,7 @@ const std::vector<SGroup>& Groups() {
           Action::MapPanUp, Action::MapPanDown, Action::MapPanLeft, Action::MapPanRight},
          true},
         {"Port", {Action::PortMenu, Action::SaveState, Action::LoadState, Action::Screenshot, Action::ToggleOriginal,
-          Action::ToggleTexturePack, Action::PhotoMode, Action::PrevStateSlot, Action::NextStateSlot}, true},
+          Action::ToggleTexturePack, Action::PhotoMode, Action::PrevStateSlot, Action::NextStateSlot, Action::SpecialMenu}, true},
         {"Layers (shift keys, advanced)", {Action::Layer1, Action::Layer2, Action::Layer3, Action::Layer4}, false},
     };
     // An action added to the engine but not sorted here still gets a row.
@@ -1939,8 +1959,9 @@ void DrawPortController(u32 port, const char* label) {
     ImGui::EndCombo();
   }
   if (port == PAD_CHAN0) {
-    ImGui::SetItemTooltip("Controller used to play and record bindings. The choice is saved and restored on "
-                          "reconnect. Keyboard and touch remain available. 'Controller bindings for' selects "
+    ImGui::SetItemTooltip("Controller used to play and record bindings. Outside a multiplayer match every "
+                          "controller plays: the one used last, touch controls included, takes over. The choice "
+                          "here is saved and applies on reconnect and when a match starts. Keyboard remains available. 'Controller bindings for' selects "
                           "the profile to edit, independently.");
   } else {
     ImGui::SetItemTooltip("This player's controller in a multiplayer match.");

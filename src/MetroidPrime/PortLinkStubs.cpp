@@ -21,9 +21,7 @@ const char* g_seen[1024];
 
 } // namespace
 
-// Weak so that a build which also links the diagnostic PortReachStubs.cpp (MP_BOOT_STUBS) keeps
-// working: that file's strong definition wins.
-extern "C" __attribute__((weak)) void mpReachStub(const char* mangled, const char* demangled) {
+extern "C" void mpReachStub(const char* mangled, const char* demangled) {
   for (unsigned i = 0; i < g_stubSeq && i < 1024; ++i) {
     if (g_seen[i] == mangled) {
       return;

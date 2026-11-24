@@ -1,0 +1,17 @@
+diff --git a/api/EGL/eglplatform.h b/api/EGL/eglplatform.h
+index 6786afd..0246760 100644
+--- a/api/EGL/eglplatform.h
++++ b/api/EGL/eglplatform.h
+@@ -145,6 +145,12 @@ typedef void              *EGLNativeDisplayType;
+ typedef khronos_uintptr_t  EGLNativePixmapType;
+ typedef khronos_uintptr_t  EGLNativeWindowType;
+ 
++#elif defined(__SWITCH__)
++
++typedef void            *EGLNativeDisplayType;
++typedef khronos_uint8_t *EGLNativePixmapType;
++typedef void            *EGLNativeWindowType;
++
+ #else
+ #error "Platform not recognized"
+ #endif

@@ -70,6 +70,7 @@
 #include <math.h>
 #ifdef TARGET_PC
 #include "MetroidPrime/PortEfbCopy.hpp"
+#include "MetroidPrime/Player/PortPhazonShotSfx.hpp"
 #include "port_mouse.h"
 #include "port_overlay.h"
 #include "port_third_person.h"
@@ -193,6 +194,32 @@ void CPlayerGun::PortFireStackedBeams(float dt, CStateManager& mgr, const CTrans
     beam->PortLockStackTokens();
     beam->PortFireStackedProjectile(mUnderwater, dt, mChargeState, xf, mgr, homingTarget,
                                     playerState.GetChargeBeamFactor());
+  }
+}
+
+void CPlayerGun::PortCheatPhazonCharge(CStateManager& mgr) {
+  // The shot's sounds are loaded by the final fight's area alone: hold them while the cheat is on.
+  if (!PortOverlay::PhazonShot()) {
+    PortPhazonShotSfx::Release();
+    return;
+  }
+  PortPhazonShotSfx::Ensure();
+  const int max = gpTweakPlayerGun->GetMaxAbsorbedPhazonShots();
+  if (mAbsorbedPhazonShots == max ||
+      GetPlayerFromAll(mgr)->GetPlayerState()->GetChargeBeamFactor() != 1.f) {
+    return;
+  }
+  // As the last absorbed shot in Update: the charge effect and loop turn to Phazon.
+  mAbsorbedPhazonShots = max;
+  if (!mPhazonChargeGenerator.get()) {
+    const TCachedToken< CGenDescription > description = gpSimplePool->GetObj("PhazonCharge");
+    mPhazonChargeGenerator = rstl::auto_ptr< CElementGen >(rs_new CElementGen(description));
+    mCurrentBeam->ActivateCharge(false, false);
+    if (mChargeSfx) {
+      CSfxManager::SfxStop(mChargeSfx);
+      mChargeSfx = PlaySfxForPlayer(nullptr, SFXsam_a_phazcharge_lp_00_looped, mSoundVolume,
+                                    kInvalidAreaId.Value(), mUnderwater, true);
+    }
   }
 }
 
@@ -1045,6 +1072,13 @@ void CPlayerGun::DamageRumble(const CVector3f& position, float damage, const CSt
 }
 
 bool CPlayerGun::IsOutOfAmmoToShoot(CStateManager& mgr) const {
+#ifdef TARGET_PC
+  // Port (#130): with "Only charged shots use ammo" an uncharged shot costs nothing (single-player;
+  // a match keeps its ammo rules).
+  if (PortOverlay::ChargeOnlyBeamAmmo() && !mgr.IsMultiplayer()) {
+    return false;
+  }
+#endif
   const CPlayerState* state = GetPlayer(mgr)->GetPlayerState();
   switch (mCurrentBeamId) {
   case CPlayerState::kBI_Light:
@@ -1078,6 +1112,11 @@ bool CPlayerGun::GetBeamAmmoTypeAndCosts(bool combo, CStateManager& mgr,
   ammoA = CPlayerState::kIT_Invalid;
   ammoB = CPlayerState::kIT_Invalid;
   cost = skNormalAmmoCosts[mCurrentBeamId];
+#ifdef TARGET_PC
+  if (PortOverlay::ChargeOnlyBeamAmmo() && !mgr.IsMultiplayer()) {
+    cost = 0;
+  }
+#endif
   switch (mCurrentBeamId) {
   case CPlayerState::kBI_Dark:
     ammoA = CPlayerState::kIT_DarkAmmo;
@@ -1935,6 +1974,9 @@ void CPlayerGun::Update(float dt, CStateManager& mgr) {
         }
       }
     }
+#ifdef TARGET_PC
+    PortCheatPhazonCharge(mgr);
+#endif
     if (mPhazonAbsorbFlashGenerator.get()) {
       if (!mPhazonAbsorbFlashGenerator->IsSystemDeletable()) {
         mPhazonAbsorbFlashGenerator->SetGlobalTranslation(mBeamLocalXf.GetTranslation());
@@ -3257,8 +3299,16 @@ void CPlayerGun::EnterFidget(CStateManager& mgr) {
 void CPlayerGun::UpdateGunIdle(float dt, CStateManager& mgr) {
   bool moving;
   CPlayer* player = GetPlayer(mgr);
+#ifdef TARGET_PC
+  // Port: the hand on cannon stands in for R's free look, which holds off fidgets; a fidget that
+  // leaves the left arm alone would otherwise play with the hand still on the cannon (#117).
+  if (player->IsInFreeLook() || mPortHandOnCannon ||
+      player->GetOrbitState() != CPlayer::kOS_NoOrbit || mBeamChangeState != kBCS_Idle ||
+      mInBigStrike) {
+#else
   if (player->IsInFreeLook() || player->GetOrbitState() != CPlayer::kOS_NoOrbit ||
       mBeamChangeState != kBCS_Idle || mInBigStrike) {
+#endif
     mFidget.ResetAll();
   } else {
     moving = true;
@@ -3428,8 +3478,21 @@ void CPlayerGun::DrawArm(const CStateManager& mgr, const CVector3f& cameraTransl
 
   const CPlayer* player = GetPlayer(const_cast< CStateManager& >(mgr));
   const CTransform4f armTransform = mGrappleArm->GetTransform();
+#ifdef TARGET_PC
+  // Port (MP1 #276): the arm follows the camera's pitch and the body doesn't, so near the pole
+  // the dot falls under 0.1 and the arm vanished. Retail free look stops short of that; direct
+  // aim goes further. Compare headings only, which keeps the facing-away test.
+  CVector3f portArmForward = armTransform.GetForward();
+  portArmForward.SetZ(0.f);
+  const float portArmDot =
+      portArmForward.CanBeNormalized()
+          ? CVector3f::Dot(portArmForward.AsNormalized(), player->GetTransform().GetForward())
+          : 1.f;
+  if (player->GetGrappleState() != CPlayer::kGS_None || portArmDot > 0.1f) {
+#else
   if (player->GetGrappleState() != CPlayer::kGS_None ||
       CVector3f::Dot(armTransform.GetForward(), player->GetTransform().GetForward()) > 0.1f) {
+#endif
     mGrappleArm->Render(mgr, cameraTranslation, flags, &mLights);
   }
 }
@@ -3759,4 +3822,10 @@ CPlayerGun::CPlayerGun(TUniqueId playerId, int characterIndex)
   }
 }
 
-CPlayerGun::~CPlayerGun() { NWeaponTypes::unlock_tokens(mCommonDependencies); }
+CPlayerGun::~CPlayerGun() {
+#ifdef TARGET_PC
+  // Dropped with the world: the next one may hold the group itself (Metroid1.pak).
+  PortPhazonShotSfx::Release();
+#endif
+  NWeaponTypes::unlock_tokens(mCommonDependencies);
+}

@@ -50,7 +50,7 @@ struct Info {
 std::string Folder();
 Info SlotInfo(int slot);
 
-int SelectedSlot();          // 1..kSlotCount, the slot F5/F9 act on
+int SelectedSlot();          // 1..kSlotCount, the slot F5/F9 act on (the state_slot setting)
 void SetSelectedSlot(int slot);
 void SelectNextSlot();
 void SelectPrevSlot();
@@ -60,6 +60,9 @@ void SelectPrevSlot();
 // on screen (the F5/F9 hotkeys).
 void RequestSave(int slot, bool toast = false);
 void RequestLoad(int slot, bool toast = false);
+// A save or load is queued, or a load (or warp) is still settling: a save or load asked for now
+// fails with "a warp or load is in progress". The game has to run for it to end.
+bool Busy();
 // The next load holds the simulation (PortOverlay::SetTickHold) on the tick its room state is
 // restored, so a harness can read the world exactly as restored (tools/statecheck.py).
 void HoldAfterLoad();
@@ -140,11 +143,13 @@ void RequestResumeLoad();     // console: load the resume file
 
 // The boot's resume prompt. ResumePromptTick runs once per splash tick (game thread) and is true
 // while the splash must be held; ResumePromptShown fills what the overlay draws (any thread);
-// AnswerResumePrompt is the overlay's Yes/No. PrimedGun Echoes: while the headset runs, its panel
-// asks (vr/vr_menu.cpp) and the pad's A answers yes, B no.
+// AnswerResumePrompt is a click's Yes/No, SelectResumePrompt a pointer hovering one (any thread).
+// PrimedGun Echoes: while the headset runs, its panel asks (vr/vr_menu.cpp) and the pad's A answers
+// yes, B no.
 bool ResumePromptTick();
 bool ResumePromptShown(ResumeInfo& out, bool& yes);
 void AnswerResumePrompt(bool yes);
+void SelectResumePrompt(bool yes);
 
 // --- room state (platform/port_savestate_room.cpp), game thread only -------------------------
 

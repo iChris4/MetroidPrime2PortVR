@@ -150,6 +150,11 @@ bool Morphed(int player = 0);
 void SetOrbitLocked(bool locked, bool onObject, int player = 0);
 bool OrbitLocked(int player = 0);
 bool LockedOnObject(int player = 0);
+// CPlayer::Update publishes whether each player's suit has the Rezbit virus (kRS_Infected): the
+// pad's R trigger presses R then whatever Twin Stick Aim or a preset does with it, so the reboot's
+// L + R + B can be held (#111).
+void SetRezbitInfected(bool infected, int player = 0);
+bool RezbitInfected(int player = 0);
 // CStateManager::Update publishes whether the game is soft paused: the scan text is up (CPlayer's
 // scan freeze, its only soft pause).
 void SetScanTextUp(bool up);
@@ -193,7 +198,6 @@ bool OverlayVisible();
 
 // The overlay has just been used, and in which layout (for the prompt icons, not built yet).
 void NoteDevice(bool xboxLayout);
-bool DeviceIsXbox();
 // True only while touch was last used, in a touch build and outside F1.
 bool Active();
 

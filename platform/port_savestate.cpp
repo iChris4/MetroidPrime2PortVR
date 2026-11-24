@@ -20,6 +20,7 @@
 #include "port_entry.h"
 #include "port_mods.h"
 #include "port_overlay.h"
+#include "port_overlay_internal.h"
 #include "port_resume_logic.h"
 #include "port_save.h"
 #include "port_warp.h"
@@ -543,7 +544,7 @@ void DoSave(CStateManager& mgr, int slot) {
   State s;
   std::string error;
   // The title and file select run a CMFGame in the 'FRND' front-end world: a state of it is useless
-  // and would overwrite the slot. Loads stay allowed there.
+  // and would overwrite the slot. LoadState refuses there too.
   if (gpGameState != nullptr && gpGameState->GetGameMode().GetGameModeType() == 'FRND') {
     SetMessage("save to slot " + std::to_string(slot) + " failed: no game running (title screen)");
     return;
@@ -599,6 +600,15 @@ bool LoadState(CStateManager& mgr, const State& s, int slot, const std::string& 
     char id[16];
     std::snprintf(id, sizeof id, "%08x", static_cast< uint32_t >(s.worldId));
     SetMessage(what + " failed: world " + id + " is not on this disc");
+    return false;
+  }
+  // The title runs a CMFGame too (the 'FRND' world), so a load reaches here with no game running.
+  // Before a card file is chosen that game has no card serial: save stations only refill energy and
+  // never ask to save. And the front end's sound groups stay locked by the replaced game state while
+  // the campaign's load, which fills the 6 MB sound pool: Weapons, SamusFootsteps and 29 more groups
+  // are then missing (#124). MP1's title has no state manager, which refuses the same load.
+  if (gpGameState->GetGameMode().GetGameModeType() == 'FRND') {
+    SetMessage(what + " failed: no game running (title screen)");
     return false;
   }
   if (slot == kResumeSlot) {
@@ -1110,15 +1120,16 @@ Info SlotInfo(int slot) {
 
 int SelectedSlot() { return sSelected.load(); }
 
+// The slot is a setting (state_slot): a change is written with the settings on the next frame.
 void SetSelectedSlot(int slot) {
-  if (slot >= 1 && slot <= kSlotCount) {
-    sSelected.store(slot);
+  if (slot >= 1 && slot <= kSlotCount && sSelected.exchange(slot) != slot) {
+    PortOverlaySettings::MarkDirty();
   }
 }
 
-void SelectNextSlot() { sSelected.store(sSelected.load() % kSlotCount + 1); }
+void SelectNextSlot() { SetSelectedSlot(sSelected.load() % kSlotCount + 1); }
 
-void SelectPrevSlot() { sSelected.store((sSelected.load() + kSlotCount - 2) % kSlotCount + 1); }
+void SelectPrevSlot() { SetSelectedSlot((sSelected.load() + kSlotCount - 2) % kSlotCount + 1); }
 
 void RequestSave(int slot, bool toast) {
   if (slot >= 0 && slot <= kSlotCount) {
@@ -1132,6 +1143,16 @@ void RequestLoad(int slot, bool toast) {
     sLoadToast.store(toast);
     sLoadRequest.store(slot);
   }
+}
+
+bool Busy() {
+  if (sSaveRequest.load() >= 0 || sLoadRequest.load() >= 0 || sPlace.active || sRoom.active ||
+      PortWarp::Pending()) {
+    return true;
+  }
+  const CStateManager* mgr = sLiveMgr;
+  return mgr != nullptr && (mgr->mPortPendingWarpArea != kInvalidAreaId || mgr->mPortSpawnAtArea != kInvalidAreaId ||
+                            mgr->mPortWarpQueuedArea != kInvalidAreaId);
 }
 
 void HoldAfterLoad() { sHoldAfterRestore.store(true); }
@@ -1387,7 +1408,15 @@ bool HidesPicture(CStateManager&) {
     sResumeBoot = false;
   }
   // A cinematic the rebuilt world starts is hidden too: the load skips it (LoadAwaitsCinematic).
-  return sPlace.active;
+  if (sPlace.active) {
+    return true;
+  }
+  // Samus is placed before the room's saved state is applied (TickRoom: the saved layers first, then
+  // each area once it is back), so the rebuilt room showed for a few frames and then changed to the
+  // saved one (objects, animations, platforms). Held until her own area is applied (sRoom.replaced),
+  // at most kRoomHoldCapFrames after she was placed; areas around it may still follow off screen.
+  constexpr int kRoomHoldCapFrames = 180;
+  return sRoom.active && !sRoom.replaced && sRoom.waited <= kRoomHoldCapFrames;
 }
 
 bool ModReloadActive() {
@@ -1603,5 +1632,7 @@ bool ResumePromptShown(ResumeInfo& out, bool& yes) {
 }
 
 void AnswerResumePrompt(bool yes) { sPromptAnswer.store(yes ? 1 : 0); }
+
+void SelectResumePrompt(bool yes) { sPromptYes.store(yes); }
 
 } // namespace PortSaveState

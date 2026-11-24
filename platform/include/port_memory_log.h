@@ -23,7 +23,7 @@ bool LowRamDevice(char* why, size_t whySize);
 // commit (Windows) and what is left of the GPU's memory budget (Windows, DXGI).
 // Lazy pipeline cache (MP1 issue #187): Tick checks the headroom every 5 s and, below moderateMib
 // or severeMib, asks Aurora to release built pipelines no recent frame drew with (idle for 3600
-// frames, or for 16). GLOBAL pipelines stay pinned. 0 turns a level off; both 0 (the default)
+// frames, or for 1800). GLOBAL pipelines stay pinned. 0 turns a level off; both 0 (the default)
 // turns the check off.
 void SetPipelinePressure(int64_t moderateMib, int64_t severeMib);
 // Texture replacements (MP1 issue #266): Tick passes the headroom to Aurora every second. Below

@@ -16,6 +16,7 @@
 #ifdef TARGET_PC
 #include "Kyoto/Basics/CBasics.hpp"
 #include "MetroidPrime/Player/CPlayerState.hpp"
+#include "port_entry.h"
 #endif
 
 static const char* const skSaveFileName = "MetroidPrime2";
@@ -65,10 +66,13 @@ static const char* const skErrorNames[] = {
 
 // Guessed name
 #ifdef TARGET_PC
+// The seed is the region's: 'USA>' in G2ME01's DOL, 'EURP' in G2MP01's (#95). The Trilogy keeps the
+// USA seed its port-written card always had (port_save_trilogy_payload.cpp CardSignature).
 // consoleOrder false: the signature older port builds wrote (see CWorldSaveGameInfo::CalculateHash).
-static uint GetSaveSignature(bool consoleOrder = true) {
-  static uint signatures[2] = {0xffffffff, 0xffffffff};
-  uint& signature = signatures[consoleOrder ? 1 : 0];
+// regionSeed false: the USA seed, which port builds before #95 used on every disc.
+static uint GetSaveSignature(bool consoleOrder = true, bool regionSeed = true) {
+  static uint signatures[4] = {0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff};
+  uint& signature = signatures[(consoleOrder ? 1 : 0) | (regionSeed ? 2 : 0)];
 #else
 static uint GetSaveSignature() {
   static uint signature = 0xffffffff;
@@ -76,7 +80,13 @@ static uint GetSaveSignature() {
   if (signature != 0xffffffff) {
     return signature;
   }
+#ifdef TARGET_PC
+  signature = regionSeed && port::entry::CurrentDiscVersion() == port::entry::DiscVersion::Pal
+                  ? 0x45555250
+                  : 0x5553413e;
+#else
   signature = 0x5553413e;
+#endif
   const rstl::vector< CMemoryCard::MemoryWorld >& worlds = gpMemoryCard->GetMemoryWorlds();
   for (rstl::vector< CMemoryCard::MemoryWorld >::const_iterator it = worlds.begin();
        it != worlds.end(); ++it) {
@@ -89,7 +99,8 @@ static uint GetSaveSignature() {
 #endif
   }
 #ifdef TARGET_PC
-  fprintf(stderr, "[save] %s signature %08x\n", consoleOrder ? "console" : "legacy port", signature);
+  fprintf(stderr, "[save] %s signature %08x\n",
+          !consoleOrder ? "legacy port" : regionSeed ? "console" : "port (USA seed)", signature);
 #endif
   return signature;
 }
@@ -100,9 +111,10 @@ static bool sDriverExists; // Guessed name
 static bool IsSaveSignatureInvalid(const void* data) {
 #ifdef TARGET_PC
   // SSaveHeader::PutTo wrote the signature through COutputStream, big-endian.
-  // Accept the console signature and the one older port builds wrote; saving writes the console one.
+  // Accept the console signature and the ones older port builds wrote; saving writes the console one.
   const uint stored = CBasics::SwapBytes(*static_cast< const uint* >(data));
-  return stored != GetSaveSignature() && stored != GetSaveSignature(false);
+  return stored != GetSaveSignature() && stored != GetSaveSignature(true, false) &&
+         stored != GetSaveSignature(false, false);
 #else
   return *static_cast< const uint* >(data) != GetSaveSignature();
 #endif

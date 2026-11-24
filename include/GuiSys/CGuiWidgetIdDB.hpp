@@ -12,6 +12,11 @@ public:
   short FindWidgetID(const rstl::string& name) const;
 
   static const short kInvalidWidgetId;
+#ifdef TARGET_PC
+  // Port: the names by id, for listing a frame's widgets (PortGameUi::DumpFrame, `gameui dump`).
+  int PortCount() const { return static_cast< int >(mNames.size()); }
+  const rstl::string& PortName(int id) const { return mNames[id]; }
+#endif
 
 private:
   rstl::vector< rstl::string > mNames;

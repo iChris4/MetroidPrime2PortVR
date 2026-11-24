@@ -173,7 +173,42 @@ float CCameraManager::GetFirstPersonFOV() const { return mFirstPersonFov; }
 
 void CCameraManager::SetFirstPersonFOV(float fov) { mFirstPersonFov = fov; }
 
-float CCameraManager::GetDefaultThirdPersonVerticalFOV() { return sThirdPersonFOV; }
+float CCameraManager::GetDefaultThirdPersonVerticalFOV() {
+#ifdef TARGET_PC
+  return PortFollowFovSetting(sThirdPersonFOV);
+#else
+  return sThirdPersonFOV;
+#endif
+}
+
+#ifdef TARGET_PC
+namespace {
+// The FOV setting the morph ball cameras' FOVs were last scaled for.
+float sPortBallFovSetting = 55.f;
+
+// The FOV setting the morph ball cameras follow: retail's 55 when they don't follow it.
+float PortBallFovSetting() {
+  const float fov = PortOverlay::FirstPersonFov();
+  return PortOverlay::BallFollowsFov() && fov > 0.f ? fov : CCameraManager::sFirstPersonFOV;
+}
+} // namespace
+
+float CCameraManager::PortRescaleFov(float fov, float fromSetting, float toSetting) {
+  // The ratio of the two settings' view tangents widens or narrows fov, so the morph ball shows
+  // as much more of the world as first person does (MP1 51f96ed7e, its #268).
+  const float kHalfDegToRad = 0.5f * 3.14159265f / 180.f;
+  const float scale = tanf(toSetting * kHalfDegToRad) / tanf(fromSetting * kHalfDegToRad);
+  if (scale == 1.f || !(fov > 0.f && fov < 180.f)) {
+    return fov;
+  }
+  const float scaled = 2.f * atanf(tanf(fov * kHalfDegToRad) * scale) / (2.f * kHalfDegToRad);
+  return scaled < 170.f ? scaled : 170.f;
+}
+
+float CCameraManager::PortFollowFovSetting(float fov) {
+  return PortRescaleFov(fov, sFirstPersonFOV, PortBallFovSetting());
+}
+#endif
 
 float CCameraManager::GetDefaultFirstPersonNearClipDistance() { return sNearPlane; }
 
@@ -227,6 +262,9 @@ void CCameraManager::CreateCameras(CStateManager& mgr) {
   AddCamera(mFixedCamera->GetUniqueId(), mgr);
 
   const TUniqueId ballId = mgr.AllocateUniqueId();
+#ifdef TARGET_PC
+  sPortBallFovSetting = PortBallFovSetting();
+#endif
   mBallCamera = rs_new CBallCamera(ballId, playerId, xf, GetDefaultThirdPersonVerticalFOV(),
                                    GetDefaultFirstPersonNearClipDistance(),
                                    GetDefaultFirstPersonFarClipDistance(), GetDefaultAspectRatio(),
@@ -268,6 +306,27 @@ void CCameraManager::UpdateCameras(float dt, CStateManager& mgr) {
     if (mFpCamera != nullptr && !IsInCinematicCamera()) {
       mFpCamera->SetFovAndTarget(wantFov);
     }
+  }
+  // A camera the change skipped under a cinematic is caught up once it ends. A world load (an
+  // elevator ride) rebuilds the cameras at retail's FOV and the arrival cinematic is often already
+  // playing on the first update, so the change above lands on mFirstPersonFov only and, matching
+  // from then on, was never retried: the view stayed at 55. Only this function sets the
+  // first-person camera's FOV, so whenever the setting is on it must equal mFirstPersonFov.
+  if (portFov > 0.f && mFpCamera != nullptr && !IsInCinematicCamera() &&
+      mFpCamera->GetTargetFov() != mFirstPersonFov) {
+    mFpCamera->SetFovAndTarget(mFirstPersonFov);
+  }
+  // The morph ball's cameras scale their FOVs by the setting (PortFollowFovSetting) when they set
+  // one, so a change mid-roll rescales what they hold.
+  const float ballFovSetting = PortBallFovSetting();
+  if (ballFovSetting != sPortBallFovSetting) {
+    CGameCamera* const followers[] = {mBallCamera, mPathCamera, mSpindleCamera};
+    for (CGameCamera* camera : followers) {
+      if (camera != nullptr) {
+        camera->PortRescaleFov(sPortBallFovSetting, ballFovSetting);
+      }
+    }
+    sPortBallFovSetting = ballFovSetting;
   }
 #endif
   for (int i = 0; i < mCameras.size(); ++i) {

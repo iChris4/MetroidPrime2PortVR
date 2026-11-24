@@ -1,4 +1,5 @@
 #include "port_data_folder.h"
+#include "port_utf8_path.h"
 #include "port_strings.h"
 
 #include <cstdlib>
@@ -29,14 +30,8 @@ namespace {
 
 namespace fs = std::filesystem;
 
-fs::path FromUtf8(const std::string& text) {
-  return fs::path(std::u8string(text.begin(), text.end()));
-}
-
-std::string ToUtf8(const fs::path& path) {
-  const std::u8string text = path.u8string();
-  return std::string(text.begin(), text.end());
-}
+using PortUtf8::FromUtf8;
+using PortUtf8::ToUtf8;
 
 std::string WithSeparator(std::string path) {
   if (!path.empty() && path.back() != '/') {

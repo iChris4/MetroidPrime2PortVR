@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Bring src/MetroidPrime/PortReachStubs.cpp in line with one failed boot-probe link.
+"""Bring src/MetroidPrime/PortLinkStubs.cpp in line with one failed link.
 
-`tools/boot_probe.sh` calls this when its link fails, then relinks once. The link must have been
+Run it on the log of a link that failed, then relink. The link must have been
 run with `-Wl,--no-demangle`: GNU ld otherwise prints C++ names demangled
-(`CFoo::Bar(int)`), which cannot be written back as a symbol, and the old shell self-heal
-skipped every one of them. That, plus never retiring duplicates, is how the file went stale
-across the 2026-09-28 upstream merge (109 duplicates, 140 unstubbed; `docs/research/boot_probe.md`).
+(`CFoo::Bar(int)`), which cannot be written back as a symbol.
 
 Two edits, both by symbol name, never by line number:
 
@@ -78,7 +76,7 @@ def main() -> int:
         objdir = args[k + 1]
         del args[k:k + 2]
     log = pathlib.Path(args[0]).read_text(errors='replace')
-    path = pathlib.Path(args[1]) if len(args) > 1 else ROOT / 'src/MetroidPrime/PortReachStubs.cpp'
+    path = pathlib.Path(args[1]) if len(args) > 1 else ROOT / 'src/MetroidPrime/PortLinkStubs.cpp'
     lines = path.read_text().split('\n')
 
     dups = set(re.findall(r"multiple definition of `([^']+)'", log))
@@ -155,8 +153,7 @@ def main() -> int:
     if out:
         stamp = datetime.datetime.now().isoformat(timespec='seconds')
         body += '\n'.join(['', f'// --- appended by tools/restub_reach.py on {stamp} ---',
-                           '// Unresolved symbols one boot-probe link asked for. Diagnostic only;'
-                           ' see the file header.'] + out)
+                           '// Unresolved symbols one link asked for; see the file header.'] + out)
     if retired or out:
         path.write_text(body)
     print(f'retired {len(retired)}, added {len(undef)}')
