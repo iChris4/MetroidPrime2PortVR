@@ -24,7 +24,7 @@
 #include "port_resume_logic.h"
 #include "port_save.h"
 #include "port_warp.h"
-// PrimedGun Echoes: the headset asks the resume question itself (vr/vr_menu.cpp).
+// PrimedGun Echoes: the resume prompt's headset controls (ResumePromptTick).
 #include "vr/openxr_integration.h"
 
 #include "MetroidPrime/PortSkipFrontEnd.hpp"
@@ -1512,6 +1512,7 @@ int sPromptTicks = 0;
 std::atomic< int > sPromptAnswer{-1}; // -1 none, 0 no, 1 yes (from the overlay's buttons)
 std::atomic< bool > sPromptYes{true};
 std::atomic< bool > sPromptShown{false};
+bool sPromptStickHeld = false; // PrimedGun Echoes: the headset's stick past half travel
 std::mutex sPromptMutex;
 PortSaveState::ResumeInfo sPromptInfo;
 
@@ -1561,24 +1562,30 @@ bool ResumePromptTick() {
     // A real mouse button held is a click on the window, whose Yes/No buttons answer: one that
     // also reaches the pad as A must not accept the highlighted Yes first (MP1 6ab7c1e15).
     const bool mouseHeld = SDL_GetMouseState(nullptr, nullptr) != 0;
-    if (sPromptTicks > kPromptIgnoreTicks && gpController != nullptr &&
-        PortVr::OpenXRIsRunning()) {
-      // PrimedGun Echoes: the headset never shows this ImGui window; its own panel asks instead
-      // (vr/vr_menu.cpp), with no choice to move between: A answers yes and B no.
+    if (sPromptTicks > kPromptIgnoreTicks && gpController != nullptr) {
       const auto& pad = gpController->GetGamepadData(0);
-      if (answer < 0 && !mouseHeld && pad.GetButton(kBU_A).GetPressEvent()) {
-        answer = 1;
-      } else if (answer < 0 && !mouseHeld && pad.GetButton(kBU_B).GetPressEvent()) {
-        answer = 0;
+      bool toggle = pad.GetButton(kBU_Left).GetPressEvent() || pad.GetButton(kBU_Right).GetPressEvent();
+      // PrimedGun Echoes: the headset shows the game's box (port_resume_prompt.h) on its virtual
+      // screen. The VR controllers send no D-pad outside gameplay, so there the stick moves the
+      // highlight too (one step per push past half travel), and B answers no.
+      const bool headset = PortVr::OpenXRIsRunning();
+      if (headset) {
+        const float x = pad.GetAxis(kJA_LeftX).GetAbsoluteValue();
+        if (x > 0.5f || x < -0.5f) {
+          toggle = toggle || !sPromptStickHeld;
+          sPromptStickHeld = true;
+        } else if (x < 0.3f && x > -0.3f) {
+          sPromptStickHeld = false;
+        }
       }
-    } else if (sPromptTicks > kPromptIgnoreTicks && gpController != nullptr) {
-      const auto& pad = gpController->GetGamepadData(0);
-      if (pad.GetButton(kBU_Left).GetPressEvent() || pad.GetButton(kBU_Right).GetPressEvent()) {
+      if (toggle) {
         sPromptYes.store(!sPromptYes.load());
       }
       if (answer < 0 && !mouseHeld && (pad.GetButton(kBU_A).GetPressEvent() ||
                          pad.GetButton(kBU_Start).GetPressEvent())) {
         answer = sPromptYes.load() ? 1 : 0;
+      } else if (answer < 0 && !mouseHeld && headset && pad.GetButton(kBU_B).GetPressEvent()) {
+        answer = 0;
       }
     }
     if (answer < 0) {

@@ -144,8 +144,8 @@ void RequestResumeLoad();     // console: load the resume file
 // The boot's resume prompt. ResumePromptTick runs once per splash tick (game thread) and is true
 // while the splash must be held; ResumePromptShown fills what the overlay draws (any thread);
 // AnswerResumePrompt is a click's Yes/No, SelectResumePrompt a pointer hovering one (any thread).
-// PrimedGun Echoes: while the headset runs, its panel asks (vr/vr_menu.cpp) and the pad's A answers
-// yes, B no.
+// PrimedGun Echoes: the headset shows the game's box too; there the stick also moves the highlight
+// and B answers no.
 bool ResumePromptTick();
 bool ResumePromptShown(ResumeInfo& out, bool& yes);
 void AnswerResumePrompt(bool yes);

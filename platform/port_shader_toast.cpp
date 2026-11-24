@@ -6,6 +6,10 @@
 
 #include <aurora/gfx.h>
 
+#if defined(MP_ENABLE_OPENXR)
+#include "vr/openxr_integration.h"
+#endif
+
 #include <chrono>
 #include <cstdio>
 
@@ -18,6 +22,16 @@ bool sStartupDone = false;
 bool sQueued = false;
 std::chrono::steady_clock::time_point sQueuedSince;
 uint32_t sBase = 0; // createdPipelines when the compile was first seen
+
+// PrimedGun Echoes: while the headset runs, its own panel shows the compile (vr/vr_menu.cpp), so
+// this count is not drawn under it (the user's choice, 2026-11-24).
+bool HiddenInHeadset() {
+#if defined(MP_ENABLE_OPENXR)
+  return PortVr::OpenXRIsRunning();
+#else
+  return false;
+#endif
+}
 } // namespace
 
 void Draw() {
@@ -27,7 +41,8 @@ void Draw() {
     delete sText;
     sText = nullptr;
   }
-  if (!PortOverlay::ShowShaderCompilation() || stats == nullptr || sStartupDone) {
+  if (!PortOverlay::ShowShaderCompilation() || stats == nullptr || sStartupDone ||
+      HiddenInHeadset()) {
     return;
   }
   const auto now = std::chrono::steady_clock::now();
@@ -56,7 +71,7 @@ void Draw() {
 }
 
 float Bottom() {
-  if (sText == nullptr) {
+  if (sText == nullptr || HiddenInHeadset()) {
     return 0.f;
   }
   const PortGameUi::ScreenRect rect = sText->LastRect();

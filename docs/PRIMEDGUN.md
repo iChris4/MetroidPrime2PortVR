@@ -45,10 +45,19 @@ Upstream's is kept, so desk checks now use `rezbit start` / `rezbit stop`.
 
 Checks: build/vr, `ctest -L port` 69/69 (macho and entity schema skipped), the TARGET_PC strip-diff
 against `upstream/port` adds no non-PC text, and a desktop run from the card's save (Temple
-Grounds) quits cleanly. Not checked: the headset, the Quest APK. The VR panel still asks the
-resume question. Upstream's game-drawn prompts and toasts are drawn after the IOWin draw, under
-whatever stereo route is current: on the virtual screen (boot, title) that is fine; in immersive
-play (the cutscene skip prompt, note toasts, the special menu) they are unchecked.
+Grounds) quits cleanly. Not checked: the Quest APK. Upstream's game-drawn prompts and toasts are
+drawn after the IOWin draw, under whatever stereo route is current: on the virtual screen (boot,
+title) that is fine; in immersive play (the cutscene skip prompt, note toasts, the special menu)
+they are unchecked.
+
+User's headset check (2026-11-24): the boot's resume question and the startup shader count each
+showed twice, the VR panel over upstream's new game box. The user chose upstream's box for the
+resume question and the VR panel for the shader count:
+- `PortVrHost::ResumeQuestionShown` (vr_host_echoes.cpp) now always answers false, so the panel
+  never asks. In `ResumePromptTick` the headset reads the game box like the TV does (left/right
+  moves the highlight, A or Start answers it), plus the stick's left/right (the VR controllers send
+  no D-pad outside gameplay; one step per push past half travel) and B for no.
+- `PortShaderToast::Draw` (and `Bottom`) skip the game's count while the headset runs.
 
 ## Visor effects follow the head (2026-11-09)
 

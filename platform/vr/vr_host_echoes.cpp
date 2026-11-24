@@ -30,7 +30,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
-#include <ctime>
 #include <vector>
 
 namespace PortDebug {
@@ -174,31 +173,11 @@ void StartLogFile() {
   }
 }
 
-// The splash's prompt (port_savestate.cpp ResumePromptTick), dated as the desktop window dates it
-// (debug_ui/window.cpp DrawResumePrompt).
-bool ResumeQuestionShown(ResumeQuestion& question) {
-  PortSaveState::ResumeInfo info;
-  bool yes = true;
-  if (!PortSaveState::ResumePromptShown(info, yes)) {
-    return false;
-  }
-  question.room = info.room;
-  question.afterCrash = info.crashedAfterThis;
-  question.crashedAgain = info.crashedAgain;
-  question.saved.clear();
-  const std::time_t t = static_cast< std::time_t >(info.savedAt);
-  std::tm local{};
-#if defined(_WIN32)
-  if (localtime_s(&local, &t) == 0) {
-#else
-  if (localtime_r(&t, &local) != nullptr) {
-#endif
-    char when[32] = "";
-    std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M", &local);
-    question.saved = when;
-  }
-  return true;
-}
+// Never: the splash's prompt is the game's own Yes/No box since upstream 0.14 (port_resume_prompt.h,
+// drawn after the IOWin draw), which the headset shows on its virtual screen, so the VR panel no
+// longer asks the question over it (the user's choice, 2026-11-24). The pad answers in
+// port_savestate.cpp ResumePromptTick.
+bool ResumeQuestionShown(ResumeQuestion&) { return false; }
 
 bool QuickResume() { return PortOverlay::QuickResume(); }
 void SetQuickResume(bool on) { PortOverlay::SetQuickResume(on); }
