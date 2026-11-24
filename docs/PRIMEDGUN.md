@@ -1,5 +1,14 @@
 # PrimedGun Echoes: engineering notes
 
+## VR menu CROSSHAIR switch (2026-11-24)
+
+The user asked for a way to turn the aiming crosshair off in the headset. Same change as Prime 1's:
+VR setting `vr_crosshair` (default on), VR menu CONFIG > CROSSHAIR (page 3, after FLOATING HUD), F1
+VR tab checkbox. `PortVr::VrHideCrosshair()` makes `CCompoundTargetReticle::DrawCrosshairs` (both
+styles) and `PortTriDrawAiming` return for player 0 while the headset runs; the lock-on, scan and
+grapple reticles stay, the desktop always draws it, and `crosshair_opacity` is left alone. Not in the
+launchers. `port_vr_menu` covers the row, its toggle and the reset.
+
 ## Upstream 0.16.0 merged (2026-11-24)
 
 The upstream repository is gone: github.com/Odrannnn/MetroidPrime2Port and the Odrannnn account

@@ -770,6 +770,10 @@ void CCompoundTargetReticle::PortTriDrawAiming(const CMatrix3f& rotation,
       PortOverlay::CrosshairStyle() != PortOverlay::kCrosshairStyle_Classic) {
     return;
   }
+  // PortVr: the VR menu's CROSSHAIR (vr_crosshair) turns it off in the headset.
+  if (mPlayerIndex == 0 && PortVr::VrHideCrosshair()) {
+    return;
+  }
   const CCameraManager* camMgr = mgr.GetCameraManager(mPlayerIndex);
   const CTransform4f cam = PortThirdPerson::View(camMgr->GetCurrentCameraTransform(mgr, true));
   const CVector3f dir = PortTriPointerDir(cam, *camMgr->GetCurrentCamera(mgr, true), mPlayerIndex);
@@ -2078,6 +2082,10 @@ void CCompoundTargetReticle::DrawCrosshairs(const CMatrix3f& rotation,
                                             const CStateManager& mgr) const {
 #ifdef TARGET_PC
   if (mNoDrawTicks > 0 || mCrosshairsDrawScale <= 0.f) {
+    return;
+  }
+  // PortVr: the VR menu's CROSSHAIR (vr_crosshair) turns it off in the headset.
+  if (mPlayerIndex == 0 && PortVr::VrHideCrosshair()) {
     return;
   }
 #else
